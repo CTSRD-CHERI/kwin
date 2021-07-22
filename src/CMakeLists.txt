@@ -197,6 +197,7 @@ set_target_properties(kwin PROPERTIES
 target_link_libraries(kwin
     kwin4_effect_builtins
     kwineffects
+    kwinglutils
 
     Qt::Concurrent
     Qt::DBus
@@ -235,9 +236,6 @@ target_link_libraries(kwin
 
     Threads::Threads
 )
-if(KWIN_BUILD_OPENGL)
-  target_link_libraries(kwin kwinglutils)
-endif()
 if(KWIN_BUILD_WAYLAND)
   target_link_libraries(kwin
                         KF5::WaylandClient

@@ -75,33 +75,32 @@ set_target_properties(kwineffects PROPERTIES OUTPUT_NAME ${KWIN_NAME}effects)
 
 install(TARGETS kwineffects EXPORT KWinEffectsTargets ${KDE_INSTALL_TARGETS_DEFAULT_ARGS})
 
-message(STATUS "KWIN_BUILD_OPENGL=${KWIN_BUILD_OPENGL}")
-if(KWIN_BUILD_OPENGL)
+# kwingl(es)utils library
+set(kwin_GLUTILSLIB_SRCS
+    logging.cpp
+)
+
+add_library(kwinglutils SHARED ${kwin_GLUTILSLIB_SRCS})
+generate_export_header(kwinglutils BASE_NAME kwinglutils EXPORT_FILE_NAME kwinglutils_export.h)
+target_link_libraries(kwinglutils PUBLIC XCB::XCB KF5::CoreAddons KF5::ConfigCore KF5::WindowSystem)
+if (KWIN_BUILD_OPENGL)
   message(FATAL_ERROR building opengl)
-  # kwingl(es)utils library
-  set(kwin_GLUTILSLIB_SRCS
-      kwinglplatform.cpp
-      kwingltexture.cpp
-      kwinglutils.cpp
-      kwinglutils_funcs.cpp
-      kwineglimagetexture.cpp
-      logging.cpp
+  target_link_libraries(kwinglutils PUBLIC epoxy::epoxy)
+  target_sources(kwinglutils
+    kwinglplatform.cpp
+    kwingltexture.cpp
+    kwinglutils.cpp
+    kwinglutils_funcs.cpp
+    kwineglimagetexture.cpp
   )
-
-  add_library(kwinglutils SHARED ${kwin_GLUTILSLIB_SRCS})
-  generate_export_header(kwinglutils BASE_NAME kwinglutils EXPORT_FILE_NAME kwinglutils_export.h)
-  target_link_libraries(kwinglutils PUBLIC XCB::XCB KF5::CoreAddons KF5::ConfigCore KF5::WindowSystem)
-  if (KWIN_BUILD_WAYLAND)
-    target_link_libraries(kwinglutils PUBLIC epoxy::epoxy)
-  endif()
-  set_target_properties(kwinglutils PROPERTIES
-      VERSION ${KWINEFFECTS_VERSION}
-      SOVERSION ${KWINEFFECTS_SOVERSION}
-      OUTPUT_NAME ${KWIN_NAME}glutils
-  )
-
-  install(TARGETS kwinglutils EXPORT KWinEffectsTargets ${KDE_INSTALL_TARGETS_DEFAULT_ARGS})
 endif()
+set_target_properties(kwinglutils PROPERTIES
+    VERSION ${KWINEFFECTS_VERSION}
+    SOVERSION ${KWINEFFECTS_SOVERSION}
+    OUTPUT_NAME ${KWIN_NAME}glutils
+)
+
+install(TARGETS kwinglutils EXPORT KWinEffectsTargets ${KDE_INSTALL_TARGETS_DEFAULT_ARGS})
 
 install(FILES
     ${CMAKE_CURRENT_BINARY_DIR}/kwinconfig.h
