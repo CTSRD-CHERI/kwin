@@ -108,7 +108,8 @@ static bool activate(const QString &sessionPath)
 
 LogindSession *LogindSession::create(QObject *parent)
 {
-    if (!QDBusConnection::systemBus().interface()->isServiceRegistered(s_serviceName)) {
+    auto *systemBusInterface = QDBusConnection::systemBus().interface();
+    if (!systemBusInterface || !systemBusInterface->isServiceRegistered(s_serviceName)) {
         return nullptr;
     }
 

@@ -110,7 +110,8 @@ static bool activate(const QString &sessionPath)
 
 ConsoleKitSession *ConsoleKitSession::create(QObject *parent)
 {
-    if (!QDBusConnection::systemBus().interface()->isServiceRegistered(s_serviceName)) {
+    auto *systemBusInterface = QDBusConnection::systemBus().interface();
+    if (!systemBusInterface || !systemBusInterface->isServiceRegistered(s_serviceName)) {
         return nullptr;
     }
 

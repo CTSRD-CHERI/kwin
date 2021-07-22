@@ -54,14 +54,12 @@ void ScreenLockerWatcher::initialize()
     m_serviceWatcher->setWatchMode(QDBusServiceWatcher::WatchForOwnerChange);
     m_serviceWatcher->addWatchedService(SCREEN_LOCKER_SERVICE_NAME);
     // check whether service is registered
-    QFutureWatcher<QDBusReply<bool> > *watcher = new QFutureWatcher<QDBusReply<bool> >(this);
-    connect(watcher, &QFutureWatcher<QDBusReply<bool>>::finished,
-            this, &ScreenLockerWatcher::serviceRegisteredQueried);
-    connect(watcher, &QFutureWatcher<QDBusReply<bool>>::canceled,
-            watcher, &QFutureWatcher<QDBusReply<bool>>::deleteLater);
-    watcher->setFuture(QtConcurrent::run(QDBusConnection::sessionBus().interface(),
-                                         &QDBusConnectionInterface::isServiceRegistered,
-                                         SCREEN_LOCKER_SERVICE_NAME));
+    if (auto *sessionInterface = QDBusConnection::sessionBus().interface()) {
+        QFutureWatcher<QDBusReply<bool>> *watcher = new QFutureWatcher<QDBusReply<bool>>(this);
+        connect(watcher, &QFutureWatcher<QDBusReply<bool>>::finished, this, &ScreenLockerWatcher::serviceRegisteredQueried);
+        connect(watcher, &QFutureWatcher<QDBusReply<bool>>::canceled, watcher, &QFutureWatcher<QDBusReply<bool>>::deleteLater);
+        watcher->setFuture(QtConcurrent::run(sessionInterface, &QDBusConnectionInterface::isServiceRegistered, SCREEN_LOCKER_SERVICE_NAME));
+    }
 }
 
 void ScreenLockerWatcher::serviceOwnerChanged(const QString &serviceName, const QString &oldOwner, const QString &newOwner)
@@ -98,6 +96,7 @@ void ScreenLockerWatcher::serviceRegisteredQueried()
     }
     const QDBusReply<bool> &reply = watcher->result();
     if (reply.isValid() && reply.value()) {
+        Q_ASSERT(QDBusConnection::sessionBus().interface() && "Should not have got here otherwise");
         QFutureWatcher<QDBusReply<QString> > *ownerWatcher = new QFutureWatcher<QDBusReply<QString> >(this);
         connect(ownerWatcher, &QFutureWatcher<QDBusReply<QString>>::finished,
                 this, &ScreenLockerWatcher::serviceOwnerQueried);

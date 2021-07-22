@@ -31,7 +31,7 @@ ColordIntegration::ColordIntegration(QObject *parent)
     connect(watcher, &QDBusServiceWatcher::serviceUnregistered, this, &ColordIntegration::teardown);
 
     QDBusConnectionInterface *interface = QDBusConnection::systemBus().interface();
-    if (interface->isServiceRegistered(QStringLiteral("org.freedesktop.ColorManager"))) {
+    if (interface && interface->isServiceRegistered(QStringLiteral("org.freedesktop.ColorManager"))) {
         initialize();
     }
 }

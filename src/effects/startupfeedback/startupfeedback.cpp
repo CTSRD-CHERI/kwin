@@ -102,16 +102,21 @@ StartupFeedbackEffect::StartupFeedbackEffect()
     });
     reconfigure(ReconfigureAll);
 
-    m_splashVisible = QDBusConnection::sessionBus().interface()->isServiceRegistered(QStringLiteral("org.kde.KSplash"));
-    auto serviceWatcher = new QDBusServiceWatcher(QStringLiteral("org.kde.KSplash"), QDBusConnection::sessionBus(), QDBusServiceWatcher::WatchForOwnerChange, this);
-    connect(serviceWatcher, &QDBusServiceWatcher::serviceRegistered, this, [this] {
-        m_splashVisible = true;
-        stop();
-    });
-    connect(serviceWatcher, &QDBusServiceWatcher::serviceUnregistered, this, [this] {
-        m_splashVisible = false;
-        gotRemoveStartup({}); // Start the next feedback
-    });
+    if (auto *sessionInterface = QDBusConnection::sessionBus().interface()) {
+        m_splashVisible = sessionInterface->isServiceRegistered(QStringLiteral("org.kde.KSplash"));
+        auto serviceWatcher =
+            new QDBusServiceWatcher(QStringLiteral("org.kde.KSplash"), QDBusConnection::sessionBus(), QDBusServiceWatcher::WatchForOwnerChange, this);
+        connect(serviceWatcher, &QDBusServiceWatcher::serviceRegistered, this, [this] {
+            m_splashVisible = true;
+            stop();
+        });
+        connect(serviceWatcher, &QDBusServiceWatcher::serviceUnregistered, this, [this] {
+            m_splashVisible = false;
+            gotRemoveStartup({}); // Start the next feedback
+        });
+    } else {
+        m_splashVisible = false; // DBus not available, can't communicate with org.kde.KSplash
+    }
 }
 
 StartupFeedbackEffect::~StartupFeedbackEffect()
