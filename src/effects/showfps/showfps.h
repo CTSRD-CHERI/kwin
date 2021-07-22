@@ -70,7 +70,9 @@ public:
         return textColor;
     }
 private:
+#if QT_CONFIG(opengl)
     void paintGL(int fps, const QMatrix4x4 &projectionMatrix);
+#endif
     void paintQPainter(int fps);
     void paintFPSGraph(int x, int y);
     void paintDrawSizeGraph(int x, int y);
@@ -92,7 +94,9 @@ private:
     int x;
     int y;
     QRect fps_rect;
+#if QT_CONFIG(opengl)
     QScopedPointer<GLTexture> fpsText;
+#endif
     int textPosition;
     QFont textFont;
     QColor textColor;

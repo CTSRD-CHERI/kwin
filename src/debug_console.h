@@ -68,7 +68,9 @@ private:
     void add(int parentRow, QVector<T*> &clients, T *client);
     template <class T>
     void remove(int parentRow, QVector<T*> &clients, T *client);
+#if HAVE_WAYLAND
     WaylandClient *waylandClient(const QModelIndex &index) const;
+#endif
     InternalClient *internalClient(const QModelIndex &index) const;
     X11Client *x11Client(const QModelIndex &index) const;
     Unmanaged *unmanaged(const QModelIndex &index) const;
@@ -109,6 +111,7 @@ private:
     QScopedPointer<DebugConsoleFilter> m_inputFilter;
 };
 
+#if HAVE_WAYLAND
 class SurfaceTreeModel : public QAbstractItemModel
 {
     Q_OBJECT
@@ -122,6 +125,7 @@ public:
     int rowCount(const QModelIndex &parent) const override;
     QModelIndex parent(const QModelIndex &child) const override;
 };
+#endif
 
 class DebugConsoleFilter : public InputEventSpy
 {
@@ -158,6 +162,7 @@ private:
     QTextEdit *m_textEdit;
 };
 
+#if HAVE_LIBINPUT
 namespace LibInput
 {
 class Device;
@@ -180,6 +185,8 @@ private:
     void setupDeviceConnections(LibInput::Device *device);
     QVector<LibInput::Device*> m_devices;
 };
+
+#endif
 
 }
 

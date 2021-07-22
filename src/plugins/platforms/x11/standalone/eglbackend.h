@@ -6,6 +6,8 @@
 
 #pragma once
 
+#include <QOpenGLContext>
+#if QT_CONFIG(opengl)
 #include "eglonxbackend.h"
 #include "platformopenglsurfacetexture_x11.h"
 
@@ -81,3 +83,4 @@ public:
 };
 
 } // namespace KWin
+#endif

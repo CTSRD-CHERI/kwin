@@ -156,7 +156,7 @@ void Scene::paintScreen(int* mask, const QRegion &damage, const QRegion &repaint
 
     if (Q_UNLIKELY(presentTime < m_expectedPresentTimestamp)) {
         qCDebug(KWIN_CORE, "Provided presentation timestamp is invalid: %ld (current: %ld)",
-                presentTime.count(), m_expectedPresentTimestamp.count());
+            (long)presentTime.count(), (long)m_expectedPresentTimestamp.count());
     } else {
         m_expectedPresentTimestamp = presentTime;
     }
@@ -518,9 +518,11 @@ void Scene::finalPaintWindow(EffectWindowImpl* w, int mask, const QRegion &regio
 // will be eventually called from drawWindow()
 void Scene::finalDrawWindow(EffectWindowImpl* w, int mask, const QRegion &region, WindowPaintData& data)
 {
+#if HAVE_WAYLAND
     if (waylandServer() && waylandServer()->isScreenLocked() && !w->window()->isLockScreen() && !w->window()->isInputMethod()) {
         return;
     }
+#endif
     w->sceneWindow()->performPaint(mask, region, data);
 }
 
@@ -606,9 +608,12 @@ Scene::Window::Window(Toplevel *client, QObject *parent)
     , filter(ImageFilterFast)
     , disable_painting(0)
 {
+#if HAVE_WAYLAND
     if (qobject_cast<WaylandClient *>(client)) {
         m_windowItem.reset(new WindowItemWayland(this));
-    } else if (qobject_cast<X11Client *>(client) || qobject_cast<Unmanaged *>(client)) {
+    } else
+#endif
+    if (qobject_cast<X11Client *>(client) || qobject_cast<Unmanaged *>(client)) {
         m_windowItem.reset(new WindowItemX11(this));
     } else if (qobject_cast<InternalClient *>(client)) {
         m_windowItem.reset(new WindowItemInternal(this));

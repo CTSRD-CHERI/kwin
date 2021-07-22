@@ -141,8 +141,7 @@ void RenderLoopPrivate::notifyFrameCompleted(std::chrono::nanoseconds timestamp)
     if (lastPresentationTimestamp <= timestamp) {
         lastPresentationTimestamp = timestamp;
     } else {
-        qCWarning(KWIN_CORE, "Got invalid presentation timestamp: %ld (current %ld)",
-                  timestamp.count(), lastPresentationTimestamp.count());
+        qCWarning(KWIN_CORE, "Got invalid presentation timestamp: %ld (current %ld)", (long)timestamp.count(), (long)lastPresentationTimestamp.count());
         lastPresentationTimestamp = std::chrono::steady_clock::now().time_since_epoch();
     }
 

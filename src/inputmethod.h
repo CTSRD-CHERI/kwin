@@ -16,6 +16,7 @@
 
 #include <QPointer>
 #include <QTimer>
+#if HAVE_WAYLAND
 #include <KWaylandServer/textinput_v2_interface.h>
 
 class KStatusNotifierItem;
@@ -31,6 +32,7 @@ namespace KWin
 
 class AbstractClient;
 class InputPanelV1Client;
+
 
 /**
  * This class implements the zwp_input_method_unstable_v1, which is currently used to provide
@@ -70,7 +72,9 @@ private Q_SLOTS:
     void textInputInterfaceV2EnabledChanged();
     void textInputInterfaceV3EnabledChanged();
     void stateCommitted(uint32_t serial);
+#if HAVE_WAYLAND
     void textInputInterfaceV2StateUpdated(quint32 serial, KWaylandServer::TextInputV2Interface::UpdateReason reason);
+#endif
 
     // inputcontext slots
     void setPreeditString(uint32_t serial, const QString &text, const QString &commit);
@@ -114,5 +118,7 @@ private:
 };
 
 }
+
+#endif
 
 #endif

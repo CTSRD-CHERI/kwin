@@ -21,10 +21,10 @@ namespace KWaylandServer
 {
 class OutputChangeSet;
 }
+#if HAVE_WAYLAND
 
 namespace KWin
 {
-
 /**
  * Generic output representation in a Wayland session
  */
@@ -225,5 +225,7 @@ private:
 }
 
 Q_DECLARE_OPERATORS_FOR_FLAGS(KWin::AbstractWaylandOutput::Capabilities)
+
+#endif
 
 #endif // KWIN_OUTPUT_H

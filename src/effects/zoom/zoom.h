@@ -118,7 +118,9 @@ private:
     QPoint prevPoint;
     QTime lastMouseEvent;
     QTime lastFocusEvent;
+#if QT_CONFIG(opengl)
     QScopedPointer<GLTexture> texture;
+#endif
     int imageWidth;
     int imageHeight;
     bool isMouseHidden;

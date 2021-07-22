@@ -1,5 +1,5 @@
 add_subdirectory(common)
 add_subdirectory(standalone)
-if (X11_XCB_FOUND)
+if (X11_XCB_FOUND AND KWIN_BUILD_WAYLAND)
     add_subdirectory(windowed)
 endif()

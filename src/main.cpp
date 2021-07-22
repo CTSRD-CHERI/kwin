@@ -33,7 +33,9 @@
 #include <KAboutData>
 #include <KLocalizedString>
 #include <KPluginMetaData>
+#if HAVE_WAYLAND
 #include <KWaylandServer/surface_interface.h>
+#endif
 // Qt
 #include <qplatformdefs.h>
 #include <QCommandLineParser>
@@ -101,7 +103,9 @@ Application::Application(Application::OperationMode mode, int &argc, char **argv
 {
     qRegisterMetaType<Options::WindowOperation>("Options::WindowOperation");
     qRegisterMetaType<KWin::EffectWindow*>();
+#if HAVE_WAYLAND
     qRegisterMetaType<KWaylandServer::SurfaceInterface *>("KWaylandServer::SurfaceInterface *");
+#endif
     qRegisterMetaType<KSharedConfigPtr>();
     qRegisterMetaType<std::chrono::nanoseconds>();
 }
@@ -567,6 +571,10 @@ static bool s_useLibinput = false;
 
 void Application::setUseLibinput(bool use)
 {
+#if !HAVE_LIBINPUT
+    if (use)
+        qFatal("Attempted to enabled libinput!");
+#endif
     s_useLibinput = use;
 }
 

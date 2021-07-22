@@ -52,7 +52,9 @@
 #include "x11eventfilter.h"
 
 #include "wayland_server.h"
+#if HAVE_WAYLAND
 #include <KWaylandServer/surface_interface.h>
+#endif
 
 #ifndef XCB_GE_GENERIC
 #define XCB_GE_GENERIC 35
@@ -790,10 +792,12 @@ void X11Client::updateMouseGrab()
 
     xcb_ungrab_button(connection(), XCB_BUTTON_INDEX_ANY, m_wrapper, XCB_MOD_MASK_ANY);
 
+#ifdef KWIN_BUILD_TABBOX
     if (TabBox::TabBox::self()->forcedGlobalMouseGrab()) { // see TabBox::establishTabBoxGrab()
         m_wrapper.grabButton(XCB_GRAB_MODE_SYNC, XCB_GRAB_MODE_ASYNC);
         return;
     }
+#endif
 
     // When a passive grab is activated or deactivated, the X server will generate crossing
     // events as if the pointer were suddenly to warp from its current position to some position
@@ -1288,11 +1292,13 @@ void Toplevel::clientMessageEvent(xcb_client_message_event_t *e)
 {
     if (e->type == atoms->wl_surface_id) {
         m_surfaceId = e->data.data32[0];
+#if HAVE_WAYLAND
         if (auto w = waylandServer()) {
             if (auto s = KWaylandServer::SurfaceInterface::get(m_surfaceId, w->xWaylandConnection())) {
                 setSurface(s);
             }
         }
+#endif
         Q_EMIT surfaceIdChanged(m_surfaceId);
     }
 }

@@ -29,7 +29,9 @@
 
 #include <QQuickItem>
 #include <QQmlContext>
+#if HAVE_WAYLAND
 #include <KWaylandServer/surface_interface.h>
+#endif
 
 #include <cmath>
 

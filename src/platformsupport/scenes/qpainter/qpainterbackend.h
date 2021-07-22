@@ -9,6 +9,9 @@
 #ifndef KWIN_SCENE_QPAINTER_BACKEND_H
 #define KWIN_SCENE_QPAINTER_BACKEND_H
 
+#include <config-kwin.h>
+#include <kwinconfig.h>
+
 class QImage;
 class QRegion;
 class QSize;
@@ -27,7 +30,9 @@ public:
     virtual ~QPainterBackend();
 
     PlatformSurfaceTexture *createPlatformSurfaceTextureInternal(SurfacePixmapInternal *pixmap);
+#if HAVE_WAYLAND
     PlatformSurfaceTexture *createPlatformSurfaceTextureWayland(SurfacePixmapWayland *pixmap);
+#endif
 
     virtual void endFrame(int screenId, int mask, const QRegion &damage) = 0;
     virtual void beginFrame(int screenId) = 0;

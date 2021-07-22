@@ -104,11 +104,13 @@ public:
     void show();
     void hide();
 
+#if QT_CONFIG(opengl)
     /**
      * Returns the current output of the scene graph
      * @note The render context must valid at the time of calling
      */
     GLTexture *bufferAsTexture();
+#endif
 
     /**
      * Returns the current output of the scene graph

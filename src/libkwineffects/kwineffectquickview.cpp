@@ -9,7 +9,7 @@
 
 #include "kwineffectquickview.h"
 
-#include "kwinglutils.h"
+// #include "kwinglutils.h"
 #include "logging_p.h"
 
 #include <QQmlEngine>
@@ -34,12 +34,14 @@ class Q_DECL_HIDDEN EffectQuickView::Private
 public:
     QQuickWindow *m_view;
     QQuickRenderControl *m_renderControl;
+#if QT_CONFIG(opengl)
     QScopedPointer<QOpenGLContext> m_glcontext;
-    QScopedPointer<QOffscreenSurface> m_offscreenSurface;
     QScopedPointer<QOpenGLFramebufferObject> m_fbo;
+    QScopedPointer<GLTexture> m_textureExport;
+#endif
+    QScopedPointer<QOffscreenSurface> m_offscreenSurface;
 
     QImage m_image;
-    QScopedPointer<GLTexture> m_textureExport;
     // if we should capture a QImage after rendering into our BO.
     // Used for either software QtQuick rendering and nonGL kwin rendering
     bool m_useBlit = false;
@@ -76,10 +78,13 @@ EffectQuickView::EffectQuickView(QObject *parent, ExportMode exportMode)
     const bool usingGl = d->m_view->rendererInterface()->graphicsApi() == QSGRendererInterface::OpenGL;
 
     if (!usingGl) {
-        qCDebug(LIBKWINEFFECTS) << "QtQuick Software rendering mode detected";
+        qCWarning(LIBKWINEFFECTS) << "QtQuick Software rendering mode detected";
         d->m_useBlit = true;
         d->m_renderControl->initialize(nullptr);
     } else {
+#if !QT_CONFIG(opengl)
+        Q_UNREACHABLE();
+#else
         QSurfaceFormat format;
         format.setOption(QSurfaceFormat::ResetNotification);
         format.setDepthBufferSize(16);
@@ -104,7 +109,9 @@ EffectQuickView::EffectQuickView(QObject *parent, ExportMode exportMode)
             // still render via GL, but blit for presentation
             d->m_useBlit = true;
         }
+#endif
     }
+
 
     auto updateSize = [this]() { contentItem()->setSize(d->m_view->size()); };
     updateSize();
@@ -122,11 +129,13 @@ EffectQuickView::EffectQuickView(QObject *parent, ExportMode exportMode)
 
 EffectQuickView::~EffectQuickView()
 {
+#if QT_CONFIG(opengl)
     if (d->m_glcontext) {
         d->m_glcontext->makeCurrent(d->m_offscreenSurface.data());
         d->m_renderControl->invalidate();
         d->m_glcontext->doneCurrent();
     }
+#endif
 }
 
 void EffectQuickView::update()
@@ -138,6 +147,7 @@ void EffectQuickView::update()
         return;
     }
 
+#if QT_CONFIG(opengl)
     bool usingGl = d->m_glcontext;
 
     if (usingGl) {
@@ -158,23 +168,28 @@ void EffectQuickView::update()
         }
         d->m_view->setRenderTarget(d->m_fbo.data());
     }
+#endif
 
     d->m_renderControl->polishItems();
     d->m_renderControl->sync();
 
     d->m_renderControl->render();
+#if QT_CONFIG(opengl)
     if (usingGl) {
         d->m_view->resetOpenGLState();
     }
+#endif
 
     if (d->m_useBlit) {
         d->m_image = d->m_renderControl->grab();
     }
 
+#if QT_CONFIG(opengl)
     if (usingGl) {
         QOpenGLFramebufferObject::bindDefault();
         d->m_glcontext->doneCurrent();
     }
+#endif
     Q_EMIT repaintNeeded();
 }
 
@@ -273,6 +288,7 @@ void EffectQuickView::hide()
     setVisible(false);
 }
 
+#if QT_CONFIG(opengl)
 GLTexture *EffectQuickView::bufferAsTexture()
 {
     if (d->m_useBlit) {
@@ -290,6 +306,7 @@ GLTexture *EffectQuickView::bufferAsTexture()
     }
     return d->m_textureExport.data();
 }
+#endif
 
 QImage EffectQuickView::bufferAsImage() const
 {
@@ -310,10 +327,14 @@ void EffectQuickView::setGeometry(const QRect &rect)
 
 void EffectQuickView::Private::releaseResources()
 {
+#if QT_CONFIG(opengl)
     if (m_glcontext) {
         m_glcontext->makeCurrent(m_offscreenSurface.data());
         m_view->releaseResources();
         m_glcontext->doneCurrent();
+#else
+    if (false) {
+#endif
     } else {
         m_view->releaseResources();
     }

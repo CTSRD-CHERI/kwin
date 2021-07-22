@@ -11,9 +11,15 @@
 
 #include <QFutureWatcher>
 #include <QtConcurrentRun>
+#include <QDBusConnection>
+#include <QDBusReply>
+#include <QDBusServiceWatcher>
+#include <QDBusConnectionInterface>
 // dbus generated
+#if KScreenLocker_FOUND
 #include "screenlocker_interface.h"
 #include "kscreenlocker_interface.h"
+#endif
 
 namespace KWin
 {
@@ -27,11 +33,15 @@ ScreenLockerWatcher::ScreenLockerWatcher(QObject *parent)
     , m_serviceWatcher(new QDBusServiceWatcher(this))
     , m_locked(false)
 {
+#if HAVE_WAYLAND
     if (waylandServer() && waylandServer()->hasScreenLockerIntegration()) {
         connect(waylandServer(), &WaylandServer::initialized, this, &ScreenLockerWatcher::initialize);
     } else {
         initialize();
     }
+#else
+    initialize();
+#endif
 }
 
 ScreenLockerWatcher::~ScreenLockerWatcher()
@@ -67,6 +77,7 @@ void ScreenLockerWatcher::serviceOwnerChanged(const QString &serviceName, const 
 
     m_locked = false;
     if (!newOwner.isEmpty()) {
+#if KScreenLocker_FOUND
         m_interface = new OrgFreedesktopScreenSaverInterface(newOwner, QStringLiteral("/ScreenSaver"), QDBusConnection::sessionBus(), this);
         m_kdeInterface = new OrgKdeScreensaverInterface(newOwner, QStringLiteral("/ScreenSaver"), QDBusConnection::sessionBus(), this);
         connect(m_interface, &OrgFreedesktopScreenSaverInterface::ActiveChanged,
@@ -75,6 +86,7 @@ void ScreenLockerWatcher::serviceOwnerChanged(const QString &serviceName, const 
         connect(watcher, &QDBusPendingCallWatcher::finished,
                 this, &ScreenLockerWatcher::activeQueried);
         connect(m_kdeInterface, &OrgKdeScreensaverInterface::AboutToLock, this, &ScreenLockerWatcher::aboutToLock);
+#endif
     }
 }
 

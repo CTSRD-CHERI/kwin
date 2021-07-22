@@ -13,6 +13,7 @@ find_package(ECM ${KF5_MIN_VERSION} REQUIRED NO_MODULE)
 include(FeatureSummary)
 include(WriteBasicConfigVersionFile)
 include(GenerateExportHeader)
+include(CMakeDependentOption)
 
 # where to look first for cmake modules, before ${CMAKE_ROOT}/Modules/ is checked
 set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules ${ECM_MODULE_PATH})
@@ -34,9 +35,22 @@ set_package_properties(Qt5Test PROPERTIES
     TYPE OPTIONAL
 )
 add_feature_info("Qt5Test" Qt5Test_FOUND "Required for building tests")
-if (NOT Qt5Test_FOUND)
+if (NOTQt5Test_FOUND)
     set(BUILD_TESTING OFF CACHE BOOL "Build the testing tree.")
 endif()
+get_target_property(QTGUI_DISABLED_FEATURES Qt5::Gui QT_DISABLED_PUBLIC_FEATURES)
+if (NOT QTGUI_DISABLED_FEATURES)
+  message(FATAL_ERROR "Qt::Gui QTGUI_DISABLED_FEATURES (${QTGUI_DISABLED_FEATURES}) property no longer exists?")
+endif()
+if ("opengl" IN_LIST QTGUI_DISABLED_FEATURES)
+  set(WARNING "Qt was built without OpenGL support, disabling features that depend on openGL")
+  set(KWIN_BUILD_OPENGL OFF CACHE BOOL "Enable OpenGL support" FORCE)
+  add_feature_info("Qt5Test" Qt5Test_FOUND "Required for building tests")
+else()
+  option(KWIN_BUILD_OPENGL "Enable OpenGL support" ON)
+endif()
+add_feature_info("OpenGL" KWIN_BUILD_OPENGL "Required for wayland support and most effects")
+cmake_dependent_option(KWIN_BUILD_WAYLAND "Enable Wayland support" ON "KWIN_BUILD_OPENGL" OFF)
 
 include(KDEInstallDirs)
 include(KDECMakeSettings)
@@ -75,11 +89,11 @@ find_package(KF5 ${KF5_MIN_VERSION} REQUIRED COMPONENTS
     GlobalAccel
     I18n
     IconThemes
-    IdleTime
+    # IdleTime
     Notifications
     Package
     Plasma
-    Wayland
+    # Wayland
     WidgetsAddons
     WindowSystem
 )
@@ -131,15 +145,15 @@ set_package_properties(KF5Kirigami2 PROPERTIES
 
 find_package(KDecoration2 5.18.0 CONFIG REQUIRED)
 
-find_package(KScreenLocker CONFIG REQUIRED)
+find_package(KScreenLocker CONFIG)
 set_package_properties(KScreenLocker PROPERTIES
-    TYPE REQUIRED
+    TYPE ${WAYLAND_REQUIRED}
     PURPOSE "For screenlocker integration in kwin_wayland"
 )
 
-find_package(KWaylandServer CONFIG REQUIRED)
+find_package(KWaylandServer CONFIG)
 set_package_properties(KWaylandServer PROPERTIES
-    TYPE REQUIRED
+    TYPE ${WAYLAND_REQUIRED}
     PURPOSE "For Wayland integration"
 )
 
@@ -169,7 +183,7 @@ find_package(epoxy)
 set_package_properties(epoxy PROPERTIES
     DESCRIPTION "libepoxy"
     URL "https://github.com/anholt/libepoxy"
-    TYPE REQUIRED
+    TYPE ${WAYLAND_REQUIRED}
     PURPOSE "OpenGL dispatch library"
 )
 
@@ -183,7 +197,7 @@ endif()
 
 find_package(Wayland 1.2 OPTIONAL_COMPONENTS Egl)
 set_package_properties(Wayland PROPERTIES
-    TYPE REQUIRED
+    TYPE ${WAYLAND_REQUIRED}
     PURPOSE "Required for building KWin with Wayland support"
 )
 add_feature_info("Wayland::EGL" Wayland_Egl_FOUND "Enable building of Wayland backend.")
@@ -194,25 +208,25 @@ endif()
 
 find_package(XKB 0.7.0)
 set_package_properties(XKB PROPERTIES
-    TYPE REQUIRED
+    TYPE ${WAYLAND_REQUIRED}
     PURPOSE "Required for building KWin with Wayland support"
 )
 
 find_package(Qt5XkbCommonSupport REQUIRED)
 
 find_package(Libinput 1.14)
-set_package_properties(Libinput PROPERTIES TYPE REQUIRED PURPOSE "Required for input handling on Wayland.")
+set_package_properties(Libinput PROPERTIES TYPE ${WAYLAND_REQUIRED} PURPOSE "Required for input handling on Wayland.")
 
 find_package(UDev)
 set_package_properties(UDev PROPERTIES
     URL "https://www.freedesktop.org/wiki/Software/systemd/"
     DESCRIPTION "Linux device library."
-    TYPE REQUIRED
+    TYPE ${WAYLAND_REQUIRED}
     PURPOSE "Required for input handling on Wayland."
 )
 
 find_package(Libdrm 2.4.62)
-set_package_properties(Libdrm PROPERTIES TYPE REQUIRED PURPOSE "Required for drm output on Wayland.")
+set_package_properties(Libdrm PROPERTIES TYPE ${WAYLAND_REQUIRED} PURPOSE "Required for drm output on Wayland.")
 
 find_package(gbm)
 set_package_properties(gbm PROPERTIES TYPE OPTIONAL PURPOSE "Required for egl output of drm backend.")
@@ -332,11 +346,11 @@ ecm_find_qmlmodule(org.kde.plasma.core 2.0)
 ecm_find_qmlmodule(org.kde.plasma.components 2.0)
 
 ########### configure tests ###############
-include(CMakeDependentOption)
-
 option(KWIN_BUILD_DECORATIONS "Enable building of KWin decorations." ON)
-option(KWIN_BUILD_KCMS "Enable building of KWin configuration modules." ON)
-option(KWIN_BUILD_TABBOX "Enable building of KWin Tabbox functionality" ON)
+# option(KWIN_BUILD_KCMS "Enable building of KWin configuration modules." ON)
+cmake_dependent_option(KWIN_BUILD_KCMS "Enable building of KWin configuration modules." ON "KWIN_BUILD_OPENGL" OFF)
+option(KWIN_BUILD_IDLETIME "Enable building of KWin idle time module." ON)
+cmake_dependent_option(KWIN_BUILD_TABBOX "Enable building of KWin Tabbox functionality" ON "KWIN_BUILD_OPENGL" OFF)
 cmake_dependent_option(KWIN_BUILD_ACTIVITIES "Enable building of KWin with kactivities support" ON "KF5Activities_FOUND" OFF)
 cmake_dependent_option(KWIN_BUILD_RUNNERS "Enable building of KWin with krunner support" ON "KF5Runner_FOUND" OFF)
 cmake_dependent_option(KWIN_BUILD_CMS "Enable building of KWin with CMS" ON "lcms2_FOUND" OFF)
@@ -410,7 +424,7 @@ add_subdirectory(data)
 add_subdirectory(kconf_update)
 add_subdirectory(src)
 
-if (BUILD_TESTING)
+if (BUILD_TESTING AND KWIN_BUILD_WAYLAND)
     find_package(WaylandProtocols 1.19 REQUIRED)
     find_package(QtWaylandScanner ${QT_MIN_VERSION} REQUIRED)
     find_package(Wayland REQUIRED COMPONENTS Client)

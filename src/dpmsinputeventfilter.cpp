@@ -15,7 +15,9 @@
 #include <QGuiApplication>
 #include <QKeyEvent>
 
+#if HAVE_WAYLAND
 #include <KWaylandServer/seat_interface.h>
+#endif
 
 namespace KWin
 {
@@ -85,7 +87,9 @@ bool DpmsInputEventFilter::touchUp(qint32 id, quint32 time)
         m_touchPoints.removeAll(id);
         if (m_touchPoints.isEmpty() && m_doubleTapTimer.isValid() && m_secondTap) {
             if (m_doubleTapTimer.elapsed() < qApp->doubleClickInterval()) {
+#if HAVE_WAYLAND
                 waylandServer()->seat()->setTimestamp(time);
+#endif
                 notify();
             }
             m_doubleTapTimer.invalidate();

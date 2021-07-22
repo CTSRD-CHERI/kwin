@@ -20,9 +20,11 @@
 #include <KDecoration2/Decoration>
 #include <KDecoration2/DecorationShadow>
 
+#if HAVE_WAYLAND
 #include <KWaylandServer/buffer_interface.h>
 #include <KWaylandServer/shadow_interface.h>
 #include <KWaylandServer/surface_interface.h>
+#endif
 
 #include <QWindow>
 
@@ -91,6 +93,7 @@ Shadow *Shadow::createShadowFromDecoration(Toplevel *toplevel)
     return shadow;
 }
 
+#if HAVE_WAYLAND
 Shadow *Shadow::createShadowFromWayland(Toplevel *toplevel)
 {
     auto surface = toplevel->surface();
@@ -108,6 +111,7 @@ Shadow *Shadow::createShadowFromWayland(Toplevel *toplevel)
     }
     return shadow;
 }
+#endif
 
 Shadow *Shadow::createShadowFromInternalWindow(Toplevel *toplevel)
 {
@@ -214,6 +218,7 @@ bool Shadow::init(KDecoration2::Decoration *decoration)
     return true;
 }
 
+#if HAVE_WAYLAND
 bool Shadow::init(const QPointer< KWaylandServer::ShadowInterface > &shadow)
 {
     if (!shadow) {
@@ -237,6 +242,7 @@ bool Shadow::init(const QPointer< KWaylandServer::ShadowInterface > &shadow)
     Q_EMIT textureChanged();
     return true;
 }
+#endif
 
 bool Shadow::init(const QWindow *window)
 {
@@ -290,6 +296,7 @@ bool Shadow::updateShadow()
         return false;
     }
 
+#if HAVE_WAYLAND
     if (waylandServer()) {
         if (m_topLevel && m_topLevel->surface()) {
             if (const auto &s = m_topLevel->surface()->shadow()) {
@@ -299,6 +306,7 @@ bool Shadow::updateShadow()
             }
         }
     }
+#endif
 
     if (InternalClient *client = qobject_cast<InternalClient *>(m_topLevel)) {
         if (init(client->internalWindow())) {

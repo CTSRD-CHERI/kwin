@@ -13,7 +13,7 @@
 
 namespace KWin
 {
-
+#if HAVE_WAYLAND
 class KWIN_EXPORT VirtualKeyboardDBus : public QObject
 {
     Q_OBJECT
@@ -39,5 +39,6 @@ Q_SIGNALS:
 private:
     InputMethod *const m_inputMethod;
 };
+#endif
 
 }

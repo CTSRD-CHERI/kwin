@@ -28,7 +28,7 @@
 #include "workspace.h"
 
 #include "wayland_server.h"
-#include <KWaylandServer/plasmawindowmanagement_interface.h>
+// #include <KWaylandServer/plasmawindowmanagement_interface.h>
 
 #include <KDecoration2/DecoratedClient>
 #include <KDecoration2/Decoration>
@@ -450,6 +450,7 @@ void AbstractClient::setDesktops(QVector<VirtualDesktop*> desktops)
 
     m_desktops = desktops;
 
+#if HAVE_WAYLAND
     if (windowManagementInterface()) {
         if (m_desktops.isEmpty()) {
             windowManagementInterface()->setOnAllDesktops(true);
@@ -468,6 +469,7 @@ void AbstractClient::setDesktops(QVector<VirtualDesktop*> desktops)
             }
         }
     }
+#endif
     if (info) {
         info->setDesktop(desktop());
     }
@@ -1462,6 +1464,7 @@ void AbstractClient::setupWindowManagementInterface()
         // already setup
         return;
     }
+#if HAVE_WAYLAND
     if (!waylandServer() || !surface()) {
         return;
     }
@@ -1687,6 +1690,7 @@ void AbstractClient::setupWindowManagementInterface()
     );
 
     m_windowManagementInterface = w;
+#endif
 }
 
 Options::MouseCommand AbstractClient::getMouseCommand(Qt::MouseButton button, bool *handled) const
@@ -2547,6 +2551,9 @@ void AbstractClient::leaveEvent()
 
 QRect AbstractClient::iconGeometry() const
 {
+#if !HAVE_WAYLAND
+    return QRect();
+#else
     if (!windowManagementInterface() || !waylandServer()) {
         // window management interface is only available if the surface is mapped
         return QRect();
@@ -2573,6 +2580,7 @@ QRect AbstractClient::iconGeometry() const
         return QRect();
     }
     return candidateGeom.translated(candidatePanel->pos());
+#endif
 }
 
 QRect AbstractClient::inputGeometry() const

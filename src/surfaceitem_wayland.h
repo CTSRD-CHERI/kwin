@@ -8,6 +8,8 @@
 
 #include "surfaceitem.h"
 
+#if HAVE_WAYLAND
+
 namespace KWaylandServer
 {
 class BufferInterface;
@@ -90,4 +92,7 @@ public:
     QRegion shape() const override;
 };
 
+
 } // namespace KWin
+
+#endif

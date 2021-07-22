@@ -58,10 +58,12 @@ private:
 
     float computeAlpha(int time, int ring);
     float computeRadius(int time, bool press, int ring);
-    void drawCircleGl(const QColor& color, float cx, float cy, float r);
     void drawCircleQPainter(const QColor& color, float cx, float cy, float r);
+#if QT_CONFIG(opengl)
+    void drawCircleGl(const QColor& color, float cx, float cy, float r);
     void paintScreenSetupGl(int mask, QRegion region, ScreenPaintData& data);
     void paintScreenFinishGl(int mask, QRegion region, ScreenPaintData& data);
+#endif
 
     Qt::GlobalColor colorForId(quint32 id);
 

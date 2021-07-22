@@ -22,6 +22,7 @@
 // KDecoration
 #include <KDecoration2/Decoration>
 // KWayland
+#if HAVE_WAYLAND
 #include <KWaylandServer/buffer_interface.h>
 #include <KWaylandServer/datadevice_interface.h>
 #include <KWaylandServer/display.h>
@@ -29,8 +30,11 @@
 #include <KWaylandServer/pointerconstraints_v1_interface.h>
 #include <KWaylandServer/seat_interface.h>
 #include <KWaylandServer/surface_interface.h>
+#endif
 // screenlocker
+#if KScreenLocker_FOUND
 #include <KScreenLocker/KsldApp>
+#endif
 
 #include <KLocalizedString>
 
@@ -111,10 +115,13 @@ PointerInputRedirection::~PointerInputRedirection() = default;
 void PointerInputRedirection::init()
 {
     Q_ASSERT(!inited());
+#if HAVE_WAYLAND
     m_cursor = new CursorImage(this);
+#endif
     setInited(true);
     InputDeviceHandler::init();
 
+#if HAVE_WAYLAND
     connect(m_cursor, &CursorImage::changed, Cursors::self()->mouse(), [this] {
         auto cursor = Cursors::self()->mouse();
         cursor->updateCursor(m_cursor->image(), m_cursor->hotSpot());
@@ -123,8 +130,10 @@ void PointerInputRedirection::init()
     Q_EMIT m_cursor->changed();
 
     connect(Cursors::self()->mouse(), &Cursor::rendered, m_cursor, &CursorImage::markAsRendered);
+#endif
 
     connect(screens(), &Screens::changed, this, &PointerInputRedirection::updateAfterScreenChange);
+#if HAVE_WAYLAND
     if (waylandServer()->hasScreenLockerIntegration()) {
         connect(ScreenLocker::KSldApp::self(), &ScreenLocker::KSldApp::lockStateChanged, this,
             [this] {
@@ -136,7 +145,6 @@ void PointerInputRedirection::init()
             }
         );
     }
-    connect(workspace(), &QObject::destroyed, this, [this] { setInited(false); });
     connect(waylandServer(), &QObject::destroyed, this, [this] { setInited(false); });
     connect(waylandServer()->seat(), &KWaylandServer::SeatInterface::dragEnded, this,
         [this] {
@@ -146,6 +154,9 @@ void PointerInputRedirection::init()
             update();
         }
     );
+#endif
+    connect(workspace(), &QObject::destroyed, this, [this] { setInited(false); });
+
     // connect the move resize of all window
     auto setupMoveResizeConnection = [this] (AbstractClient *c) {
         connect(c, &AbstractClient::clientStartUserMovedResized, this, &PointerInputRedirection::updateOnStartMoveResize);
@@ -165,7 +176,9 @@ void PointerInputRedirection::updateOnStartMoveResize()
     breakPointerConstraints(focus() ? focus()->surface() : nullptr);
     disconnectPointerConstraintsConnection();
     setFocus(nullptr);
+#if HAVE_WAYLAND
     waylandServer()->seat()->setFocusedPointerSurface(nullptr);
+#endif
 }
 
 void PointerInputRedirection::updateToReset()
@@ -192,7 +205,9 @@ void PointerInputRedirection::updateToReset()
         disconnectPointerConstraintsConnection();
         setFocus(nullptr);
     }
+#if HAVE_WAYLAND
     waylandServer()->seat()->setFocusedPointerSurface(nullptr);
+#endif
 }
 
 void PointerInputRedirection::processMotion(const QPointF &pos, uint32_t time, LibInput::Device *device)
@@ -431,6 +446,7 @@ bool PointerInputRedirection::focusUpdatesBlocked()
     if (!inited()) {
         return true;
     }
+#if HAVE_WAYLAND
     if (waylandServer()->seat()->isDragPointer()) {
         // ignore during drag and drop
         return true;
@@ -439,6 +455,7 @@ bool PointerInputRedirection::focusUpdatesBlocked()
         // ignore during touch operations
         return true;
     }
+#endif
     if (input()->isSelectingWindow()) {
         return true;
     }
@@ -484,8 +501,9 @@ void PointerInputRedirection::cleanupDecoration(Decoration::DecoratedClientImpl 
         // left decoration
         return;
     }
-
+#if HAVE_WAYLAND
     waylandServer()->seat()->setFocusedPointerSurface(nullptr);
+#endif
 
     auto pos = m_pos - now->client()->pos();
     QHoverEvent event(QEvent::HoverEnter, pos, pos);
@@ -533,18 +551,21 @@ void PointerInputRedirection::focusUpdate(Toplevel *focusOld, Toplevel *focusNow
         QCoreApplication::sendEvent(internalWindow(), &enterEvent);
     }
 
-    auto seat = waylandServer()->seat();
     if (!focusNow || !focusNow->surface() || decoration()) {
         // Clean up focused pointer surface if there's no client to take focus,
         // or the pointer is on a client without surface or on a decoration.
+#if HAVE_WAYLAND
         warpXcbOnSurfaceLeft(nullptr);
-        seat->setFocusedPointerSurface(nullptr);
+        waylandServer()->seat()->setFocusedPointerSurface(nullptr);
+#endif
         return;
     }
 
+#if HAVE_WAYLAND
     // TODO: add convenient API to update global pos together with updating focused surface
     warpXcbOnSurfaceLeft(focusNow->surface());
 
+    auto seat = waylandServer()->seat();
     // TODO: why? in order to reset the cursor icon?
     s_cursorUpdateBlocking = true;
     seat->setFocusedPointerSurface(nullptr);
@@ -574,11 +595,13 @@ void PointerInputRedirection::focusUpdate(Toplevel *focusOld, Toplevel *focusNow
 
     m_constraintsConnection = connect(focusNow->surface(), &KWaylandServer::SurfaceInterface::pointerConstraintsChanged,
                                       this, &PointerInputRedirection::updatePointerConstraints);
+#endif
     m_constraintsActivatedConnection = connect(workspace(), &Workspace::clientActivated,
                                                this, &PointerInputRedirection::updatePointerConstraints);
     updatePointerConstraints();
 }
 
+#if HAVE_WAYLAND
 void PointerInputRedirection::breakPointerConstraints(KWaylandServer::SurfaceInterface *surface)
 {
     // cancel pointer constraints
@@ -596,6 +619,7 @@ void PointerInputRedirection::breakPointerConstraints(KWaylandServer::SurfaceInt
     m_confined = false;
     m_locked = false;
 }
+#endif
 
 void PointerInputRedirection::disconnectConfinedPointerRegionConnection()
 {
@@ -644,6 +668,7 @@ void PointerInputRedirection::updatePointerConstraints()
     if (!s) {
         return;
     }
+#if HAVE_WAYLAND
     if (s != waylandServer()->seat()->focusedPointerSurface()) {
         return;
     }
@@ -735,8 +760,10 @@ void PointerInputRedirection::updatePointerConstraints()
         m_locked = false;
         disconnectLockedPointerAboutToBeUnboundConnection();
     }
+#endif
 }
 
+#if HAVE_WAYLAND
 void PointerInputRedirection::warpXcbOnSurfaceLeft(KWaylandServer::SurfaceInterface *newSurface)
 {
     auto xc = waylandServer()->xWaylandConnection();
@@ -765,6 +792,7 @@ void PointerInputRedirection::warpXcbOnSurfaceLeft(KWaylandServer::SurfaceInterf
     xcb_warp_pointer(c, XCB_WINDOW_NONE, kwinApp()->x11RootWindow(), 0, 0, 0, 0, 0, 0),
     xcb_flush(c);
 }
+#endif
 
 QPointF PointerInputRedirection::applyPointerConfinement(const QPointF &pos) const
 {
@@ -775,6 +803,9 @@ QPointF PointerInputRedirection::applyPointerConfinement(const QPointF &pos) con
     if (!s) {
         return pos;
     }
+#if !HAVE_WAYLAND
+    Q_UNREACHABLE();
+#else
     auto cf = s->confinedPointer();
     if (!cf) {
         return pos;
@@ -799,6 +830,7 @@ QPointF PointerInputRedirection::applyPointerConfinement(const QPointF &pos) con
     }
 
     return m_pos;
+#endif
 }
 
 void PointerInputRedirection::updatePosition(const QPointF &pos)
@@ -836,6 +868,7 @@ void PointerInputRedirection::updatePosition(const QPointF &pos)
 
 void PointerInputRedirection::updateCursorOutputs()
 {
+#if HAVE_WAYLAND
     KWaylandServer::PointerInterface *pointer = waylandServer()->seat()->pointer();
     if (!pointer) {
         return;
@@ -853,6 +886,7 @@ void PointerInputRedirection::updateCursorOutputs()
 
     const QRectF cursorGeometry(m_pos - m_cursor->hotSpot(), surface->size());
     surface->setOutputs(waylandServer()->display()->outputsIntersecting(cursorGeometry.toAlignedRect()));
+#endif
 }
 
 void PointerInputRedirection::updateButton(uint32_t button, InputRedirection::PointerButtonState state)
@@ -875,7 +909,9 @@ void PointerInputRedirection::warp(const QPointF &pos)
 {
     if (supportsWarping()) {
         kwinApp()->platform()->warpPointer(pos);
+#if HAVE_WAYLAND
         processMotion(pos, waylandServer()->seat()->timestamp());
+#endif
     }
 }
 
@@ -902,10 +938,12 @@ void PointerInputRedirection::updateAfterScreenChange()
         // pointer still on a screen
         return;
     }
+#if HAVE_WAYLAND
     // pointer no longer on a screen, reposition to closes screen
     const QPointF pos = screens()->geometry(screens()->number(m_pos.toPoint())).center();
     // TODO: better way to get timestamps
     processMotion(pos, waylandServer()->seat()->timestamp());
+#endif
 }
 
 QPointF PointerInputRedirection::position() const
@@ -920,7 +958,9 @@ void PointerInputRedirection::setEffectsOverrideCursor(Qt::CursorShape shape)
     }
     // current pointer focus window should get a leave event
     update();
+#if HAVE_WAYLAND
     m_cursor->setEffectsOverrideCursor(shape);
+#endif
 }
 
 void PointerInputRedirection::removeEffectsOverrideCursor()
@@ -930,7 +970,9 @@ void PointerInputRedirection::removeEffectsOverrideCursor()
     }
     // cursor position might have changed while there was an effect in place
     update();
+#if HAVE_WAYLAND
     m_cursor->removeEffectsOverrideCursor();
+#endif
 }
 
 void PointerInputRedirection::setWindowSelectionCursor(const QByteArray &shape)
@@ -940,7 +982,9 @@ void PointerInputRedirection::setWindowSelectionCursor(const QByteArray &shape)
     }
     // send leave to current pointer focus window
     updateToReset();
+#if HAVE_WAYLAND
     m_cursor->setWindowSelectionCursor(shape);
+#endif
 }
 
 void PointerInputRedirection::removeWindowSelectionCursor()
@@ -949,9 +993,12 @@ void PointerInputRedirection::removeWindowSelectionCursor()
         return;
     }
     update();
+#if HAVE_WAYLAND
     m_cursor->removeWindowSelectionCursor();
+#endif
 }
 
+#if HAVE_WAYLAND
 CursorImage::CursorImage(PointerInputRedirection *parent)
     : QObject(parent)
     , m_pointer(parent)
@@ -1168,12 +1215,16 @@ void CursorImage::updateDrag()
     disconnect(m_drag.connection);
     m_drag.cursor = {};
     reevaluteSource();
+#if HAVE_WAYLAND
     if (waylandServer()->seat()->isDragPointer()) {
         KWaylandServer::PointerInterface *pointer = waylandServer()->seat()->pointer();
         m_drag.connection = connect(pointer, &PointerInterface::cursorChanged, this, &CursorImage::updateDragCursor);
     } else {
         m_drag.connection = QMetaObject::Connection();
     }
+#else
+    m_drag.connection = QMetaObject::Connection();
+#endif
     updateDragCursor();
 }
 
@@ -1181,6 +1232,11 @@ void CursorImage::updateDragCursor()
 {
     m_drag.cursor = {};
     const bool needsEmit = m_currentSource == CursorSource::DragAndDrop;
+#if !HAVE_WAYLAND
+    if (needsEmit) {
+        Q_EMIT changed();
+    }
+#else
     QImage additionalIcon;
     if (auto ddi = waylandServer()->seat()->dragSource()) {
         if (const KWaylandServer::DragAndDropIcon *dragIcon = ddi->icon()) {
@@ -1254,11 +1310,11 @@ void CursorImage::updateDragCursor()
         p.drawImage(cursorRect, cursorImage);
         p.end();
     }
-
     if (needsEmit) {
         Q_EMIT changed();
     }
     // TODO: add the cursor image
+#endif
 }
 
 void CursorImage::loadThemeCursor(CursorShape shape, WaylandCursorImage::Image *image)
@@ -1349,6 +1405,7 @@ bool WaylandCursorImage::loadThemeCursor_helper(const QByteArray &name, Image *c
 
 void CursorImage::reevaluteSource()
 {
+#if HAVE_WAYLAND
     if (waylandServer()->seat()->isDragPointer()) {
         // TODO: touch drag?
         setSource(CursorSource::DragAndDrop);
@@ -1358,6 +1415,7 @@ void CursorImage::reevaluteSource()
         setSource(CursorSource::LockScreen);
         return;
     }
+#endif
     if (input()->isSelectingWindow()) {
         setSource(CursorSource::WindowSelector);
         return;
@@ -1374,11 +1432,13 @@ void CursorImage::reevaluteSource()
         setSource(CursorSource::Decoration);
         return;
     }
+#if HAVE_WAYLAND
     const KWaylandServer::PointerInterface *pointer = waylandServer()->seat()->pointer();
     if (pointer && pointer->focusedSurface()) {
         setSource(CursorSource::PointerSurface);
         return;
     }
+#endif
     setSource(CursorSource::Fallback);
 }
 
@@ -1438,6 +1498,8 @@ QPoint CursorImage::hotSpot() const
         Q_UNREACHABLE();
     }
 }
+
+#endif
 
 InputRedirectionCursor::InputRedirectionCursor(QObject *parent)
     : Cursor(parent)

@@ -112,7 +112,9 @@ public:
     void startMousePolling() override;
     void stopMousePolling() override;
     EffectWindow* findWindow(WId id) const override;
+#if HAVE_WAYLAND
     EffectWindow* findWindow(KWaylandServer::SurfaceInterface *surf) const override;
+#endif
     EffectWindow *findWindow(QWindow *w) const override;
     EffectWindow *findWindow(const QUuid &id) const override;
     EffectWindowList stackingOrder() const override;

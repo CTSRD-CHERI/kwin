@@ -97,7 +97,9 @@ public:
      */
     void forwardModifiers();
 
+#if HAVE_WAYLAND
     void setSeat(KWaylandServer::SeatInterface *seat);
+#endif
     QByteArray keymapContents() const;
 
 Q_SIGNALS:
@@ -149,7 +151,9 @@ private:
     };
     Ownership m_ownership = Ownership::Server;
 
+#if HAVE_WAYLAND
     QPointer<KWaylandServer::SeatInterface> m_seat;
+#endif
 };
 
 inline

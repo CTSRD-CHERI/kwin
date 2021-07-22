@@ -19,10 +19,14 @@
 #include "wayland_server.h"
 #include "workspace.h"
 // KWayland
+#if HAVE_WAYLAND
 #include <KWaylandServer/datadevice_interface.h>
 #include <KWaylandServer/seat_interface.h>
+#endif
 //screenlocker
+#if KScreenLocker_FOUND
 #include <KScreenLocker/KsldApp>
+#endif
 // Frameworks
 #include <KGlobalAccel>
 // Qt
@@ -37,9 +41,11 @@ KeyboardInputRedirection::KeyboardInputRedirection(InputRedirection *parent)
     , m_xkb(new Xkb(parent))
 {
     connect(m_xkb.data(), &Xkb::ledsChanged, this, &KeyboardInputRedirection::ledsChanged);
+#if HAVE_WAYLAND
     if (waylandServer()) {
         m_xkb->setSeat(waylandServer()->seat());
     }
+#endif
 }
 
 KeyboardInputRedirection::~KeyboardInputRedirection() = default;
@@ -110,9 +116,11 @@ void KeyboardInputRedirection::init()
     m_keyboardLayout->init();
     m_input->installInputEventSpy(m_keyboardLayout);
 
+#if HAVE_WAYLAND
     if (waylandServer()->hasGlobalShortcutSupport()) {
         m_input->installInputEventSpy(new ModifierOnlyShortcuts);
     }
+#endif
 
     KeyboardRepeat *keyRepeatSpy = new KeyboardRepeat(m_xkb.data());
     connect(keyRepeatSpy, &KeyboardRepeat::keyRepeat, this,
@@ -120,7 +128,9 @@ void KeyboardInputRedirection::init()
     m_input->installInputEventSpy(keyRepeatSpy);
 
     connect(workspace(), &QObject::destroyed, this, [this] { m_inited = false; });
+#if HAVE_WAYLAND
     connect(waylandServer(), &QObject::destroyed, this, [this] { m_inited = false; });
+#endif
     connect(workspace(), &Workspace::clientActivated, this,
         [this] {
             disconnect(m_activeClientSurfaceChangedConnection);
@@ -132,9 +142,11 @@ void KeyboardInputRedirection::init()
             update();
         }
     );
+#if HAVE_WAYLAND
     if (waylandServer()->hasScreenLockerIntegration()) {
         connect(ScreenLocker::KSldApp::self(), &ScreenLocker::KSldApp::lockStateChanged, this, &KeyboardInputRedirection::update);
     }
+#endif
 }
 
 void KeyboardInputRedirection::update()
@@ -142,6 +154,7 @@ void KeyboardInputRedirection::update()
     if (!m_inited) {
         return;
     }
+#if HAVE_WAYLAND
     auto seat = waylandServer()->seat();
     // TODO: this needs better integration
     Toplevel *found = nullptr;
@@ -176,6 +189,7 @@ void KeyboardInputRedirection::update()
     } else {
         seat->setFocusedKeyboardSurface(nullptr);
     }
+#endif
 }
 
 void KeyboardInputRedirection::processKey(uint32_t key, InputRedirection::KeyboardKeyState state, uint32_t time, LibInput::Device *device)

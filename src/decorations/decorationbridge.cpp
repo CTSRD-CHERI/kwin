@@ -21,8 +21,10 @@
 #include <KDecoration2/DecoratedClient>
 #include <KDecoration2/DecorationSettings>
 
+#if HAVE_WAYLAND
 // KWayland
 #include <KWaylandServer/server_decoration_interface.h>
+#endif
 
 // Frameworks
 #include <KPluginFactory>
@@ -110,9 +112,11 @@ void DecorationBridge::init()
     using namespace KWaylandServer;
     m_noPlugin = readNoPlugin();
     if (m_noPlugin) {
+#if HAVE_WAYLAND
         if (waylandServer()) {
             waylandServer()->decorationManager()->setDefaultMode(ServerSideDecorationManagerInterface::Mode::None);
         }
+#endif
         return;
     }
     m_plugin = readPlugin();
@@ -130,9 +134,11 @@ void DecorationBridge::init()
             initPlugin();
         }
     }
+#if HAVE_WAYLAND
     if (waylandServer()) {
         waylandServer()->decorationManager()->setDefaultMode(m_factory ? ServerSideDecorationManagerInterface::Mode::Server : ServerSideDecorationManagerInterface::Mode::None);
     }
+#endif
 }
 
 void DecorationBridge::initPlugin()

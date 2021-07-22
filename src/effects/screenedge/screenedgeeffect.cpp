@@ -8,8 +8,10 @@
 */
 #include "screenedgeeffect.h"
 // KWin
+#if QT_CONFIG(opengl)
 #include <kwinglutils.h>
 #include <kwingltexture.h>
+#endif
 // KDE
 #include <Plasma/Svg>
 // Qt
@@ -84,6 +86,7 @@ void ScreenEdgeEffect::paintScreen(int mask, const QRegion &region, ScreenPaintD
             continue;
         }
         if (effects->isOpenGLCompositing()) {
+#if QT_CONFIG(opengl)
             GLTexture *texture = (*it)->texture.data();
             glEnable(GL_BLEND);
             glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
@@ -97,6 +100,9 @@ void ScreenEdgeEffect::paintScreen(int mask, const QRegion &region, ScreenPaintD
             texture->render(infiniteRegion(), (*it)->geometry);
             texture->unbind();
             glDisable(GL_BLEND);
+#else
+            Q_UNREACHABLE();
+#endif
         } else if (effects->compositingType() == QPainterCompositing) {
             QImage tmp((*it)->image->size(), QImage::Format_ARGB32_Premultiplied);
             tmp.fill(Qt::transparent);
@@ -145,7 +151,11 @@ void ScreenEdgeEffect::edgeApproaching(ElectricBorder border, qreal factor, cons
             effects->addRepaint((*it)->geometry);
             if (border == ElectricLeft || border == ElectricRight || border == ElectricTop || border == ElectricBottom) {
                 if (effects->isOpenGLCompositing()) {
+#if !QT_CONFIG(opengl)
+                    Q_UNREACHABLE();
+#else
                     (*it)->texture.reset(createEdgeGlow<GLTexture>(border, geometry.size()));
+#endif
                 } else if (effects->compositingType() == QPainterCompositing) {
                     (*it)->image.reset(createEdgeGlow<QImage>(border, geometry.size()));
                 }
@@ -175,6 +185,9 @@ Glow *ScreenEdgeEffect::createGlow(ElectricBorder border, qreal factor, const QR
 
     // render the glow image
     if (effects->isOpenGLCompositing()) {
+#if !QT_CONFIG(opengl)
+        Q_UNREACHABLE();
+#else
         effects->makeOpenGLContextCurrent();
         if (border == ElectricTopLeft || border == ElectricTopRight || border == ElectricBottomRight || border == ElectricBottomLeft) {
             glow->texture.reset(createCornerGlow<GLTexture>(border));
@@ -188,6 +201,7 @@ Glow *ScreenEdgeEffect::createGlow(ElectricBorder border, qreal factor, const QR
             delete glow;
             return nullptr;
         }
+#endif
     } else if (effects->compositingType() == QPainterCompositing) {
         if (border == ElectricTopLeft || border == ElectricTopRight || border == ElectricBottomRight || border == ElectricBottomLeft) {
             glow->image.reset(createCornerGlow<QImage>(border));

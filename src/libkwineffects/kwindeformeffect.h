@@ -12,6 +12,9 @@ namespace KWin
 {
 
 class DeformEffectPrivate;
+#if !QT_CONFIG(opengl)
+// class DeformEffect;
+#else
 
 /**
  * The DeformEffect class is the base class for effects that paint deformed windows.
@@ -67,5 +70,6 @@ private:
 
     QScopedPointer<DeformEffectPrivate> d;
 };
+#endif
 
 } // namespace KWin

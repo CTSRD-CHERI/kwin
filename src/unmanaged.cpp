@@ -22,9 +22,11 @@
 
 #include <xcb/shape.h>
 
+#if HAVE_WAYLAND
 #include <KWaylandServer/surface_interface.h>
 
 using namespace KWaylandServer;
+#endif
 
 namespace KWin
 {
@@ -60,6 +62,7 @@ Unmanaged::~Unmanaged()
 
 void Unmanaged::associate()
 {
+#if HAVE_WAYLAND
     if (surface()->isMapped()) {
         initialize();
     } else {
@@ -67,6 +70,9 @@ void Unmanaged::associate()
         // the associated surface item has processed the new surface state.
         connect(surface(), &SurfaceInterface::mapped, this, &Unmanaged::initialize, Qt::QueuedConnection);
     }
+#else
+    initialize();
+#endif
 }
 
 void Unmanaged::initialize()

@@ -30,9 +30,13 @@
 #include "x11syncmanager.h"
 #include "xcbutils.h"
 
+#if QT_CONFIG(opengl)
 #include <kwingltexture.h>
+#endif
 
+#if HAVE_WAYLAND
 #include <KWaylandServer/surface_interface.h>
+#endif
 
 #include <KGlobalAccel>
 #include <KLocalizedString>
@@ -351,6 +355,7 @@ void Compositor::startupWithWorkspace()
         client->updateShadow();
     }
 
+#if HAVE_WAYLAND
     if (auto *server = waylandServer()) {
         const auto clients = server->clients();
         for (AbstractClient *c : clients) {
@@ -358,6 +363,7 @@ void Compositor::startupWithWorkspace()
             c->updateShadow();
         }
     }
+#endif
 
     Q_EMIT compositingToggled(true);
 
@@ -454,6 +460,7 @@ void Compositor::stop()
         }
     }
 
+#if HAVE_WAYLAND
     if (waylandServer()) {
         for (AbstractClient *c : waylandServer()->clients()) {
             m_scene->removeToplevel(c);
@@ -462,6 +469,7 @@ void Compositor::stop()
             c->finishCompositing();
         }
     }
+#endif
 
     while (!m_renderLoops.isEmpty()) {
         unregisterRenderLoop(m_renderLoops.firstKey());
@@ -607,11 +615,13 @@ void Compositor::composite(RenderLoop *renderLoop)
         if (!win->readyForPainting()) {
             windows.removeAll(win);
         }
+#if HAVE_WAYLAND
         if (waylandServer() && waylandServer()->isScreenLocked()) {
             if(!win->isLockScreen() && !win->isInputMethod()) {
                 windows.removeAll(win);
             }
         }
+#endif
     }
 
     const QRegion repaints = m_scene->repaints(screenId);
@@ -627,16 +637,20 @@ void Compositor::composite(RenderLoop *renderLoop)
             if (!window->readyForPainting()) {
                 continue;
             }
+#if HAVE_WAYLAND
             if (waylandServer()->isScreenLocked() &&
                     !(window->isLockScreen() || window->isInputMethod())) {
                 continue;
             }
+#endif
             if (!window->isOnScreen(screenId)) {
                 continue;
             }
+#if HAVE_WAYLAND
             if (auto surface = window->surface()) {
                 surface->frameRendered(frameTime.count());
             }
+#endif
         }
         if (!kwinApp()->platform()->isCursorHidden()) {
             Cursors::self()->currentCursor()->markAsRendered();

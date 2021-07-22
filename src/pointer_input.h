@@ -144,12 +144,18 @@ private:
     void updateToReset();
     void updatePosition(const QPointF &pos);
     void updateButton(uint32_t button, InputRedirection::PointerButtonState state);
+#if HAVE_WAYLAND
     void warpXcbOnSurfaceLeft(KWaylandServer::SurfaceInterface *surface);
+#endif
     QPointF applyPointerConfinement(const QPointF &pos) const;
     void disconnectConfinedPointerRegionConnection();
     void disconnectLockedPointerAboutToBeUnboundConnection();
     void disconnectPointerConstraintsConnection();
+#if HAVE_WAYLAND
     void breakPointerConstraints(KWaylandServer::SurfaceInterface *surface);
+#else
+    void breakPointerConstraints(KWaylandServer::SurfaceInterface *) {}
+#endif
     CursorImage *m_cursor;
     bool m_supportsWarping;
     QPointF m_pos;
@@ -167,6 +173,7 @@ private:
     bool m_enableConstraints = true;
 };
 
+#if HAVE_WAYLAND
 class WaylandCursorImage : public QObject
 {
     Q_OBJECT
@@ -258,6 +265,7 @@ private:
         WaylandCursorImage::Image cursor;
     } m_serverCursor;
 };
+#endif
 
 /**
  * @brief Implementation using the InputRedirection framework to get pointer positions.

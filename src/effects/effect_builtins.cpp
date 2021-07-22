@@ -7,22 +7,24 @@
     SPDX-License-Identifier: GPL-2.0-or-later
 */
 #include "effect_builtins.h"
+#include <QOpenGLContext>
 #ifdef EFFECT_BUILTINS
 // common effects
+#if QT_CONFIG(opengl)
 #include "backgroundcontrast/contrast.h"
 #include "blur/blur.h"
 #include "colorpicker/colorpicker.h"
+#endif
 #include "kscreen/kscreen.h"
 #include "presentwindows/presentwindows.h"
 #include "screenedge/screenedgeeffect.h"
 #include "screenshot/screenshot.h"
+#if HAVE_WAYLAND
 #include "slidingpopups/slidingpopups.h"
+#endif
 // Common effects only relevant to desktop
-#include "desktopgrid/desktopgrid.h"
 #include "diminactive/diminactive.h"
-#include "fallapart/fallapart.h"
 #include "highlightwindow/highlightwindow.h"
-#include "magiclamp/magiclamp.h"
 #include "resize/resize.h"
 #include "showfps/showfps.h"
 #include "showpaint/showpaint.h"
@@ -33,9 +35,13 @@
 #include "windowgeometry/windowgeometry.h"
 #include "zoom/zoom.h"
 // OpenGL-specific effects for desktop
+#if QT_CONFIG(opengl)
+#include "desktopgrid/desktopgrid.h"
+#include "fallapart/fallapart.h"
 #include "glide/glide.h"
 #include "invert/invert.h"
 #include "lookingglass/lookingglass.h"
+#include "magiclamp/magiclamp.h"
 #include "magnifier/magnifier.h"
 #include "mouseclick/mouseclick.h"
 #include "mousemark/mousemark.h"
@@ -44,6 +50,7 @@
 #include "startupfeedback/startupfeedback.h"
 #include "trackmouse/trackmouse.h"
 #include "wobblywindows/wobblywindows.h"
+#endif
 #endif
 
 #include <KLocalizedString>
@@ -84,6 +91,7 @@ static const QVector<EffectData> &effectData()
         nullptr,
         QString()
     }, {
+#if QT_CONFIG(opengl)
         QStringLiteral("blur"),
         i18ndc("kwin_effects", "Name of a KWin Effect", "Blur"),
         i18ndc("kwin_effects", "Comment describing the KWin Effect", "Blurs the background behind semi-transparent windows"),
@@ -147,6 +155,7 @@ EFFECT_FALLBACK
 #endif
 EFFECT_FALLBACK
         QStringLiteral("kwin_desktopgrid_config")
+#endif
     }, {
         QStringLiteral("diminactive"),
         i18ndc("kwin_effects", "Name of a KWin Effect", "Dim Inactive"),
@@ -164,6 +173,7 @@ EFFECT_FALLBACK
 EFFECT_FALLBACK
         QStringLiteral("kwin_diminactive_config")
     }, {
+#if QT_CONFIG(opengl)
         QStringLiteral("fallapart"),
         i18ndc("kwin_effects", "Name of a KWin Effect", "Fall Apart"),
         i18ndc("kwin_effects", "Comment describing the KWin Effect", "Closed windows fall into pieces"),
@@ -403,6 +413,7 @@ EFFECT_FALLBACK
 #endif
 EFFECT_FALLBACK
         QString()
+#endif
     }, {
         QStringLiteral("showfps"),
         i18ndc("kwin_effects", "Name of a KWin Effect", "Show FPS"),
@@ -467,6 +478,7 @@ EFFECT_FALLBACK
 #endif
 EFFECT_FALLBACK
         QString()
+#if QT_CONFIG(opengl)
     }, {
         QStringLiteral("slidingpopups"),
         i18ndc("kwin_effects", "Name of a KWin Effect", "Sliding popups"),
@@ -515,6 +527,7 @@ EFFECT_FALLBACK
 #endif
 EFFECT_FALLBACK
         QString()
+#endif
     }, {
         QStringLiteral("thumbnailaside"),
         i18ndc("kwin_effects", "Name of a KWin Effect", "Thumbnail Aside"),
@@ -547,6 +560,7 @@ EFFECT_FALLBACK
 #endif
 EFFECT_FALLBACK
         QString()
+#if QT_CONFIG(opengl)
     }, {
         QStringLiteral("trackmouse"),
         i18ndc("kwin_effects", "Name of a KWin Effect", "Track Mouse"),
@@ -563,6 +577,7 @@ EFFECT_FALLBACK
 #endif
 EFFECT_FALLBACK
         QStringLiteral("kwin_trackmouse_config")
+#endif
     }, {
         QStringLiteral("windowgeometry"),
         i18ndc("kwin_effects", "Name of a KWin Effect", "Window Geometry"),
@@ -579,6 +594,7 @@ EFFECT_FALLBACK
 #endif
 EFFECT_FALLBACK
         QStringLiteral("kwin_windowgeometry_config")
+#if QT_CONFIG(opengl)
     }, {
         QStringLiteral("wobblywindows"),
         i18ndc("kwin_effects", "Name of a KWin Effect", "Wobbly Windows"),
@@ -595,6 +611,7 @@ EFFECT_FALLBACK
 #endif
 EFFECT_FALLBACK
         QStringLiteral("kwin_wobblywindows_config")
+#endif
     }, {
         QStringLiteral("zoom"),
         i18ndc("kwin_effects", "Name of a KWin Effect", "Zoom"),

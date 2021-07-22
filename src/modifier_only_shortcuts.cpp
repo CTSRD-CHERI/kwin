@@ -53,7 +53,11 @@ void ModifierOnlyShortcuts::keyEvent(KeyEvent *event)
             if (m_modifier != Qt::NoModifier) {
                 const auto list = options->modifierOnlyDBusShortcut(m_modifier);
                 if (list.size() >= 4) {
+#if HAVE_WAYLAND
                     if (!waylandServer() || !waylandServer()->isKeyboardShortcutsInhibited()) {
+#else
+                    if (true) {
+#endif
                         auto call = QDBusMessage::createMethodCall(list.at(0), list.at(1), list.at(2), list.at(3));
                         QVariantList args;
                         for (int i = 4; i < list.size(); ++i) {

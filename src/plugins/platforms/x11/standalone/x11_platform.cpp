@@ -117,6 +117,7 @@ X11StandalonePlatform::X11StandalonePlatform(QObject *parent)
 
 X11StandalonePlatform::~X11StandalonePlatform()
 {
+#if QT_CONFIG(opengl)
     if (m_openGLFreezeProtectionThread) {
         m_openGLFreezeProtectionThread->quit();
         m_openGLFreezeProtectionThread->wait();
@@ -125,6 +126,7 @@ X11StandalonePlatform::~X11StandalonePlatform()
     if (sceneEglDisplay() != EGL_NO_DISPLAY) {
         eglTerminate(sceneEglDisplay());
     }
+#endif
     if (isReady()) {
         XRenderUtils::cleanup();
     }
@@ -150,6 +152,7 @@ Session *X11StandalonePlatform::session() const
     return m_session;
 }
 
+#if QT_CONFIG(opengl)
 OpenGLBackend *X11StandalonePlatform::createOpenGLBackend()
 {
     switch (options->glPlatformInterface()) {
@@ -170,6 +173,7 @@ OpenGLBackend *X11StandalonePlatform::createOpenGLBackend()
         return nullptr;
     }
 }
+#endif
 
 Edge *X11StandalonePlatform::createScreenEdge(ScreenEdges *edges)
 {
@@ -245,11 +249,13 @@ bool X11StandalonePlatform::compositingPossible() const
     }
     if (hasGlx())
         return true;
+#if QT_CONFIG(opengl)
     if (QOpenGLContext::openGLModuleType() == QOpenGLContext::LibGLES) {
         return true;
     } else if (qstrcmp(qgetenv("KWIN_COMPOSE"), "O2ES") == 0) {
         return true;
     }
+#endif
     qCDebug(KWIN_X11STANDALONE) << "No OpenGL support";
     return false;
 }
@@ -259,6 +265,7 @@ bool X11StandalonePlatform::hasGlx()
     return Xcb::Extensions::self()->hasGlx();
 }
 
+#if QT_CONFIG(opengl)
 void X11StandalonePlatform::createOpenGLSafePoint(OpenGLSafePoint safePoint)
 {
     const QString unsafeKey(QLatin1String("OpenGLIsUnsafe") + (kwinApp()->isX11MultiHead() ? QString::number(kwinApp()->x11ScreenNumber()) : QString()));
@@ -313,6 +320,7 @@ void X11StandalonePlatform::createOpenGLSafePoint(OpenGLSafePoint safePoint)
         break;
     }
 }
+#endif
 
 PlatformCursorImage X11StandalonePlatform::cursorImage() const
 {

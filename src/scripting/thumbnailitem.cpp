@@ -15,8 +15,10 @@
 #include "scripting_logging.h"
 #include "workspace.h"
 
+#if QT_CONFIG(opengl)
 #include <kwingltexture.h>
 #include <kwinglutils.h>
+#endif
 
 #include <QSGImageNode>
 #include <QRunnable>
@@ -50,6 +52,7 @@ QSGTexture *ThumbnailTextureProvider::texture() const
     return m_texture.data();
 }
 
+#if QT_CONFIG(opengl)
 void ThumbnailTextureProvider::setTexture(const QSharedPointer<GLTexture> &nativeTexture)
 {
     if (m_nativeTexture != nativeTexture) {
@@ -67,6 +70,7 @@ void ThumbnailTextureProvider::setTexture(const QSharedPointer<GLTexture> &nativ
     // The textureChanged signal must be emitted also if only texture data changes.
     Q_EMIT textureChanged();
 }
+#endif
 
 void ThumbnailTextureProvider::setTexture(QSGTexture *texture)
 {
@@ -150,7 +154,9 @@ void ThumbnailItemBase::handleCompositingToggled()
     }
     Scene *scene = Compositor::self()->scene();
     if (scene && scene->compositingType() == OpenGLCompositing) {
+#if QT_CONFIG(opengl)
         connect(scene, &Scene::frameRendered, this, &ThumbnailItemBase::updateOffscreenTexture);
+#endif
     }
 }
 
@@ -173,6 +179,7 @@ void ThumbnailItemBase::destroyOffscreenTexture()
     if (!Compositor::self()) {
         return;
     }
+#if QT_CONFIG(opengl)
     Scene *scene = Compositor::self()->scene();
     if (!scene || scene->compositingType() != OpenGLCompositing) {
         return;
@@ -189,6 +196,7 @@ void ThumbnailItemBase::destroyOffscreenTexture()
         }
         scene->doneOpenGLContextCurrent();
     }
+#endif
 }
 
 QSGNode *ThumbnailItemBase::updatePaintNode(QSGNode *oldNode, QQuickItem::UpdatePaintNodeData *)
@@ -197,19 +205,23 @@ QSGNode *ThumbnailItemBase::updatePaintNode(QSGNode *oldNode, QQuickItem::Update
         return oldNode;
     }
 
+#if QT_CONFIG(opengl)
     // Wait for rendering commands to the offscreen texture complete if there are any.
     if (m_acquireFence) {
         glClientWaitSync(m_acquireFence, GL_SYNC_FLUSH_COMMANDS_BIT, 5000);
         glDeleteSync(m_acquireFence);
         m_acquireFence = 0;
     }
+#endif
 
     if (!m_provider) {
         m_provider = new ThumbnailTextureProvider(window());
     }
 
     if (m_offscreenTexture) {
+#if QT_CONFIG(opengl)
         m_provider->setTexture(m_offscreenTexture);
+#endif
     } else {
         const QImage placeholderImage = fallbackImage();
         m_provider->setTexture(window()->createTextureFromImage(placeholderImage));
@@ -222,9 +234,13 @@ QSGNode *ThumbnailItemBase::updatePaintNode(QSGNode *oldNode, QQuickItem::Update
     }
     node->setTexture(m_provider->texture());
 
+#if QT_CONFIG(opengl)
     if (m_offscreenTexture && m_offscreenTexture->isYInverted()) {
         node->setTextureCoordinatesTransform(QSGImageNode::MirrorVertically);
     } else {
+#else
+    if (true) {
+#endif
         node->setTextureCoordinatesTransform(QSGImageNode::NoTransform);
     }
 
@@ -324,6 +340,7 @@ void WindowThumbnailItem::invalidateOffscreenTexture()
     update();
 }
 
+#if QT_CONFIG(opengl)
 void WindowThumbnailItem::updateOffscreenTexture()
 {
     if (m_acquireFence || !m_dirty || !m_client) {
@@ -376,6 +393,7 @@ void WindowThumbnailItem::updateOffscreenTexture()
     // We know that the texture has changed, so schedule an item update.
     update();
 }
+#endif
 
 DesktopThumbnailItem::DesktopThumbnailItem(QQuickItem *parent)
     : ThumbnailItemBase(parent)
@@ -407,6 +425,7 @@ void DesktopThumbnailItem::invalidateOffscreenTexture()
     update();
 }
 
+#if QT_CONFIG(opengl)
 void DesktopThumbnailItem::updateOffscreenTexture()
 {
     if (m_acquireFence) {
@@ -456,5 +475,6 @@ void DesktopThumbnailItem::updateOffscreenTexture()
     // We know that the texture has changed, so schedule an item update.
     update();
 }
+#endif
 
 } // namespace KWin

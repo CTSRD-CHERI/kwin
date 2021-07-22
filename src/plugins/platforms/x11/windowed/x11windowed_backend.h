@@ -59,7 +59,9 @@ public:
         return m_hasXInput;
     }
 
+#if QT_CONFIG(opengl)
     OpenGLBackend *createOpenGLBackend() override;
+#endif
     QPainterBackend* createQPainterBackend() override;
     void warpPointer(const QPointF &globalPos) override;
 

@@ -25,7 +25,9 @@
 #include <KGlobalAccel>
 #include <KLocalizedString>
 
+#if QT_CONFIG(opengl)
 #include <kwinglutils.h>
+#endif
 
 namespace KWin
 {
@@ -163,7 +165,9 @@ void ZoomEffect::showCursor()
         disconnect(effects, &EffectsHandler::cursorShapeChanged, this, &ZoomEffect::recreateTexture);
         // show the previously hidden mouse-pointer again and free the loaded texture/picture.
         effects->showCursor();
+#if QT_CONFIG(opengl)
         texture.reset();
+#endif
         isMouseHidden = false;
     }
 }
@@ -177,7 +181,11 @@ void ZoomEffect::hideCursor()
         recreateTexture();
         bool shouldHide = false;
         if (effects->isOpenGLCompositing()) {
+#if !QT_CONFIG(opengl)
+            Q_UNREACHABLE();
+#else
             shouldHide = !texture.isNull();
+#endif
         }
         if (shouldHide) {
             effects->hideCursor();
@@ -196,8 +204,12 @@ void ZoomEffect::recreateTexture()
         imageHeight = cursor.image().height();
         cursorHotSpot = cursor.hotSpot();
         if (effects->isOpenGLCompositing()) {
+#if !QT_CONFIG(opengl)
+            Q_UNREACHABLE();
+#else
             texture.reset(new GLTexture(cursor.image()));
             texture->setWrapMode(GL_CLAMP_TO_EDGE);
+#endif
         }
     }
     else {
@@ -337,6 +349,7 @@ void ZoomEffect::paintScreen(int mask, const QRegion &region, ScreenPaintData& d
         const QPoint p = effects->cursorPos() - cursorHotSpot;
         QRect rect(p.x() * zoom + data.xTranslation(), p.y() * zoom + data.yTranslation(), w, h);
 
+#if QT_CONFIG(opengl)
         if (texture) {
             texture->bind();
             glEnable(GL_BLEND);
@@ -350,6 +363,7 @@ void ZoomEffect::paintScreen(int mask, const QRegion &region, ScreenPaintData& d
             texture->unbind();
             glDisable(GL_BLEND);
         }
+#endif
     }
 }
 

@@ -24,7 +24,9 @@
 #include "windowitem.h"
 #include "workspace.h"
 
+#if HAVE_WAYLAND
 #include <KWaylandServer/surface_interface.h>
+#endif
 
 #include <QDebug>
 
@@ -406,7 +408,11 @@ qreal Toplevel::screenScale() const
 
 qreal Toplevel::bufferScale() const
 {
+#if HAVE_WAYLAND
     return surface() ? surface()->bufferScale() : 1;
+#else
+    return 1;
+#endif
 }
 
 bool Toplevel::isOnScreen(int screen) const
@@ -591,6 +597,7 @@ void Toplevel::setSkipCloseAnimation(bool set)
     Q_EMIT skipCloseAnimationChanged();
 }
 
+#if HAVE_WAYLAND
 void Toplevel::setSurface(KWaylandServer::SurfaceInterface *surface)
 {
     if (m_surface == surface) {
@@ -604,6 +611,7 @@ void Toplevel::setSurface(KWaylandServer::SurfaceInterface *surface)
     m_surfaceId = surface->id();
     Q_EMIT surfaceChanged();
 }
+#endif
 
 QByteArray Toplevel::windowRole() const
 {
@@ -628,7 +636,11 @@ void Toplevel::setDepth(int depth)
 QRegion Toplevel::inputShape() const
 {
     if (m_surface) {
+#if HAVE_WAYLAND
         return m_surface->input();
+#else
+        Q_UNREACHABLE();
+#endif
     } else {
         // TODO: maybe also for X11?
         return QRegion();
@@ -644,9 +656,11 @@ QMatrix4x4 Toplevel::inputTransformation() const
 
 bool Toplevel::hitTest(const QPoint &point) const
 {
+#if HAVE_WAYLAND
     if (m_surface && m_surface->isMapped()) {
         return m_surface->inputSurfaceAt(mapToLocal(point));
     }
+#endif
     return inputGeometry().contains(point);
 }
 

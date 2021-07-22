@@ -25,8 +25,10 @@
 #include <QCoreApplication>
 #include <QSocketNotifier>
 // kwayland
+#if HAVE_WAYLAND
 #include <KWaylandServer/display.h>
 #include <KWaylandServer/seat_interface.h>
+#endif
 // xcb
 #include <xcb/xcb_keysyms.h>
 // X11
@@ -53,9 +55,11 @@ X11WindowedBackend::X11WindowedBackend(QObject *parent)
 
 X11WindowedBackend::~X11WindowedBackend()
 {
+#if QT_CONFIG(opengl)
     if (sceneEglDisplay() != EGL_NO_DISPLAY) {
         eglTerminate(sceneEglDisplay());
     }
+#endif
     if (m_connection) {
         if (m_keySymbols) {
             xcb_key_symbols_free(m_keySymbols);

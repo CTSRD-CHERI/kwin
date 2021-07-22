@@ -1,2 +1,4 @@
 add_subdirectory(qpainter)
-add_subdirectory(opengl)
+if (KWIN_BUILD_WAYLAND)
+  add_subdirectory(opengl)
+endif()

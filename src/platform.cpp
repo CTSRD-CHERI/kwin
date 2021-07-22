@@ -22,8 +22,10 @@
 #include "screenedge.h"
 #include "wayland_server.h"
 
+#if HAVE_WAYLAND
 #include <KWaylandServer/outputconfiguration_interface.h>
 #include <KWaylandServer/outputchangeset.h>
+#endif
 
 #include <QX11Info>
 
@@ -34,7 +36,9 @@ namespace KWin
 
 Platform::Platform(QObject *parent)
     : QObject(parent)
+#if QT_CONFIG(opengl)
     , m_eglDisplay(EGL_NO_DISPLAY)
+#endif
 {
     setSoftwareCursorForced(false);
     connect(Cursors::self(), &Cursors::currentCursorRendered, this, &Platform::cursorRendered);
@@ -74,10 +78,12 @@ void Platform::doShowCursor()
 {
 }
 
+#if QT_CONFIG(opengl)
 OpenGLBackend *Platform::createOpenGLBackend()
 {
     return nullptr;
 }
+#endif
 
 QPainterBackend *Platform::createQPainterBackend()
 {
@@ -94,6 +100,7 @@ void Platform::createPlatformCursor(QObject *parent)
     new InputRedirectionCursor(parent);
 }
 
+#if HAVE_WAYLAND
 void Platform::requestOutputsChange(KWaylandServer::OutputConfigurationInterface *config)
 {
     if (!m_supportsOutputChanges) {
@@ -151,6 +158,7 @@ void Platform::requestOutputsChange(KWaylandServer::OutputConfigurationInterface
     Q_EMIT screens()->changed();
     config->setApplied();
 }
+#endif
 
 AbstractOutput *Platform::findOutput(int screenId) const
 {
@@ -484,6 +492,7 @@ bool Platform::supportsNativeFence() const
     return false;
 }
 
+#if QT_CONFIG(opengl)
 EGLDisplay KWin::Platform::sceneEglDisplay() const
 {
     return m_eglDisplay;
@@ -493,6 +502,7 @@ void Platform::setSceneEglDisplay(EGLDisplay display)
 {
     m_eglDisplay = display;
 }
+#endif
 
 QSize Platform::screenSize() const
 {
@@ -608,6 +618,7 @@ QString Platform::supportInformation() const
     return QStringLiteral("Name: %1\n").arg(metaObject()->className());
 }
 
+#if QT_CONFIG(opengl)
 EGLContext Platform::sceneEglGlobalShareContext() const
 {
     return m_globalShareContext;
@@ -617,5 +628,6 @@ void Platform::setSceneEglGlobalShareContext(EGLContext context)
 {
     m_globalShareContext = context;
 }
+#endif
 
 }

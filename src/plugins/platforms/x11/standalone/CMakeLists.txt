@@ -2,7 +2,6 @@ set(X11PLATFORM_SOURCES
     edge.cpp
     effects_mouse_interception_x11_filter.cpp
     effects_x11.cpp
-    eglbackend.cpp
     logging.cpp
     non_composited_outline.cpp
     overlaywindow_x11.cpp
@@ -17,12 +16,16 @@ set(X11PLATFORM_SOURCES
 
 add_library(KWinX11Platform MODULE ${X11PLATFORM_SOURCES})
 set_target_properties(KWinX11Platform PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/org.kde.kwin.platforms/")
-target_link_libraries(KWinX11Platform eglx11common kwin kwinxrenderutils SceneOpenGLBackend VsyncSupport Qt::X11Extras XCB::CURSOR KF5::Crash X11::X11)
+target_link_libraries(KWinX11Platform eglx11common kwin kwinxrenderutils VsyncSupport Qt::X11Extras XCB::CURSOR KF5::Crash X11::X11)
 if (X11_Xi_FOUND)
     target_sources(KWinX11Platform PRIVATE xinputintegration.cpp)
     target_link_libraries(KWinX11Platform X11::Xi)
 endif()
 
+if(KWIN_BUILD_OPENGL)
+    target_link_libraries(KWinX11Platform eglx11common SceneOpenGLBackend)
+    target_sources(KWinX11Platform PRIVATE eglbackend.cpp)
+endif()
 if (HAVE_EPOXY_GLX)
     target_sources(KWinX11Platform PRIVATE
         glx_context_attribute_builder.cpp

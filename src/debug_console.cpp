@@ -14,23 +14,29 @@
 #include "main.h"
 #include "scene.h"
 #include "unmanaged.h"
+#if HAVE_WAYLAND
 #include "waylandclient.h"
+#endif
 #include "workspace.h"
 #include "keyboard_input.h"
 #include "input_event.h"
 #include "subsurfacemonitor.h"
 #include "libinput/connection.h"
 #include "libinput/device.h"
+#if QT_CONFIG(opengl)
 #include <kwinglplatform.h>
 #include <kwinglutils.h>
+#endif
 
 #include "ui_debug_console.h"
 
 // KWayland
+#if HAVE_WAYLAND
 #include <KWaylandServer/buffer_interface.h>
 #include <KWaylandServer/clientconnection.h>
 #include <KWaylandServer/subcompositor_interface.h>
 #include <KWaylandServer/surface_interface.h>
+#endif
 // frameworks
 #include <KLocalizedString>
 #include <NETWM>
@@ -560,10 +566,14 @@ DebugConsole::DebugConsole()
     m_ui->setupUi(this);
     m_ui->windowsView->setItemDelegate(new DebugConsoleDelegate(this));
     m_ui->windowsView->setModel(new DebugConsoleModel(this));
+#if HAVE_WAYLAND
     m_ui->surfacesView->setModel(new SurfaceTreeModel(this));
+#endif
     if (kwinApp()->usesLibinput()) {
+#if HAVE_LIBINPUT
         m_ui->inputDevicesView->setModel(new InputDeviceModel(this));
         m_ui->inputDevicesView->setItemDelegate(new DebugConsoleDelegate(this));
+#endif
     }
     m_ui->quitButton->setIcon(QIcon::fromTheme(QStringLiteral("application-exit")));
     m_ui->tabWidget->setTabIcon(0, QIcon::fromTheme(QStringLiteral("view-list-tree")));
@@ -607,6 +617,7 @@ void DebugConsole::initGLTab()
         m_ui->glInfoScrollArea->setVisible(false);
         return;
     }
+#if QT_CONFIG(opengl)
     GLPlatform *gl = GLPlatform::instance();
     m_ui->noOpenGLLabel->setVisible(false);
     m_ui->glInfoScrollArea->setVisible(true);
@@ -630,6 +641,7 @@ void DebugConsole::initGLTab()
 
     m_ui->platformExtensionsLabel->setText(extensionsString(Compositor::self()->scene()->openGLPlatformInterfaceExtensions()));
     m_ui->openGLExtensionsLabel->setText(extensionsString(openGLExtensions()));
+#endif
 }
 
 template <typename T>
@@ -720,6 +732,7 @@ QString DebugConsoleDelegate::displayText(const QVariant &value, const QLocale &
         return QStringLiteral("%1,%2 %3x%4").arg(r.x()).arg(r.y()).arg(r.width()).arg(r.height());
     }
     default:
+#if HAVE_WAYLAND
         if (value.userType() == qMetaTypeId<KWaylandServer::SurfaceInterface*>()) {
             if (auto s = value.value<KWaylandServer::SurfaceInterface*>()) {
                 return QStringLiteral("KWaylandServer::SurfaceInterface(0x%1)").arg(qulonglong(s), 0, 16);
@@ -727,6 +740,7 @@ QString DebugConsoleDelegate::displayText(const QVariant &value, const QLocale &
                 return QStringLiteral("nullptr");
             }
         }
+#endif
         if (value.userType() == qMetaTypeId<Qt::MouseButtons>()) {
             const auto buttons = value.value<Qt::MouseButtons>();
             if (buttons == Qt::NoButton) {
@@ -905,11 +919,13 @@ void DebugConsoleModel::handleClientAdded(AbstractClient *client)
         return;
     }
 
+#if HAVE_WAYLAND
     WaylandClient *waylandClient = qobject_cast<WaylandClient *>(client);
     if (waylandClient) {
         add(s_waylandClientId - 1, m_waylandClients, waylandClient);
         return;
     }
+#endif
 }
 
 void DebugConsoleModel::handleClientRemoved(AbstractClient *client)
@@ -920,11 +936,13 @@ void DebugConsoleModel::handleClientRemoved(AbstractClient *client)
         return;
     }
 
+#if HAVE_WAYLAND
     WaylandClient *waylandClient = qobject_cast<WaylandClient *>(client);
     if (waylandClient) {
         remove(s_waylandClientId - 1, m_waylandClients, waylandClient);
         return;
     }
+#endif
 }
 
 DebugConsoleModel::~DebugConsoleModel() = default;
@@ -977,8 +995,10 @@ int DebugConsoleModel::rowCount(const QModelIndex &parent) const
         return propertyCount(parent, &DebugConsoleModel::x11Client);
     } else if (parent.internalId() < s_idDistance * (s_x11UnmanagedId + 1)) {
         return propertyCount(parent, &DebugConsoleModel::unmanaged);
+#if HAVE_WAYLAND
     } else if (parent.internalId() < s_idDistance * (s_waylandClientId + 1)) {
         return propertyCount(parent, &DebugConsoleModel::waylandClient);
+#endif
     } else if (parent.internalId() < s_idDistance * (s_workspaceInternalId + 1)) {
         return propertyCount(parent, &DebugConsoleModel::internalClient);
     }
@@ -1042,8 +1062,10 @@ QModelIndex DebugConsoleModel::index(int row, int column, const QModelIndex &par
         return indexForProperty(row, column, parent, &DebugConsoleModel::x11Client);
     } else if (parent.internalId() < s_idDistance * (s_x11UnmanagedId + 1)) {
         return indexForProperty(row, column, parent, &DebugConsoleModel::unmanaged);
+#if HAVE_WAYLAND
     } else if (parent.internalId() < s_idDistance * (s_waylandClientId + 1)) {
         return indexForProperty(row, column, parent, &DebugConsoleModel::waylandClient);
+#endif
     } else if (parent.internalId() < s_idDistance * (s_workspaceInternalId + 1)) {
         return indexForProperty(row, column, parent, &DebugConsoleModel::internalClient);
     }
@@ -1182,9 +1204,12 @@ QVariant DebugConsoleModel::data(const QModelIndex &index, int role) const
         if (index.column() >= 2 || role != Qt::DisplayRole) {
             return QVariant();
         }
+#if HAVE_WAYLAND
         if (AbstractClient *c = waylandClient(index)) {
             return propertyData(c, index, role);
-        } else if (InternalClient *c = internalClient(index)) {
+        } else
+#endif
+        if (InternalClient *c = internalClient(index)) {
             return propertyData(c, index, role);
         } else if (X11Client *c = x11Client(index)) {
             return propertyData(c, index, role);
@@ -1214,8 +1239,10 @@ QVariant DebugConsoleModel::data(const QModelIndex &index, int role) const
             }
             break;
         }
+#if HAVE_WAYLAND
         case s_waylandClientId:
             return clientData<WaylandClient>(index, role, m_waylandClients, generic);
+#endif
         case s_workspaceInternalId:
             return clientData<InternalClient>(index, role, m_internalClients, generic);
         default:
@@ -1236,10 +1263,12 @@ static T *clientForIndex(const QModelIndex &index, const QVector<T*> &clients, i
     return clients.at(row);
 }
 
+#if HAVE_WAYLAND
 WaylandClient *DebugConsoleModel::waylandClient(const QModelIndex &index) const
 {
     return clientForIndex(index, m_waylandClients, s_waylandClientId);
 }
+#endif
 
 InternalClient *DebugConsoleModel::internalClient(const QModelIndex &index) const
 {
@@ -1257,6 +1286,7 @@ Unmanaged *DebugConsoleModel::unmanaged(const QModelIndex &index) const
 }
 
 /////////////////////////////////////// SurfaceTreeModel
+#if HAVE_WAYLAND
 SurfaceTreeModel::SurfaceTreeModel(QObject *parent)
     : QAbstractItemModel(parent)
 {
@@ -1431,7 +1461,9 @@ QVariant SurfaceTreeModel::data(const QModelIndex &index, int role) const
     }
     return QVariant();
 }
+#endif // HAVE_WAYLAND
 
+#if HAVE_LIBINPUT
 InputDeviceModel::InputDeviceModel(QObject *parent)
     : QAbstractItemModel(parent)
     , m_devices(LibInput::Connection::self()->devices())
@@ -1563,5 +1595,7 @@ void InputDeviceModel::setupDeviceConnections(LibInput::Device *device)
         }
     );
 }
+
+#endif // HAVE_LIBINPUT
 
 }

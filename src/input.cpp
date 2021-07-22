@@ -26,8 +26,10 @@
 #include "tabbox/tabbox.h"
 #endif
 #include "internal_client.h"
+#if HAVE_WAYLAND
 #include "libinput/connection.h"
 #include "libinput/device.h"
+#endif
 #include "platform.h"
 #include "popup_input_filter.h"
 #include "screenedge.h"
@@ -39,6 +41,7 @@
 #include "cursor.h"
 #include <KDecoration2/Decoration>
 #include <KGlobalAccel>
+#if HAVE_WAYLAND
 #include <KWaylandServer/display.h>
 #include <KWaylandServer/fakeinput_interface.h>
 #include <KWaylandServer/relativepointer_v1_interface.h>
@@ -47,10 +50,13 @@
 #include <KWaylandServer/surface_interface.h>
 #include <KWaylandServer/tablet_v2_interface.h>
 #include <KWaylandServer/keyboard_interface.h>
+#endif
 #include <decorations/decoratedclient.h>
 
 //screenlocker
+#if KScreenLocker_FOUND
 #include <KScreenLocker/KsldApp>
+#endif
 // Qt
 #include <QKeyEvent>
 #include <qpa/qwindowsysteminterface.h>
@@ -60,6 +66,7 @@
 namespace KWin
 {
 
+#if HAVE_WAYLAND
 static KWaylandServer::PointerAxisSource kwinAxisSourceToKWaylandAxisSource(InputRedirection::PointerAxisSource source)
 {
     switch (source) {
@@ -76,6 +83,7 @@ static KWaylandServer::PointerAxisSource kwinAxisSourceToKWaylandAxisSource(Inpu
         return KWaylandServer::PointerAxisSource::Unknown;
     }
 }
+#endif
 
 InputEventFilter::InputEventFilter() = default;
 
@@ -228,6 +236,7 @@ bool InputEventFilter::tabletPadRingEvent(int number, int position, bool isFinge
     return false;
 }
 
+#if HAVE_WAYLAND
 void InputEventFilter::passToWaylandServer(QKeyEvent *event)
 {
     Q_ASSERT(waylandServer());
@@ -247,6 +256,7 @@ void InputEventFilter::passToWaylandServer(QKeyEvent *event)
         break;
     }
 }
+#endif
 
 class VirtualTerminalFilter : public InputEventFilter {
 public:
@@ -277,6 +287,7 @@ public:
     }
 };
 
+#if HAVE_WAYLAND
 class LockScreenFilter : public InputEventFilter {
 public:
     bool pointerEvent(QMouseEvent *event, quint32 nativeButton) override {
@@ -462,6 +473,7 @@ private:
         return surfaceAllowed(&KWaylandServer::SeatInterface::focusedTouchSurface);
     }
 };
+#endif
 
 class EffectsFilter : public InputEventFilter {
 public:
@@ -482,8 +494,10 @@ public:
         if (!effects || !static_cast< EffectsHandlerImpl* >(effects)->hasKeyboardGrab()) {
             return false;
         }
+#if HAVE_WAYLAND
         waylandServer()->seat()->setFocusedKeyboardSurface(nullptr);
         passToWaylandServer(event);
+#endif
         static_cast< EffectsHandlerImpl* >(effects)->grabbedKeyboardEvent(event);
         return true;
     }
@@ -628,8 +642,10 @@ public:
         if (!m_active) {
             return false;
         }
+#if HAVE_WAYLAND
         waylandServer()->seat()->setFocusedKeyboardSurface(nullptr);
         passToWaylandServer(event);
+#endif
 
         if (event->type() == QEvent::KeyPress) {
             // x11 variant does this on key press, so do the same
@@ -810,9 +826,11 @@ public:
                 return ret;
             }
         } else if (event->type() == QEvent::KeyPress) {
+#if HAVE_WAYLAND
             if (!waylandServer()->isKeyboardShortcutsInhibited()) {
                 return input()->shortcuts()->processKey(static_cast<KeyEvent*>(event)->modifiersRelevantForGlobalShortcuts(), event->key());
             }
+#endif
         }
         return false;
     }
@@ -840,7 +858,6 @@ public:
 private:
     QTimer* m_powerDown = nullptr;
 };
-
 
 namespace {
 
@@ -1005,13 +1022,16 @@ class InternalWindowEventFilter : public InputEventFilter {
                                 event->nativeModifiers(), event->text());
         internalEvent.setAccepted(false);
         if (QCoreApplication::sendEvent(found, &internalEvent)) {
+#if HAVE_WAYLAND
             waylandServer()->seat()->setFocusedKeyboardSurface(nullptr);
             passToWaylandServer(event);
+#endif
             return true;
         }
         return false;
     }
 
+#if HAVE_WAYLAND
     bool touchDown(qint32 id, const QPointF &pos, quint32 time) override {
         auto seat = waylandServer()->seat();
         if (seat->isTouchSequence()) {
@@ -1092,6 +1112,7 @@ class InternalWindowEventFilter : public InputEventFilter {
         input()->touch()->setInternalPressId(-1);
         return true;
     }
+#endif
 private:
     QSet<qint32> m_pressedIds;
     QPointF m_lastGlobalTouchPos;
@@ -1169,6 +1190,7 @@ public:
         }
         return true;
     }
+#if HAVE_WAYLAND
     bool touchDown(qint32 id, const QPointF &pos, quint32 time) override {
         auto seat = waylandServer()->seat();
         if (seat->isTouchSequence()) {
@@ -1199,6 +1221,7 @@ public:
         }
         return true;
     }
+#endif
     bool touchMotion(qint32 id, const QPointF &pos, quint32 time) override {
         Q_UNUSED(time)
         auto decoration = input()->touch()->decoration();
@@ -1308,6 +1331,7 @@ public:
     }
     bool touchDown(qint32 id, const QPointF &pos, quint32 time) override {
         Q_UNUSED(time)
+#if HAVE_WAYLAND
         // TODO: better check whether a touch sequence is in progress
         if (m_touchInProgress || waylandServer()->seat()->isTouchSequence()) {
             // cancel existing touch
@@ -1316,6 +1340,7 @@ public:
             m_id = 0;
             return false;
         }
+#endif
         if (ScreenEdges::self()->gestureRecognizer()->startSwipeGesture(pos) > 0) {
             m_touchInProgress = true;
             m_id = id;
@@ -1348,6 +1373,7 @@ private:
     QPointF m_lastPos;
 };
 
+#if HAVE_WAYLAND
 /**
  * This filter implements window actions. If the event should not be passed to the
  * current pointer window it will filter out the event
@@ -2083,6 +2109,8 @@ private:
     QTimer m_raiseTimer;
 };
 
+#endif // HAVE_WAYLAND
+
 KWIN_SINGLETON_FACTORY(InputRedirection)
 
 static const QString s_touchpadComponent = QStringLiteral("kcm_touchpad");
@@ -2145,6 +2173,7 @@ void InputRedirection::init()
 
 void InputRedirection::setupWorkspace()
 {
+#if HAVE_WAYLAND
     if (waylandServer()) {
         using namespace KWaylandServer;
         FakeInputInterface *fakeInput = new FakeInputInterface(waylandServer()->display(), this);
@@ -2259,17 +2288,23 @@ void InputRedirection::setupWorkspace()
         m_touch->init();
         m_tablet->init();
     }
+#endif
     setupTouchpadShortcuts();
     setupInputFilters();
 }
 
 void InputRedirection::setupInputFilters()
 {
+#if HAVE_WAYLAND
     const bool hasGlobalShortcutSupport = !waylandServer() || waylandServer()->hasGlobalShortcutSupport();
+#else
+    const bool hasGlobalShortcutSupport = true;
+#endif
     if ((kwinApp()->platform()->session()->capabilities() & Session::Capability::SwitchTerminal)
             && hasGlobalShortcutSupport) {
         installInputEventFilter(new VirtualTerminalFilter);
     }
+#if HAVE_WAYLAND
     if (waylandServer()) {
         installInputEventSpy(new TouchHideCursorSpy);
         if (hasGlobalShortcutSupport) {
@@ -2281,6 +2316,7 @@ void InputRedirection::setupInputFilters()
         m_windowSelector = new WindowSelectorFilter;
         installInputEventFilter(m_windowSelector);
     }
+#endif
     if (hasGlobalShortcutSupport) {
         installInputEventFilter(new ScreenEdgeInputFilter);
     }
@@ -2294,6 +2330,7 @@ void InputRedirection::setupInputFilters()
     }
     installInputEventFilter(new DecorationEventFilter);
     installInputEventFilter(new InternalWindowEventFilter);
+#if HAVE_WAYLAND
     if (waylandServer()) {
         installInputEventFilter(new WindowActionInputFilter);
         installInputEventFilter(new ForwardInputFilter);
@@ -2310,6 +2347,7 @@ void InputRedirection::setupInputFilters()
             installInputEventFilter(m_tabletSupport);
         }
     }
+#endif
 }
 
 void InputRedirection::handleInputConfigChanged(const KConfigGroup &group)
@@ -2322,6 +2360,9 @@ void InputRedirection::handleInputConfigChanged(const KConfigGroup &group)
 void InputRedirection::reconfigure()
 {
     if (Application::usesLibinput()) {
+#if !HAVE_LIBINPUT
+        Q_UNREACHABLE();
+#else
         auto inputConfig = m_inputConfigWatcher->config();
         const auto config = inputConfig->group(QStringLiteral("Keyboard"));
         const int delay = config.readEntry("RepeatDelay", 660);
@@ -2332,6 +2373,7 @@ void InputRedirection::reconfigure()
         const bool enabled = repeatMode == QLatin1String("accent") || repeatMode == QLatin1String("repeat");
 
         waylandServer()->seat()->keyboard()->setRepeatInfo(enabled ? rate : 0, delay);
+#endif
     }
 }
 
@@ -2340,6 +2382,9 @@ void InputRedirection::setupLibInput()
     if (!Application::usesLibinput()) {
         return;
     }
+#if !HAVE_LIBINPUT
+    Q_UNREACHABLE();
+#else
     if (m_libInput) {
         return;
     }
@@ -2467,6 +2512,7 @@ void InputRedirection::setupLibInput()
                 this, &InputRedirection::handleInputConfigChanged);
         reconfigure();
     }
+#endif
 }
 
 void InputRedirection::setupTouchpadShortcuts()
@@ -2474,6 +2520,9 @@ void InputRedirection::setupTouchpadShortcuts()
     if (!m_libInput) {
         return;
     }
+#if !HAVE_WAYLAND
+    Q_UNREACHABLE();
+#else
     QAction *touchpadToggleAction = new QAction(this);
     QAction *touchpadOnAction = new QAction(this);
     QAction *touchpadOffAction = new QAction(this);
@@ -2498,21 +2547,26 @@ void InputRedirection::setupTouchpadShortcuts()
     connect(touchpadToggleAction, &QAction::triggered, m_libInput, &LibInput::Connection::toggleTouchpads);
     connect(touchpadOnAction, &QAction::triggered, m_libInput, &LibInput::Connection::enableTouchpads);
     connect(touchpadOffAction, &QAction::triggered, m_libInput, &LibInput::Connection::disableTouchpads);
+#endif
 }
 
 bool InputRedirection::hasAlphaNumericKeyboard()
 {
+#if HAVE_WAYLAND
     if (m_libInput) {
         return m_libInput->hasAlphaNumericKeyboard();
     }
+#endif
     return true;
 }
 
 bool InputRedirection::hasTabletModeSwitch()
 {
+#if HAVE_WAYLAND
     if (m_libInput) {
         return m_libInput->hasTabletModeSwitch();
     }
+#endif
     return false;
 }
 
@@ -2521,6 +2575,9 @@ void InputRedirection::setupLibInputWithScreens()
     if (!screens() || !m_libInput) {
         return;
     }
+#if !HAVE_WAYLAND
+    Q_UNREACHABLE();
+#else
     m_libInput->setScreenSize(screens()->size());
     m_libInput->updateScreens();
     connect(screens(), &Screens::sizeChanged, this,
@@ -2529,6 +2586,7 @@ void InputRedirection::setupLibInputWithScreens()
         }
     );
     connect(screens(), &Screens::changed, m_libInput, &LibInput::Connection::updateScreens);
+#endif
 }
 
 void InputRedirection::processPointerMotion(const QPointF &pos, uint32_t time)
@@ -2606,7 +2664,11 @@ Toplevel *InputRedirection::findToplevel(const QPoint &pos)
     if (!Workspace::self()) {
         return nullptr;
     }
+#if HAVE_WAYLAND
     const bool isScreenLocked = waylandServer() && waylandServer()->isScreenLocked();
+#else
+    const bool isScreenLocked = false;
+#endif
     // TODO: check whether the unmanaged wants input events at all
     if (!isScreenLocked) {
         // if an effect overrides the cursor we don't have a window to focus
@@ -2628,7 +2690,11 @@ Toplevel *InputRedirection::findManagedToplevel(const QPoint &pos)
     if (!Workspace::self()) {
         return nullptr;
     }
+#if HAVE_WAYLAND
     const bool isScreenLocked = waylandServer() && waylandServer()->isScreenLocked();
+#else
+    const bool isScreenLocked = false;
+#endif
     const QList<Toplevel *> &stacking = Workspace::self()->stackingOrder();
     if (stacking.isEmpty()) {
         return nullptr;

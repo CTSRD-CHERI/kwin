@@ -66,6 +66,7 @@ private Q_SLOTS:
     void initialize();
 };
 
+#if HAVE_WAYLAND
 /**
  * The WindowItemWayland class represents a Wayland window.
  */
@@ -76,6 +77,7 @@ class KWIN_EXPORT WindowItemWayland : public WindowItem
 public:
     explicit WindowItemWayland(Scene::Window *window, Item *parent = nullptr);
 };
+#endif
 
 /**
  * The WindowItemInternal class represents a window created by the compositor, for

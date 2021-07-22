@@ -358,6 +358,7 @@ void InternalClient::popupDone()
     m_internalWindow->hide();
 }
 
+#if QT_CONFIG(opengl)
 void InternalClient::present(const QSharedPointer<QOpenGLFramebufferObject> fbo)
 {
     Q_ASSERT(m_internalImage.isNull());
@@ -376,6 +377,7 @@ void InternalClient::present(const QSharedPointer<QOpenGLFramebufferObject> fbo)
         performInteractiveMoveResize();
     }
 }
+#endif
 
 void InternalClient::present(const QImage &image, const QRegion &damage)
 {

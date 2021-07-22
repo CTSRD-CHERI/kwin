@@ -18,6 +18,10 @@
 
 namespace KWin
 {
+
+#if !QT_CONFIG(opengl)
+// class GLPlatform;
+#else
 // forward declare method
 void cleanupGL();
 
@@ -458,6 +462,7 @@ inline GLPlatform *GLPlatform::instance()
 
     return s_platform;
 }
+#endif
 
 } // namespace KWin
 

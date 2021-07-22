@@ -1057,7 +1057,9 @@ public:
     virtual double animationTimeFactor() const = 0;
 
     Q_SCRIPTABLE virtual KWin::EffectWindow* findWindow(WId id) const = 0;
+#if HAVE_WAYLAND
     Q_SCRIPTABLE virtual KWin::EffectWindow* findWindow(KWaylandServer::SurfaceInterface *surf) const = 0;
+#endif
     /**
      * Finds the EffectWindow for the internal window @p w.
      * If there is no such window @c null is returned.

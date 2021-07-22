@@ -299,10 +299,12 @@ void Workspace::init()
 
     Scripting::create(this);
 
+#if HAVE_WAYLAND
     if (auto server = waylandServer()) {
         connect(server, &WaylandServer::shellClientAdded, this, &Workspace::addShellClient);
         connect(server, &WaylandServer::shellClientRemoved, this, &Workspace::removeShellClient);
     }
+#endif
 
     // SELI TODO: This won't work with unreasonable focus policies,
     // and maybe in rare cases also if the selected client doesn't
@@ -502,12 +504,14 @@ Workspace::~Workspace()
 
     cleanupX11();
 
+#if HAVE_WAYLAND
     if (waylandServer()) {
         const QList<AbstractClient *> shellClients = waylandServer()->clients();
         for (AbstractClient *client : shellClients) {
             client->destroyClient();
         }
     }
+#endif
 
     // We need a shadow copy because clients get removed as we go through them.
     const QList<InternalClient *> internalClients = m_internalClients;
@@ -672,7 +676,11 @@ X11Client *Workspace::createClient(xcb_window_t w, bool is_mapped)
     if (kwinApp()->operationMode() == Application::OperationModeX11) {
         c = new X11Client();
     } else {
+#if !HAVE_WAYLAND
+        Q_UNREACHABLE();
+#else
         c = new XwaylandClient();
+#endif
     }
     setupClientConnections(c);
     if (X11Compositor *compositor = X11Compositor::self()) {
@@ -1644,6 +1652,9 @@ QString Workspace::supportInformation() const
         support.append(QStringLiteral("Compositing is active\n"));
         switch (effects->compositingType()) {
         case OpenGLCompositing: {
+#if !QT_CONFIG(opengl)
+            Q_UNREACHABLE();
+#else
             GLPlatform *platform = GLPlatform::instance();
             if (platform->isGLES()) {
                 support.append(QStringLiteral("Compositing Type: OpenGL ES 2.0\n"));
@@ -1722,6 +1733,7 @@ QString Workspace::supportInformation() const
             }
 
             support.append(QStringLiteral("OpenGL 2 Shaders are used\n"));
+#endif
             break;
         }
         case QPainterCompositing:

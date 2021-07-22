@@ -34,7 +34,9 @@ public:
     DecorationRenderer *createDecorationRenderer(Decoration::DecoratedClientImpl *impl) override;
     void screenGeometryChanged(const QSize &size) override;
     PlatformSurfaceTexture *createPlatformSurfaceTextureInternal(SurfacePixmapInternal *pixmap) override;
+#if HAVE_WAYLAND
     PlatformSurfaceTexture *createPlatformSurfaceTextureWayland(SurfacePixmapWayland *pixmap) override;
+#endif
 
     bool animationsSupported() const override {
         return false;

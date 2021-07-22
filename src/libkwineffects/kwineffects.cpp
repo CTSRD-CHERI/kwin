@@ -16,6 +16,7 @@
 #include <QVariant>
 #include <QTimeLine>
 #include <QFontMetrics>
+#include <QMatrix4x4>
 #include <QPainter>
 #include <QPixmap>
 #include <QtMath>
@@ -23,7 +24,7 @@
 #include <ksharedconfig.h>
 #include <kconfiggroup.h>
 
-#include <KWaylandServer/surface_interface.h>
+// #include <KWaylandServer/surface_interface.h>
 
 #if defined(__SSE2__)
 #  include <emmintrin.h>

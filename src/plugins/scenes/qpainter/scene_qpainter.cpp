@@ -333,10 +333,12 @@ PlatformSurfaceTexture *SceneQPainter::createPlatformSurfaceTextureInternal(Surf
     return m_backend->createPlatformSurfaceTextureInternal(pixmap);
 }
 
+#if HAVE_WAYLAND
 PlatformSurfaceTexture *SceneQPainter::createPlatformSurfaceTextureWayland(SurfacePixmapWayland *pixmap)
 {
     return m_backend->createPlatformSurfaceTextureWayland(pixmap);
 }
+#endif
 
 QPainterEffectFrame::QPainterEffectFrame(EffectFrameImpl *frame, SceneQPainter *scene)
     : Scene::EffectFrame(frame)

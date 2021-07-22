@@ -27,7 +27,9 @@ X11SyncObject::X11SyncObject()
     xcb_sync_create_fence(connection, kwinApp()->x11RootWindow(), m_fence, false);
     xcb_flush(connection);
 
+#if QT_CONFIG(opengl)
     m_sync = glImportSyncEXT(GL_SYNC_X11_FENCE_EXT, m_fence, 0);
+#endif
 }
 
 X11SyncObject::~X11SyncObject()
@@ -45,7 +47,9 @@ X11SyncObject::~X11SyncObject()
         xcb_flush(connection);
     }
     xcb_sync_destroy_fence(connection, m_fence);
+#if QT_CONFIG(opengl)
     glDeleteSync(m_sync);
+#endif
 
     if (m_state == Resetting) {
         xcb_discard_reply(connection, m_reset_cookie.sequence);
@@ -71,7 +75,9 @@ void X11SyncObject::wait()
         return;
     }
 
+#if QT_CONFIG(opengl)
     glWaitSync(m_sync, 0, GL_TIMEOUT_IGNORED);
+#endif
     m_state = Waiting;
 }
 
@@ -86,6 +92,7 @@ bool X11SyncObject::finish()
     //       window because it is fully occluded.
     Q_ASSERT(m_state == TriggerSent || m_state == Waiting);
 
+#if QT_CONFIG(opengl)
     // Check if the fence is signaled
     GLint value;
     glGetSynciv(m_sync, GL_SYNC_STATUS, 1, nullptr, &value);
@@ -106,6 +113,7 @@ bool X11SyncObject::finish()
             return false;
         }
     }
+#endif
 
     m_state = Done;
     return true;
@@ -146,7 +154,7 @@ X11SyncManager *X11SyncManager::create()
     if (scene->compositingType() != OpenGLCompositing) {
         return nullptr;
     }
-
+#if QT_CONFIG(opengl)
     GLPlatform *glPlatform = GLPlatform::instance();
     const bool haveSyncObjects = glPlatform->isGLES()
         ? hasGLVersion(3, 0)
@@ -162,6 +170,7 @@ X11SyncManager *X11SyncManager::create()
             qCDebug(KWIN_CORE) << "Explicit synchronization with the X command stream disabled by environment variable";
         }
     }
+#endif
     return nullptr;
 }
 

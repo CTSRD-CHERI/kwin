@@ -18,9 +18,13 @@
 // KDecoration
 #include <KDecoration2/Decoration>
 // KWayland
+#if HAVE_WAYLAND
 #include <KWaylandServer/seat_interface.h>
+#endif
 // screenlocker
+#if KScreenLocker_FOUND
 #include <KScreenLocker/KsldApp>
+#endif
 // Qt
 #include <QHoverEvent>
 #include <QWindow>
@@ -40,7 +44,7 @@ void TouchInputRedirection::init()
     Q_ASSERT(!inited());
     setInited(true);
     InputDeviceHandler::init();
-
+#if HAVE_WAYLAND
     if (waylandServer()->hasScreenLockerIntegration()) {
         connect(ScreenLocker::KSldApp::self(), &ScreenLocker::KSldApp::lockStateChanged, this,
             [this] {
@@ -50,8 +54,9 @@ void TouchInputRedirection::init()
             }
         );
     }
-    connect(workspace(), &QObject::destroyed, this, [this] { setInited(false); });
     connect(waylandServer(), &QObject::destroyed, this, [this] { setInited(false); });
+#endif
+    connect(workspace(), &QObject::destroyed, this, [this] { setInited(false); });
 }
 
 bool TouchInputRedirection::focusUpdatesBlocked()
@@ -63,9 +68,11 @@ bool TouchInputRedirection::focusUpdatesBlocked()
         return true;
     }
     m_windowUpdatedInCycle = true;
+#if HAVE_WAYLAND
     if (waylandServer()->seat()->isDragTouch()) {
         return true;
     }
+#endif
     if (m_activeTouchPoints.count() > 1) {
         // first touch defines focus
         return true;
@@ -94,6 +101,7 @@ void TouchInputRedirection::focusUpdate(Toplevel *focusOld, Toplevel *focusNow)
         workspace()->updateFocusMousePosition(m_lastPosition.toPoint());
     }
 
+#if HAVE_WAYLAND
     auto seat = waylandServer()->seat();
     if (!focusNow || !focusNow->surface() || decoration()) {
         // no new surface or internal window or on decoration -> cleanup
@@ -117,6 +125,7 @@ void TouchInputRedirection::focusUpdate(Toplevel *focusOld, Toplevel *focusNow)
             seat->setFocusedTouchSurfacePosition(-1 * focus()->inputTransformation().map(focus()->pos()) + focus()->pos());
         }
     );
+#endif
 }
 
 void TouchInputRedirection::cleanupInternalWindow(QWindow *old, QWindow *now)
@@ -197,16 +206,20 @@ void TouchInputRedirection::cancel()
     // the compositor will not receive any TOUCH_MOTION or TOUCH_UP events for that slot.
     if (!m_activeTouchPoints.isEmpty()) {
         m_activeTouchPoints.clear();
+#if HAVE_WAYLAND
         waylandServer()->seat()->notifyTouchCancel();
+#endif
     }
 }
 
 void TouchInputRedirection::frame()
 {
+#if HAVE_WAYLAND
     if (!inited() || !waylandServer()->seat()->hasTouch()) {
         return;
     }
     waylandServer()->seat()->notifyTouchFrame();
+#endif
 }
 
 }

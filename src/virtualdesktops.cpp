@@ -15,7 +15,9 @@
 #include <KLocalizedString>
 #include <NETWM>
 
+#if HAVE_WAYLAND
 #include <KWaylandServer/plasmavirtualdesktop_interface.h>
+#endif
 // Qt
 #include <QAction>
 #include <QUuid>
@@ -41,6 +43,7 @@ VirtualDesktop::~VirtualDesktop()
     Q_EMIT aboutToBeDestroyed();
 }
 
+#if HAVE_WAYLAND
 void VirtualDesktopManager::setVirtualDesktopManagement(KWaylandServer::PlasmaVirtualDesktopManagementInterface *management)
 {
     using namespace KWaylandServer;
@@ -114,6 +117,7 @@ void VirtualDesktopManager::setVirtualDesktopManagement(KWaylandServer::PlasmaVi
         }
     );
 }
+#endif
 
 void VirtualDesktop::setId(const QByteArray &id)
 {

@@ -11,8 +11,10 @@
 // frameworks
 #include <KConfigGroup>
 // KWayland
+#if HAVE_WAYLAND
 #include <KWaylandServer/keyboard_interface.h>
 #include <KWaylandServer/seat_interface.h>
+#endif
 // Qt
 #include <QTemporaryFile>
 #include <QKeyEvent>
@@ -288,14 +290,18 @@ void Xkb::createKeymapFile()
     if (currentKeymap.isEmpty()) {
         return;
     }
+#if HAVE_WAYLAND
     m_seat->keyboard()->setKeymap(currentKeymap);
+#endif
 }
 
 QByteArray Xkb::keymapContents() const
 {
+#if HAVE_WAYLAND
     if (!m_seat || !m_seat->keyboard()) {
         return {};
     }
+#endif
     // TODO: uninstall keymap on server?
     if (!m_keymap) {
         return {};
@@ -391,6 +397,7 @@ void Xkb::updateModifiers()
 
 void Xkb::forwardModifiers()
 {
+#if HAVE_WAYLAND
     if (!m_seat || !m_seat->keyboard()) {
         return;
     }
@@ -398,6 +405,7 @@ void Xkb::forwardModifiers()
                                     m_modifierState.latched,
                                     m_modifierState.locked,
                                     m_currentLayout);
+#endif
 }
 
 QString Xkb::layoutName(xkb_layout_index_t index) const
@@ -563,9 +571,11 @@ quint32 Xkb::numberOfLayouts() const
     return xkb_keymap_num_layouts(m_keymap);
 }
 
+#if HAVE_WAYLAND
 void Xkb::setSeat(KWaylandServer::SeatInterface *seat)
 {
     m_seat = QPointer<KWaylandServer::SeatInterface>(seat);
 }
+#endif
 
 }

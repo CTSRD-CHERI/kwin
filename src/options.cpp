@@ -610,6 +610,7 @@ void Options::setMoveMinimizedWindowsToEndOfTabBoxFocusChain(bool value)
 void Options::setGlPreferBufferSwap(char glPreferBufferSwap)
 {
     if (glPreferBufferSwap == 'a') {
+#if QT_CONFIG(opengl)
         // buffer copying is very fast with the nvidia blob
         // but due to restrictions in DRI2 *incredibly* slow for all MESA drivers
         // see https://www.x.org/releases/X11R7.7/doc/dri2proto/dri2proto.txt, item 2.5
@@ -617,6 +618,9 @@ void Options::setGlPreferBufferSwap(char glPreferBufferSwap)
             glPreferBufferSwap = CopyFrontBuffer;
         else if (GLPlatform::instance()->driver() != Driver_Unknown) // undetected, finally resolved when context is initialized
             glPreferBufferSwap = ExtendDamage;
+#else
+            glPreferBufferSwap = ExtendDamage;
+#endif
     }
     if (m_glPreferBufferSwap == (GlSwapStrategy)glPreferBufferSwap) {
         return;
@@ -656,6 +660,10 @@ void Options::setRenderTimeEstimator(RenderTimeEstimator estimator)
 void Options::setGlPlatformInterface(OpenGLPlatformInterface interface)
 {
     // check environment variable
+#if !QT_CONFIG(opengl)
+    qCDebug(KWIN_CORE) << "Forcing non-OpenGL native interface as Qt was built without OpenGL support.";
+    interface = NoOpenGLPlatformInterface;
+#else
     const QByteArray envOpenGLInterface(qgetenv("KWIN_OPENGL_INTERFACE"));
     if (!envOpenGLInterface.isEmpty()) {
         if (qstrcmp(envOpenGLInterface, "egl") == 0) {
@@ -682,6 +690,7 @@ void Options::setGlPlatformInterface(OpenGLPlatformInterface interface)
         qCDebug(KWIN_CORE) << "Forcing EGL native interface as OpenGL ES requested through KWIN_COMPOSE environment variable.";
         interface = EglPlatformInterface;
     }
+#endif
 
     if (m_glPlatformInterface == interface) {
         return;

@@ -31,12 +31,15 @@
 #ifdef KWIN_UNIT_TEST
 #include "plugins/platforms/x11/standalone/edge.h"
 #endif
+#if KScreenLocker_FOUND
 // DBus generated
 #include "screenlocker_interface.h"
+#endif
 // frameworks
 #include <KConfigGroup>
 // Qt
 #include <QAction>
+#include <QAbstractEventDispatcher>
 #include <QMouseEvent>
 #include <QSharedPointer>
 #include <QTimer>
@@ -326,12 +329,14 @@ bool Edge::handleAction(ElectricBorderAction action)
         return true;
     }
     case ElectricActionLockScreen: { // Lock the screen
+#if KScreenLocker_FOUND
         OrgFreedesktopScreenSaverInterface interface(QStringLiteral("org.freedesktop.ScreenSaver"),
                                                      QStringLiteral("/ScreenSaver"),
                                                      QDBusConnection::sessionBus());
         if (interface.isValid()) {
             interface.Lock();
         }
+#endif
         return true;
     }
     case ElectricActionKRunner: { // open krunner

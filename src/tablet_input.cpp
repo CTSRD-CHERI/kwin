@@ -11,7 +11,9 @@
 #include "decorations/decoratedclient.h"
 #include "input_event.h"
 #include "input_event_spy.h"
+#if HAVE_WAYLAND
 #include "libinput/device.h"
+#endif
 #include "pointer_input.h"
 #include "toplevel.h"
 #include "wayland_server.h"
@@ -19,9 +21,13 @@
 // KDecoration
 #include <KDecoration2/Decoration>
 // KWayland
+#if HAVE_WAYLAND
 #include <KWaylandServer/seat_interface.h>
+#endif
 // screenlocker
+#if KScreenLocker_FOUND
 #include <KScreenLocker/KsldApp>
+#endif
 // Qt
 #include <QHoverEvent>
 #include <QWindow>
@@ -42,7 +48,9 @@ void TabletInputRedirection::init()
     InputDeviceHandler::init();
 
     connect(workspace(), &QObject::destroyed, this, [this] { setInited(false); });
+#if HAVE_WAYLAND
     connect(waylandServer(), &QObject::destroyed, this, [this] { setInited(false); });
+#endif
 }
 
 void TabletInputRedirection::tabletToolEvent(KWin::InputRedirection::TabletEventType type, const QPointF &pos,

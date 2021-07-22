@@ -277,12 +277,14 @@ QString CompositorDBusInterface::compositingType() const
         return QStringLiteral("none");
     }
     switch (m_compositor->scene()->compositingType()) {
+#if QT_CONFIG(opengl)
     case OpenGLCompositing:
         if (QOpenGLContext::openGLModuleType() == QOpenGLContext::LibGLES) {
             return QStringLiteral("gles");
         } else {
             return QStringLiteral("gl2");
         }
+#endif
     case QPainterCompositing:
         return QStringLiteral("qpainter");
     case NoCompositing:
@@ -333,6 +335,7 @@ void CompositorDBusInterface::reinitialize()
 QStringList CompositorDBusInterface::supportedOpenGLPlatformInterfaces() const
 {
     QStringList interfaces;
+#if QT_CONFIG(opengl)
     bool supportsGlx = false;
 #if HAVE_EPOXY_GLX
     supportsGlx = (kwinApp()->operationMode() == Application::OperationModeX11);
@@ -344,6 +347,7 @@ QStringList CompositorDBusInterface::supportedOpenGLPlatformInterfaces() const
         interfaces << QStringLiteral("glx");
     }
     interfaces << QStringLiteral("egl");
+#endif
     return interfaces;
 }
 

@@ -11,7 +11,9 @@
 #include "wayland_server.h"
 #include "workspace.h"
 
+#if HAVE_WAYLAND
 #include <KWaylandServer/seat_interface.h>
+#endif
 #include <QMouseEvent>
 
 namespace KWin
@@ -72,7 +74,7 @@ bool PopupInputFilter::keyEvent(QKeyEvent *event)
     if (m_popupClients.isEmpty()) {
         return false;
     }
-
+#if HAVE_WAYLAND
     auto seat = waylandServer()->seat();
 
     auto last = m_popupClients.last();
@@ -91,6 +93,7 @@ bool PopupInputFilter::keyEvent(QKeyEvent *event)
     default:
         break;
     }
+#endif
 
     return true;
 }

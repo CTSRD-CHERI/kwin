@@ -10,7 +10,9 @@
 
 #include "showpaint.h"
 
+#if QT_CONFIG(opengl)
 #include <kwinglutils.h>
+#endif
 
 #include <KGlobalAccel>
 #include <KLocalizedString>
@@ -49,7 +51,11 @@ void ShowPaintEffect::paintScreen(int mask, const QRegion &region, ScreenPaintDa
     m_painted = QRegion();
     effects->paintScreen(mask, region, data);
     if (effects->isOpenGLCompositing()) {
+#if !QT_CONFIG(opengl)
+        Q_UNREACHABLE();
+#else
         paintGL(data.projectionMatrix());
+#endif
     } else if (effects->compositingType() == QPainterCompositing) {
         paintQPainter();
     }
@@ -64,6 +70,7 @@ void ShowPaintEffect::paintWindow(EffectWindow *w, int mask, QRegion region, Win
     effects->paintWindow(w, mask, region, data);
 }
 
+#if QT_CONFIG(opengl)
 void ShowPaintEffect::paintGL(const QMatrix4x4 &projection)
 {
     GLVertexBuffer *vbo = GLVertexBuffer::streamingBuffer();
@@ -90,6 +97,7 @@ void ShowPaintEffect::paintGL(const QMatrix4x4 &projection)
     vbo->render(GL_TRIANGLES);
     glDisable(GL_BLEND);
 }
+#endif
 
 void ShowPaintEffect::paintQPainter()
 {

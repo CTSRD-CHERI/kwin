@@ -29,11 +29,12 @@ PlatformSurfaceTexture *QPainterBackend::createPlatformSurfaceTextureInternal(Su
 {
     return new PlatformQPainterSurfaceTextureInternal(this, pixmap);
 }
-
+#if HAVE_WAYLAND
 PlatformSurfaceTexture *QPainterBackend::createPlatformSurfaceTextureWayland(SurfacePixmapWayland *pixmap)
 {
     return new PlatformQPainterSurfaceTextureWayland(this, pixmap);
 }
+#endif
 
 void QPainterBackend::screenGeometryChanged(const QSize &size)
 {

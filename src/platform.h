@@ -10,11 +10,13 @@
 #define KWIN_PLATFORM_H
 #include <kwin_export.h>
 #include <kwinglobals.h>
-#include <epoxy/egl.h>
 #include "input.h"
 
 #include <QImage>
 #include <QObject>
+#if QT_CONFIG(opengl)
+#include <epoxy/egl.h>
+#endif
 
 #include <functional>
 
@@ -61,7 +63,9 @@ public:
 
     virtual Session *session() const = 0;
     virtual bool initialize() = 0;
+#if QT_CONFIG(opengl)
     virtual OpenGLBackend *createOpenGLBackend();
+#endif
     virtual QPainterBackend *createQPainterBackend();
     virtual DmaBufTexture *createDmaBufTexture(const QSize &size) {
         Q_UNUSED(size);
@@ -88,6 +92,7 @@ public:
      * Whether our Compositing EGL display supports creating native EGL fences.
      */
     bool supportsNativeFence() const;
+#if QT_CONFIG(opengl)
     /**
      * The EGLDisplay used by the compositing scene.
      */
@@ -118,7 +123,6 @@ public:
      * by rendering backends.
      */
     void setSceneEglGlobalShareContext(EGLContext context);
-
     /**
      * The EglConfig used by the compositing scene.
      */
@@ -132,7 +136,7 @@ public:
     void setSceneEglConfig(EGLConfig config) {
         m_eglConfig = config;
     }
-
+#endif
     /**
      * Implementing subclasses should provide a size in case the backend represents
      * a basic screen and uses the BasicScreens.
@@ -546,10 +550,12 @@ private:
     bool m_pointerWarping = false;
     int m_initialOutputCount = 1;
     qreal m_initialOutputScale = 1;
+#if QT_CONFIG(opengl)
     EGLDisplay m_eglDisplay;
     EGLConfig m_eglConfig = nullptr;
     EGLContext m_context = EGL_NO_CONTEXT;
     EGLContext m_globalShareContext = EGL_NO_CONTEXT;
+#endif
     int m_hideCursorCounter = 0;
     bool m_supportsGammaControl = false;
     bool m_supportsOutputChanges = false;

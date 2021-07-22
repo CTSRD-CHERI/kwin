@@ -34,7 +34,9 @@
 #include "virtualdesktops.h"
 #include "window_property_notify_x11_filter.h"
 #include "workspace.h"
+#if QT_CONFIG(opengl)
 #include "kwinglutils.h"
+#endif
 #include "kwineffectquickview.h"
 
 #include <QDebug>
@@ -1038,6 +1040,7 @@ EffectWindow* EffectsHandlerImpl::findWindow(WId id) const
     return nullptr;
 }
 
+#if HAVE_WAYLAND
 EffectWindow* EffectsHandlerImpl::findWindow(KWaylandServer::SurfaceInterface *surf) const
 {
     if (waylandServer()) {
@@ -1047,6 +1050,7 @@ EffectWindow* EffectsHandlerImpl::findWindow(KWaylandServer::SurfaceInterface *s
     }
     return nullptr;
 }
+#endif
 
 EffectWindow *EffectsHandlerImpl::findWindow(QWindow *w) const
 {
@@ -1497,9 +1501,11 @@ bool EffectsHandlerImpl::blocksDirectScanout() const
 
 KWaylandServer::Display *EffectsHandlerImpl::waylandDisplay() const
 {
+#if HAVE_WAYLAND
     if (waylandServer()) {
         return waylandServer()->display();
     }
+#endif
     return nullptr;
 }
 
@@ -1768,8 +1774,11 @@ EffectWindowImpl::EffectWindowImpl(Toplevel *toplevel)
     // an instance of Deleted becomes parent of the EffectWindow, effects
     // can still figure out whether it is/was a managed window.
     managed = toplevel->isClient();
-
+#if HAVE_WAYLAND
     waylandClient = qobject_cast<KWin::WaylandClient *>(toplevel) != nullptr;
+#else
+    waylandClient = false;
+#endif
     x11Client = qobject_cast<KWin::X11Client *>(toplevel) != nullptr ||
         qobject_cast<KWin::Unmanaged *>(toplevel) != nullptr;
 }
@@ -1778,8 +1787,12 @@ EffectWindowImpl::~EffectWindowImpl()
 {
     QVariant cachedTextureVariant = data(LanczosCacheRole);
     if (cachedTextureVariant.isValid()) {
+#if QT_CONFIG(opengl)
         GLTexture *cachedTexture = static_cast< GLTexture*>(cachedTextureVariant.value<void*>());
         delete cachedTexture;
+#else
+        Q_UNREACHABLE();
+#endif
     }
 }
 

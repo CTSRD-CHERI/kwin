@@ -263,11 +263,13 @@ bool Screens::isVrrCapable(int screen) const
     Q_UNUSED(screen);
     return false;
 #else
+#if HAVE_WAYLAND
     if (auto output = findOutput(screen)) {
         if (auto waylandoutput = dynamic_cast<AbstractWaylandOutput*>(output)) {
             return waylandoutput->capabilities() & AbstractWaylandOutput::Capability::Vrr;
         }
     }
+#endif
 #endif
     return true;
 }
@@ -278,11 +280,13 @@ RenderLoop::VrrPolicy Screens::vrrPolicy(int screen) const
     Q_UNUSED(screen);
     return RenderLoop::VrrPolicy::Never;
 #else
+#if HAVE_WAYLAND
     if (auto output = findOutput(screen)) {
         if (auto waylandOutput = dynamic_cast<AbstractWaylandOutput *>(output)) {
             return waylandOutput->vrrPolicy();
         }
     }
+#endif
     return RenderLoop::VrrPolicy::Never;
 #endif
 }

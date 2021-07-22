@@ -18,6 +18,7 @@ class QThread;
 class QProcess;
 class QWindow;
 
+#if HAVE_WAYLAND
 namespace KWayland
 {
 namespace Client
@@ -322,6 +323,15 @@ WaylandServer *waylandServer() {
 }
 
 } // namespace KWin
+#else
+namespace KWin
+{
+inline void *waylandServer()
+{
+    return nullptr;
+}
+}
+#endif // HAVE_WAYLAND
 
 #endif
 

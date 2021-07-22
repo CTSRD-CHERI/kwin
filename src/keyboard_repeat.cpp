@@ -11,8 +11,10 @@
 #include "input_event.h"
 #include "wayland_server.h"
 
+#if HAVE_WAYLAND
 #include <KWaylandServer/keyboard_interface.h>
 #include <KWaylandServer/seat_interface.h>
+#endif
 
 #include <QTimer>
 
@@ -31,10 +33,12 @@ KeyboardRepeat::~KeyboardRepeat() = default;
 
 void KeyboardRepeat::handleKeyRepeat()
 {
+#if HAVE_WAYLAND
     // TODO: don't depend on WaylandServer
     if (waylandServer()->seat()->keyboard()->keyRepeatRate() != 0) {
         m_timer->setInterval(1000 / waylandServer()->seat()->keyboard()->keyRepeatRate());
     }
+#endif
     // TODO: better time
     Q_EMIT keyRepeat(m_key, m_time);
 }
@@ -47,12 +51,14 @@ void KeyboardRepeat::keyEvent(KeyEvent *event)
     const quint32 key = event->nativeScanCode();
     if (event->type() == QEvent::KeyPress) {
         // TODO: don't get these values from WaylandServer
+#if HAVE_WAYLAND
         if (m_xkb->shouldKeyRepeat(key) && waylandServer()->seat()->keyboard()->keyRepeatDelay() != 0) {
             m_timer->setInterval(waylandServer()->seat()->keyboard()->keyRepeatDelay());
             m_key = key;
             m_time = event->timestamp();
             m_timer->start();
         }
+#endif
     } else if (event->type() == QEvent::KeyRelease) {
         if (key == m_key) {
             m_timer->stop();

@@ -37,14 +37,18 @@ public:
     bool initialize() override;
     Session *session() const override;
 
+#if QT_CONFIG(opengl)
     OpenGLBackend *createOpenGLBackend() override;
+#endif
     Edge *createScreenEdge(ScreenEdges *parent) override;
     void createPlatformCursor(QObject *parent = nullptr) override;
     bool requiresCompositing() const override;
     bool compositingPossible() const override;
     QString compositingNotPossibleReason() const override;
     bool openGLCompositingIsBroken() const override;
+#if QT_CONFIG(opengl)
     void createOpenGLSafePoint(OpenGLSafePoint safePoint) override;
+#endif
     void startInteractiveWindowSelection(std::function<void (KWin::Toplevel *)> callback, const QByteArray &cursorName = QByteArray()) override;
     void startInteractivePositionSelection(std::function<void (const QPoint &)> callback) override;
 
@@ -90,7 +94,9 @@ private:
 
     Session *m_session;
     XInputIntegration *m_xinputIntegration = nullptr;
+#if QT_CONFIG(opengl)
     QThread *m_openGLFreezeProtectionThread = nullptr;
+#endif
     QTimer *m_openGLFreezeProtection = nullptr;
     QTimer *m_updateOutputsTimer = nullptr;
     Display *m_x11Display;

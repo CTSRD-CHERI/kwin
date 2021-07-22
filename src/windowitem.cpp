@@ -130,16 +130,22 @@ void WindowItemX11::initialize()
     if (!window()->window()->surface()) {
         updateSurfaceItem(new SurfaceItemX11(window(), this));
     } else {
+#if !HAVE_WAYLAND
+        Q_UNREACHABLE();
+#else
         updateSurfaceItem(new SurfaceItemXwayland(window(), this));
+#endif
     }
 }
 
+#if HAVE_WAYLAND
 WindowItemWayland::WindowItemWayland(Scene::Window *window, Item *parent)
     : WindowItem(window, parent)
 {
     Toplevel *toplevel = window->window();
     updateSurfaceItem(new SurfaceItemWayland(toplevel->surface(), window, this));
 }
+#endif
 
 WindowItemInternal::WindowItemInternal(Scene::Window *window, Item *parent)
     : WindowItem(window, parent)

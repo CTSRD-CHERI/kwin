@@ -43,7 +43,9 @@ set(kwin_effect_XCB_LIBS
     XCB::XFIXES
 )
 
-set(kwin_effect_OWN_LIBS ${kwin_effect_OWN_LIBS} kwinglutils)
+if(KWIN_BUILD_OPENGL)
+  set(kwin_effect_OWN_LIBS ${kwin_effect_OWN_LIBS} kwinglutils)
+endif()
 
 macro(KWIN4_ADD_EFFECT_BACKEND name)
     add_library(${name} SHARED ${ARGN})
@@ -72,34 +74,38 @@ install(FILES kwineffect.desktop DESTINATION ${KDE_INSTALL_KSERVICETYPES5DIR})
 set(kwin4_effect_include_directories)
 
 set(kwin4_effect_builtins_sources
-    blur/blur.cpp
-    blur/blurshader.cpp
-    colorpicker/colorpicker.cpp
-    desktopgrid/desktopgrid.cpp
     diminactive/diminactive.cpp
     effect_builtins.cpp
     glide/glide.cpp
-    invert/invert.cpp
     logging.cpp
-    lookingglass/lookingglass.cpp
-    magiclamp/magiclamp.cpp
-    magnifier/magnifier.cpp
-    mouseclick/mouseclick.cpp
-    mousemark/mousemark.cpp
-    presentwindows/presentwindows.cpp
-    presentwindows/presentwindows_proxy.cpp
-    resize/resize.cpp
     showfps/showfps.cpp
     showpaint/showpaint.cpp
     slide/slide.cpp
     thumbnailaside/thumbnailaside.cpp
     touchpoints/touchpoints.cpp
-    trackmouse/trackmouse.cpp
     windowgeometry/windowgeometry.cpp
-    wobblywindows/wobblywindows.cpp
     zoom/zoom.cpp
     ../service_utils.cpp
 )
+if(KWIN_BUILD_OPENGL)
+  set(kwin4_effect_builtins_sources ${kwin4_effect_builtins_sources}
+      blur/blur.cpp
+      blur/blurshader.cpp
+      colorpicker/colorpicker.cpp
+      desktopgrid/desktopgrid.cpp
+      invert/invert.cpp
+      lookingglass/lookingglass.cpp
+      magnifier/magnifier.cpp
+      magiclamp/magiclamp.cpp
+      mouseclick/mouseclick.cpp
+      mousemark/mousemark.cpp
+      presentwindows/presentwindows.cpp
+      presentwindows/presentwindows_proxy.cpp
+      resize/resize.cpp
+      trackmouse/trackmouse.cpp
+      wobblywindows/wobblywindows.cpp
+      )
+endif()
 
 if (HAVE_ACCESSIBILITY)
     set(kwin4_effect_builtins_sources
@@ -164,7 +170,9 @@ install_scripted_effect(sessionquit)
 # Common effects
 add_subdirectory(desktopgrid)
 add_subdirectory(diminactive)
+if(KWIN_BUILD_OPENGL)
 include(fallapart/CMakeLists.txt)
+endif()
 include(highlightwindow/CMakeLists.txt)
 include(kscreen/CMakeLists.txt)
 add_subdirectory(magiclamp)
@@ -175,11 +183,14 @@ add_subdirectory(showfps)
 add_subdirectory(showpaint)
 add_subdirectory(slide)
 include(slideback/CMakeLists.txt)
-include(slidingpopups/CMakeLists.txt)
+if(KWIN_BUILD_WAYLAND)
+    include(slidingpopups/CMakeLists.txt)
+endif()
 add_subdirectory(thumbnailaside)
 add_subdirectory(windowgeometry)
 add_subdirectory(zoom)
 
+if(KWIN_BUILD_OPENGL)
 # OpenGL-specific effects
 add_subdirectory(blur)
 include(backgroundcontrast/CMakeLists.txt)
@@ -195,6 +206,7 @@ include(snaphelper/CMakeLists.txt)
 include(startupfeedback/CMakeLists.txt)
 add_subdirectory(trackmouse)
 add_subdirectory(wobblywindows)
+endif()
 
 ###############################################################################
 

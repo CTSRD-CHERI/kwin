@@ -38,11 +38,15 @@ install(TARGETS kwinxrenderutils EXPORT KWinEffectsTargets ${KDE_INSTALL_TARGETS
 set(kwin_EFFECTSLIB_SRCS
     anidata.cpp
     kwinanimationeffect.cpp
-    kwindeformeffect.cpp
     kwineffectquickview.cpp
     kwineffects.cpp
     logging.cpp
 )
+if(KWIN_BUILD_OPENGL)
+    list(APPEND kwin_EFFECTSLIB_SRCS
+        kwindeformeffect.cpp
+    )
+endif()
 
 add_library(kwineffects SHARED ${kwin_EFFECTSLIB_SRCS})
 generate_export_header(kwineffects EXPORT_FILE_NAME kwineffects_export.h)
@@ -52,12 +56,17 @@ target_link_libraries(kwineffects
         KF5::CoreAddons
         KF5::WindowSystem
         XCB::XCB
-        Plasma::KWaylandServer
     PRIVATE
         Qt::Quick
         KF5::Declarative
-        kwinglutils
+
 )
+if(KWIN_BUILD_OPENGL)
+  target_link_libraries(kwineffects PRIVATE kwinglutils)
+endif()
+if(KWIN_BUILD_WAYLAND)
+  target_link_libraries(kwineffects PUBLIC Plasma::KWaylandServer)
+endif()
 set_target_properties(kwineffects PROPERTIES
     VERSION ${KWINEFFECTS_VERSION}
     SOVERSION ${KWINEFFECTS_SOVERSION}
@@ -66,26 +75,33 @@ set_target_properties(kwineffects PROPERTIES OUTPUT_NAME ${KWIN_NAME}effects)
 
 install(TARGETS kwineffects EXPORT KWinEffectsTargets ${KDE_INSTALL_TARGETS_DEFAULT_ARGS})
 
-# kwingl(es)utils library
-set(kwin_GLUTILSLIB_SRCS
-    kwinglplatform.cpp
-    kwingltexture.cpp
-    kwinglutils.cpp
-    kwinglutils_funcs.cpp
-    kwineglimagetexture.cpp
-    logging.cpp
-)
+message(STATUS "KWIN_BUILD_OPENGL=${KWIN_BUILD_OPENGL}")
+if(KWIN_BUILD_OPENGL)
+  message(FATAL_ERROR building opengl)
+  # kwingl(es)utils library
+  set(kwin_GLUTILSLIB_SRCS
+      kwinglplatform.cpp
+      kwingltexture.cpp
+      kwinglutils.cpp
+      kwinglutils_funcs.cpp
+      kwineglimagetexture.cpp
+      logging.cpp
+  )
 
-add_library(kwinglutils SHARED ${kwin_GLUTILSLIB_SRCS})
-generate_export_header(kwinglutils BASE_NAME kwinglutils EXPORT_FILE_NAME kwinglutils_export.h)
-target_link_libraries(kwinglutils PUBLIC XCB::XCB KF5::CoreAddons KF5::ConfigCore KF5::WindowSystem epoxy::epoxy)
-set_target_properties(kwinglutils PROPERTIES
-    VERSION ${KWINEFFECTS_VERSION}
-    SOVERSION ${KWINEFFECTS_SOVERSION}
-    OUTPUT_NAME ${KWIN_NAME}glutils
-)
+  add_library(kwinglutils SHARED ${kwin_GLUTILSLIB_SRCS})
+  generate_export_header(kwinglutils BASE_NAME kwinglutils EXPORT_FILE_NAME kwinglutils_export.h)
+  target_link_libraries(kwinglutils PUBLIC XCB::XCB KF5::CoreAddons KF5::ConfigCore KF5::WindowSystem)
+  if (KWIN_BUILD_WAYLAND)
+    target_link_libraries(kwinglutils PUBLIC epoxy::epoxy)
+  endif()
+  set_target_properties(kwinglutils PROPERTIES
+      VERSION ${KWINEFFECTS_VERSION}
+      SOVERSION ${KWINEFFECTS_SOVERSION}
+      OUTPUT_NAME ${KWIN_NAME}glutils
+  )
 
-install(TARGETS kwinglutils EXPORT KWinEffectsTargets ${KDE_INSTALL_TARGETS_DEFAULT_ARGS})
+  install(TARGETS kwinglutils EXPORT KWinEffectsTargets ${KDE_INSTALL_TARGETS_DEFAULT_ARGS})
+endif()
 
 install(FILES
     ${CMAKE_CURRENT_BINARY_DIR}/kwinconfig.h

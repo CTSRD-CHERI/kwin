@@ -14,7 +14,9 @@
 
 #include <kwinconfig.h>
 
+#if QT_CONFIG(opengl)
 #include <kwinglutils.h>
+#endif
 
 #include <KLocalizedString>
 
@@ -149,14 +151,19 @@ void ShowFpsEffect::paintScreen(int mask, const QRegion &region, ScreenPaintData
     if (fps > MAX_TIME)
         fps = MAX_TIME; // keep it the same height
     if (effects->isOpenGLCompositing()) {
+#if !QT_CONFIG(opengl)
+        Q_UNREACHABLE();
+#else
         paintGL(fps, data.projectionMatrix());
         glFinish(); // make sure all rendering is done
+#endif
     } else if (effects->compositingType() == QPainterCompositing) {
         paintQPainter(fps);
     }
     m_noBenchmark->render(infiniteRegion(), 1.0, alpha);
 }
 
+#if QT_CONFIG(opengl)
 void ShowFpsEffect::paintGL(int fps, const QMatrix4x4 &projectionMatrix)
 {
     int x = this->x;
@@ -233,6 +240,7 @@ void ShowFpsEffect::paintGL(int fps, const QMatrix4x4 &projectionMatrix)
     // Paint paint sizes
     glDisable(GL_BLEND);
 }
+#endif
 
 void ShowFpsEffect::paintQPainter(int fps)
 {
@@ -316,6 +324,9 @@ void ShowFpsEffect::paintDrawSizeGraph(int x, int y)
 void ShowFpsEffect::paintGraph(int x, int y, QList<int> values, QList<int> lines, bool colorize)
 {
     if (effects->isOpenGLCompositing()) {
+#if !QT_CONFIG(opengl)
+        Q_UNREACHABLE();
+#else
         QColor color(0, 0, 0);
         color.setAlphaF(alpha);
         GLVertexBuffer *vbo = GLVertexBuffer::streamingBuffer();
@@ -359,6 +370,7 @@ void ShowFpsEffect::paintGraph(int x, int y, QList<int> values, QList<int> lines
             vbo->setData(verts.size() / 2, 2, verts.constData(), nullptr);
             vbo->render(GL_LINES);
         }
+#endif
     } else if (effects->compositingType() == QPainterCompositing) {
         QPainter *painter = effects->scenePainter();
         painter->setPen(Qt::black);
