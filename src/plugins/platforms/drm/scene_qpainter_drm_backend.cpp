@@ -16,8 +16,7 @@ namespace KWin
 {
 
 DrmQPainterBackend::DrmQPainterBackend(DrmBackend *backend, DrmGpu *gpu)
-    : QObject()
-    , QPainterBackend()
+    : QPainterBackend()
     , m_backend(backend)
     , m_gpu(gpu)
 {
@@ -58,6 +57,7 @@ void DrmQPainterBackend::initOutput(DrmOutput *output)
                 return;
             }
             it->swapchain = QSharedPointer<DumbSwapchain>::create(m_gpu, output->pixelSize());
+            it->damageJournal.setCapacity(it->swapchain->slotCount());
         }
     );
 }
@@ -67,29 +67,30 @@ QImage *DrmQPainterBackend::bufferForScreen(int screenId)
     return m_outputs[screenId].swapchain->currentBuffer()->image();
 }
 
-bool DrmQPainterBackend::needsFullRepaint(int screenId) const
+QRegion DrmQPainterBackend::beginFrame(int screenId)
 {
-    Q_UNUSED(screenId)
-    return true;
+    Output *rendererOutput = &m_outputs[screenId];
+
+    int bufferAge;
+    rendererOutput->swapchain->acquireBuffer(&bufferAge);
+
+    return rendererOutput->damageJournal.accumulate(bufferAge, rendererOutput->output->geometry());
 }
 
-void DrmQPainterBackend::beginFrame(int screenId)
+void DrmQPainterBackend::endFrame(int screenId, const QRegion &damage)
 {
-    m_outputs[screenId].swapchain->acquireBuffer();
-}
-
-void DrmQPainterBackend::endFrame(int screenId, int mask, const QRegion &damage)
-{
-    Q_UNUSED(mask)
-    Q_UNUSED(damage)
-
-    const Output &rendererOutput = m_outputs[screenId];
+    Output &rendererOutput = m_outputs[screenId];
     DrmOutput *drmOutput = rendererOutput.output;
 
-    if (!drmOutput->present(rendererOutput.swapchain->currentBuffer(), drmOutput->geometry())) {
+    QSharedPointer<DrmDumbBuffer> back = rendererOutput.swapchain->currentBuffer();
+    rendererOutput.swapchain->releaseBuffer(back);
+
+    if (!drmOutput->present(back, drmOutput->geometry())) {
         RenderLoopPrivate *renderLoopPrivate = RenderLoopPrivate::get(drmOutput->renderLoop());
         renderLoopPrivate->notifyFrameFailed();
     }
+
+    rendererOutput.damageJournal.add(damage);
 }
 
 }

@@ -23,7 +23,7 @@
 #include <KDecoration2/Decoration>
 // KWayland
 #if HAVE_WAYLAND
-#include <KWaylandServer/buffer_interface.h>
+#include <KWaylandServer/shmclientbuffer.h>
 #include <KWaylandServer/datadevice_interface.h>
 #include <KWaylandServer/display.h>
 #include <KWaylandServer/pointer_interface.h>
@@ -1162,7 +1162,7 @@ void CursorImage::updateServerCursor()
         }
         return;
     }
-    auto buffer = cursorSurface->buffer();
+    auto buffer = qobject_cast<KWaylandServer::ShmClientBuffer *>(cursorSurface->buffer());
     if (!buffer) {
         if (needsEmit) {
             Q_EMIT changed();
@@ -1240,7 +1240,7 @@ void CursorImage::updateDragCursor()
     QImage additionalIcon;
     if (auto ddi = waylandServer()->seat()->dragSource()) {
         if (const KWaylandServer::DragAndDropIcon *dragIcon = ddi->icon()) {
-            if (KWaylandServer::BufferInterface *buffer = dragIcon->surface()->buffer()) {
+            if (auto buffer = qobject_cast<KWaylandServer::ShmClientBuffer *>(dragIcon->surface()->buffer())) {
                 additionalIcon = buffer->data().copy();
                 additionalIcon.setDevicePixelRatio(dragIcon->surface()->bufferScale());
                 additionalIcon.setOffset(dragIcon->position());
@@ -1268,7 +1268,7 @@ void CursorImage::updateDragCursor()
         }
         return;
     }
-    auto buffer = cursorSurface->buffer();
+    auto buffer = qobject_cast<KWaylandServer::ShmClientBuffer *>(cursorSurface->buffer());
     if (!buffer) {
         if (needsEmit) {
             Q_EMIT changed();

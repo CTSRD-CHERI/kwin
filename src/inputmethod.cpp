@@ -586,6 +586,7 @@ void InputMethod::setInputMethodCommand(const QString &command)
         startInputMethod();
     }
     updateSni();
+    Q_EMIT availableChanged();
 }
 
 void InputMethod::stopInputMethod()
@@ -695,6 +696,11 @@ void InputMethod::installKeyboardGrab(KWaylandServer::InputMethodGrabV1 *keyboar
 bool InputMethod::isVisible() const
 {
     return m_inputClient && m_inputClient->isShown(false);
+}
+
+bool InputMethod::isAvailable() const
+{
+    return !m_inputMethodCommand.isEmpty();
 }
 
 }

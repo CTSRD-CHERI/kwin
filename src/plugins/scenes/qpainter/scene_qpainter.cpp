@@ -79,24 +79,17 @@ void SceneQPainter::paintGenericScreen(int mask, const ScreenPaintData &data)
     m_painter->restore();
 }
 
-void SceneQPainter::paint(int screenId, const QRegion &_damage, const QList<Toplevel *> &toplevels,
+void SceneQPainter::paint(int screenId, const QRegion &damage, const QList<Toplevel *> &toplevels,
                           RenderLoop *renderLoop)
 {
     Q_ASSERT(kwinApp()->platform()->isPerScreenRenderingEnabled());
     painted_screen = screenId;
 
     createStackingOrder(toplevels);
-    QRegion damage = _damage;
 
-    int mask = 0;
-
-    m_backend->beginFrame(screenId);
-    const bool needsFullRepaint = m_backend->needsFullRepaint(screenId);
-    if (needsFullRepaint) {
-        mask |= Scene::PAINT_SCREEN_BACKGROUND_FIRST;
-        damage = screens()->geometry(screenId);
-    }
+    const QRegion repaint = m_backend->beginFrame(screenId);
     const QRect geometry = screens()->geometry(screenId);
+
     QImage *buffer = m_backend->bufferForScreen(screenId);
     if (buffer && !buffer->isNull()) {
         renderLoop->beginFrame();
@@ -104,13 +97,12 @@ void SceneQPainter::paint(int screenId, const QRegion &_damage, const QList<Topl
         m_painter->setWindow(geometry);
 
         QRegion updateRegion, validRegion;
-        paintScreen(&mask, damage.intersected(geometry), QRegion(), &updateRegion, &validRegion,
-                    renderLoop);
+        paintScreen(damage.intersected(geometry), repaint, &updateRegion, &validRegion, renderLoop);
         paintCursor(updateRegion);
 
         m_painter->end();
         renderLoop->endFrame();
-        m_backend->endFrame(screenId, mask, updateRegion);
+        m_backend->endFrame(screenId, updateRegion);
     }
 
     // do cleanup
@@ -119,9 +111,8 @@ void SceneQPainter::paint(int screenId, const QRegion &_damage, const QList<Topl
 
 void SceneQPainter::paintBackground(const QRegion &region)
 {
-    m_painter->setBrush(Qt::black);
     for (const QRect &rect : region) {
-        m_painter->drawRect(rect);
+        m_painter->fillRect(rect, Qt::black);
     }
 }
 

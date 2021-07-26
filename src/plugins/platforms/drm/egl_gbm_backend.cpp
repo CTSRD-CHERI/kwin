@@ -33,12 +33,10 @@
 #include <gbm.h>
 #include <unistd.h>
 #include <errno.h>
-#include <egl_dmabuf.h>
 #include <drm_fourcc.h>
 // kwayland server
 #include "KWaylandServer/surface_interface.h"
-#include "KWaylandServer/buffer_interface.h"
-#include "KWaylandServer/linuxdmabuf_v1_interface.h"
+#include "KWaylandServer/linuxdmabufv1clientbuffer.h"
 #include "KWaylandServer/clientconnection.h"
 
 namespace KWin
@@ -530,20 +528,13 @@ QRegion EglGbmBackend::prepareRenderingForOutput(Output &output)
     }
     setViewport(output);
 
+    const QRect geometry = output.output->geometry();
     if (supportsBufferAge()) {
-        QRegion region;
-
-        // Note: An age of zero means the buffer contents are undefined
-        if (output.current.bufferAge > 0 && output.current.bufferAge <= output.current.damageHistory.count()) {
-            for (int i = 0; i < output.current.bufferAge - 1; i++)
-                region |= output.current.damageHistory[i];
-        } else {
-            region = output.output->geometry();
-        }
-
-        return region;
+        auto current = &output.current;
+        return current->damageJournal.accumulate(current->bufferAge, geometry);
     }
-    return output.output->geometry();
+
+    return geometry;
 }
 
 QSharedPointer<DrmBuffer> EglGbmBackend::endFrameWithBuffer(int screenId, const QRegion &dirty)
@@ -583,10 +574,7 @@ void EglGbmBackend::updateBufferAge(Output &output, const QRegion &dirty)
 {
     if (supportsBufferAge()) {
         eglQuerySurface(eglDisplay(), output.current.gbmSurface->eglSurface(), EGL_BUFFER_AGE_EXT, &output.current.bufferAge);
-        if (output.current.damageHistory.count() > 10) {
-            output.current.damageHistory.removeLast();
-        }
-        output.current.damageHistory.prepend(dirty);
+        output.current.damageJournal.add(dirty);
     }
 }
 
@@ -598,47 +586,50 @@ bool EglGbmBackend::scanout(int screenId, SurfaceItem *surfaceItem)
     }
 
     KWaylandServer::SurfaceInterface *surface = item->surface();
-    if (!surface || !surface->buffer() || !surface->buffer()->linuxDmabufBuffer()) {
+    if (!surface) {
         return false;
     }
-    auto buffer = surface->buffer();
+
+    auto buffer = qobject_cast<KWaylandServer::LinuxDmaBufV1ClientBuffer *>(surface->buffer());
+    if (!buffer) {
+        return false;
+    }
     Output &output = m_outputs[screenId];
-    if (buffer->linuxDmabufBuffer()->size() != output.output->modeSize()) {
+    if (buffer->size() != output.output->modeSize()) {
         return false;
     }
-    EglDmabufBuffer *dmabuf = static_cast<EglDmabufBuffer*>(buffer->linuxDmabufBuffer());
-    if (!dmabuf || !dmabuf->planes().count() ||
-        !gbm_device_is_format_supported(m_gpu->gbmDevice(), dmabuf->format(), GBM_BO_USE_SCANOUT)) {
+    if (!buffer->planes().count() ||
+        !gbm_device_is_format_supported(m_gpu->gbmDevice(), buffer->format(), GBM_BO_USE_SCANOUT)) {
         return false;
     }
     gbm_bo *importedBuffer;
-    if (dmabuf->planes()[0].modifier != DRM_FORMAT_MOD_INVALID
-        || dmabuf->planes()[0].offset > 0
-        || dmabuf->planes().size() > 1) {
+    if (buffer->planes()[0].modifier != DRM_FORMAT_MOD_INVALID
+        || buffer->planes()[0].offset > 0
+        || buffer->planes().size() > 1) {
         if (!m_gpu->addFB2ModifiersSupported()) {
             return false;
         }
         gbm_import_fd_modifier_data data = {};
-        data.format = dmabuf->format();
-        data.width = (uint32_t) dmabuf->size().width();
-        data.height = (uint32_t) dmabuf->size().height();
-        data.num_fds = dmabuf->planes().count();
-        data.modifier = dmabuf->planes()[0].modifier;
-        for (int i = 0; i < dmabuf->planes().count(); i++) {
-            auto plane = dmabuf->planes()[i];
+        data.format = buffer->format();
+        data.width = (uint32_t) buffer->size().width();
+        data.height = (uint32_t) buffer->size().height();
+        data.num_fds = buffer->planes().count();
+        data.modifier = buffer->planes()[0].modifier;
+        for (int i = 0; i < buffer->planes().count(); i++) {
+            auto plane = buffer->planes()[i];
             data.fds[i] = plane.fd;
             data.offsets[i] = plane.offset;
             data.strides[i] = plane.stride;
         }
         importedBuffer = gbm_bo_import(m_gpu->gbmDevice(), GBM_BO_IMPORT_FD_MODIFIER, &data, GBM_BO_USE_SCANOUT);
     } else {
-        auto plane = dmabuf->planes()[0];
+        auto plane = buffer->planes()[0];
         gbm_import_fd_data data = {};
         data.fd = plane.fd;
-        data.width = (uint32_t) dmabuf->size().width();
-        data.height = (uint32_t) dmabuf->size().height();
+        data.width = (uint32_t) buffer->size().width();
+        data.height = (uint32_t) buffer->size().height();
         data.stride = plane.stride;
-        data.format = dmabuf->format();
+        data.format = buffer->format();
         importedBuffer = gbm_bo_import(m_gpu->gbmDevice(), GBM_BO_IMPORT_FD, &data, GBM_BO_USE_SCANOUT);
     }
     if (!importedBuffer) {
@@ -664,7 +655,7 @@ bool EglGbmBackend::scanout(int screenId, SurfaceItem *surfaceItem)
     // ensure that a context is current like with normal presentation
     makeCurrent();
     if (output.output->present(bo, damage)) {
-        output.current.damageHistory.clear();
+        output.current.damageJournal.clear();
         if (output.surfaceInterface != surface) {
             auto path = surface->client()->executablePath();
             qCDebug(KWIN_DRM).nospace() << "Direct scanout starting on output " << output.output->name() << " for application \"" << path << "\"";

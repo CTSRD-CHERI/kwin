@@ -17,7 +17,7 @@ namespace KWin
 {
 class FramebufferBackend;
 
-class FramebufferQPainterBackend : public QObject, public QPainterBackend
+class FramebufferQPainterBackend : public QPainterBackend
 {
     Q_OBJECT
 public:
@@ -25,9 +25,8 @@ public:
     ~FramebufferQPainterBackend() override;
 
     QImage *bufferForScreen(int screenId) override;
-    bool needsFullRepaint(int screenId) const override;
-    void beginFrame(int screenId) override;
-    void endFrame(int screenId, int mask, const QRegion &damage) override;
+    QRegion beginFrame(int screenId) override;
+    void endFrame(int screenId, const QRegion &damage) override;
 
 private:
     void reactivate();
@@ -43,7 +42,6 @@ private:
     QImage m_backBuffer;
 
     FramebufferBackend *m_backend;
-    bool m_needsFullRepaint;
 };
 
 }

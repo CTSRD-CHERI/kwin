@@ -32,7 +32,7 @@
 
 // KWayland
 #if HAVE_WAYLAND
-#include <KWaylandServer/buffer_interface.h>
+#include <KWaylandServer/shmclientbuffer.h>
 #include <KWaylandServer/clientconnection.h>
 #include <KWaylandServer/subcompositor_interface.h>
 #include <KWaylandServer/surface_interface.h>
@@ -1452,10 +1452,8 @@ QVariant SurfaceTreeModel::data(const QModelIndex &index, int role) const
                                                 .arg(surface->client()->processId())
                                                 .arg(surface->id());
         } else if (role == Qt::DecorationRole) {
-            if (auto buffer = surface->buffer()) {
-                if (buffer->shmBuffer()) {
-                    return buffer->data().scaled(QSize(64, 64), Qt::KeepAspectRatio);
-                }
+            if (auto buffer = qobject_cast<KWaylandServer::ShmClientBuffer *>(surface->buffer())) {
+                return buffer->data().scaled(QSize(64, 64), Qt::KeepAspectRatio);
             }
         }
     }

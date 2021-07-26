@@ -22,7 +22,7 @@ namespace KWin
 
 class X11WindowedBackend;
 
-class X11WindowedQPainterBackend : public QObject, public QPainterBackend
+class X11WindowedQPainterBackend : public QPainterBackend
 {
     Q_OBJECT
 public:
@@ -30,9 +30,8 @@ public:
     ~X11WindowedQPainterBackend() override;
 
     QImage *bufferForScreen(int screenId) override;
-    bool needsFullRepaint(int screenId) const override;
-    void beginFrame(int screenId) override;
-    void endFrame(int screenId, int mask, const QRegion &damage) override;
+    QRegion beginFrame(int screenId) override;
+    void endFrame(int screenId, const QRegion &damage) override;
 
 private:
     void createOutputs();
@@ -41,7 +40,6 @@ private:
     struct Output {
         xcb_window_t window;
         QImage buffer;
-        bool needsFullRepaint = true;
     };
     QVector<Output*> m_outputs;
 };

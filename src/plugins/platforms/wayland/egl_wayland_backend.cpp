@@ -31,7 +31,6 @@
 
 // KDE
 #include <KWayland/Client/surface.h>
-#include <KWaylandServer/buffer_interface.h>
 #include <KWaylandServer/display.h>
 
 // Qt
@@ -316,8 +315,8 @@ void EglWaylandBackend::presentOnSurface(EglWaylandOutput *output, const QRegion
     waylandOutput->surface()->setScale(std::ceil(waylandOutput->scale()));
     Q_EMIT waylandOutput->outputChange(damage);
 
-    if (supportsSwapBuffersWithDamage() && !output->m_damageHistory.isEmpty()) {
-        QVector<EGLint> rects = regionToRects(output->m_damageHistory.constFirst(), waylandOutput);
+    if (supportsSwapBuffersWithDamage()) {
+        QVector<EGLint> rects = regionToRects(damage, waylandOutput);
         if (!eglSwapBuffersWithDamageEXT(eglDisplay(), output->m_eglSurface,
                                          rects.data(), rects.count() / 4)) {
             qCCritical(KWIN_WAYLAND_BACKEND, "eglSwapBuffersWithDamage() failed: %x", eglGetError());
@@ -363,17 +362,7 @@ QRegion EglWaylandBackend::beginFrame(int screenId)
     auto *output = m_outputs.at(screenId);
     makeContextCurrent(output);
     if (supportsBufferAge()) {
-        QRegion region;
-
-        // Note: An age of zero means the buffer contents are undefined
-        if (output->m_bufferAge > 0 && output->m_bufferAge <= output->m_damageHistory.count()) {
-            for (int i = 0; i < output->m_bufferAge - 1; i++)
-                region |= output->m_damageHistory[i];
-        } else {
-            region = output->m_waylandOutput->geometry();
-        }
-
-        return region;
+        return output->m_damageJournal.accumulate(output->m_bufferAge, output->m_waylandOutput->geometry());
     }
     return QRegion();
 }
@@ -386,11 +375,7 @@ void EglWaylandBackend::endFrame(int screenId, const QRegion &renderedRegion, co
     presentOnSurface(output, damage);
 
     if (supportsBufferAge()) {
-        if (output->m_damageHistory.count() > 10) {
-            output->m_damageHistory.removeLast();
-        }
-
-        output->m_damageHistory.prepend(damage);
+        output->m_damageJournal.add(damage);
     }
 }
 

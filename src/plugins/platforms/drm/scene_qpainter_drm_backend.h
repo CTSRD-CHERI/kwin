@@ -9,6 +9,7 @@
 #ifndef KWIN_SCENE_QPAINTER_DRM_BACKEND_H
 #define KWIN_SCENE_QPAINTER_DRM_BACKEND_H
 #include "qpainterbackend.h"
+#include "utils.h"
 
 #include <QObject>
 #include <QVector>
@@ -24,22 +25,22 @@ class DrmDumbBuffer;
 class DrmOutput;
 class DrmGpu;
 
-class DrmQPainterBackend : public QObject, public QPainterBackend
+class DrmQPainterBackend : public QPainterBackend
 {
     Q_OBJECT
 public:
     DrmQPainterBackend(DrmBackend *backend, DrmGpu *gpu);
 
     QImage *bufferForScreen(int screenId) override;
-    bool needsFullRepaint(int screenId) const override;
-    void beginFrame(int screenId) override;
-    void endFrame(int screenId, int mask, const QRegion &damage) override;
+    QRegion beginFrame(int screenId) override;
+    void endFrame(int screenId, const QRegion &damage) override;
 
 private:
     void initOutput(DrmOutput *output);
     struct Output {
         DrmOutput *output;
         QSharedPointer<DumbSwapchain> swapchain;
+        DamageJournal damageJournal;
     };
     QVector<Output> m_outputs;
     DrmBackend *m_backend;

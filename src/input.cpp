@@ -41,12 +41,13 @@
 #include "cursor.h"
 #include <KDecoration2/Decoration>
 #include <KGlobalAccel>
+#include <KLocalizedString>
 #if HAVE_WAYLAND
 #include <KWaylandServer/display.h>
 #include <KWaylandServer/fakeinput_interface.h>
 #include <KWaylandServer/relativepointer_v1_interface.h>
 #include <KWaylandServer/seat_interface.h>
-#include <KWaylandServer/buffer_interface.h>
+#include <KWaylandServer/shmclientbuffer.h>
 #include <KWaylandServer/surface_interface.h>
 #include <KWaylandServer/tablet_v2_interface.h>
 #include <KWaylandServer/keyboard_interface.h>
@@ -1620,7 +1621,7 @@ public:
 private:
     void refresh()
     {
-        auto buffer = m_surface->buffer();
+        auto buffer = qobject_cast<KWaylandServer::ShmClientBuffer *>(m_surface->buffer());
         if (!buffer) {
             updateCursor({}, {});
             return;
@@ -2312,7 +2313,6 @@ void InputRedirection::setupInputFilters()
         }
         installInputEventFilter(new DragAndDropInputFilter);
         installInputEventFilter(new LockScreenFilter);
-        installInputEventFilter(new PopupInputFilter);
         m_windowSelector = new WindowSelectorFilter;
         installInputEventFilter(m_windowSelector);
     }
@@ -2327,6 +2327,9 @@ void InputRedirection::setupInputFilters()
 #endif
     if (hasGlobalShortcutSupport) {
         installInputEventFilter(new GlobalShortcutFilter);
+    }
+    if (waylandServer()) {
+        installInputEventFilter(new PopupInputFilter);
     }
     installInputEventFilter(new DecorationEventFilter);
     installInputEventFilter(new InternalWindowEventFilter);
@@ -2527,12 +2530,17 @@ void InputRedirection::setupTouchpadShortcuts()
     QAction *touchpadOnAction = new QAction(this);
     QAction *touchpadOffAction = new QAction(this);
 
+    const QString touchpadDisplayName = i18n("Touchpad");
+
     touchpadToggleAction->setObjectName(QStringLiteral("Toggle Touchpad"));
     touchpadToggleAction->setProperty("componentName", s_touchpadComponent);
+    touchpadToggleAction->setProperty("componentDisplayName", touchpadDisplayName);
     touchpadOnAction->setObjectName(QStringLiteral("Enable Touchpad"));
     touchpadOnAction->setProperty("componentName", s_touchpadComponent);
+    touchpadOnAction->setProperty("componentDisplayName", touchpadDisplayName);
     touchpadOffAction->setObjectName(QStringLiteral("Disable Touchpad"));
     touchpadOffAction->setProperty("componentName", s_touchpadComponent);
+    touchpadOffAction->setProperty("componentDisplayName", touchpadDisplayName);
     KGlobalAccel::self()->setDefaultShortcut(touchpadToggleAction, QList<QKeySequence>{Qt::Key_TouchpadToggle});
     KGlobalAccel::self()->setShortcut(touchpadToggleAction, QList<QKeySequence>{Qt::Key_TouchpadToggle});
     KGlobalAccel::self()->setDefaultShortcut(touchpadOnAction, QList<QKeySequence>{Qt::Key_TouchpadOn});

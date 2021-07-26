@@ -10,6 +10,7 @@
 #ifndef KWIN_SCENE_OPENGL_BACKEND_H
 #define KWIN_SCENE_OPENGL_BACKEND_H
 
+#include <QObject>
 #include <QRegion>
 
 #include <kwin_export.h>
@@ -40,8 +41,10 @@ class GLTexture;
  *
  * @author Martin Gräßlin <mgraesslin@kde.org>
  */
-class KWIN_EXPORT OpenGLBackend
+class KWIN_EXPORT OpenGLBackend : public QObject
 {
+    Q_OBJECT
+
 public:
     OpenGLBackend();
     virtual ~OpenGLBackend();
@@ -125,16 +128,6 @@ public:
         return m_haveNativeFence;
     }
     virtual bool directScanoutAllowed(int screen) const;
-
-    /**
-     * Returns the damage that has accumulated since a buffer of the given age was presented.
-     */
-    QRegion accumulatedDamageHistory(int bufferAge) const;
-
-    /**
-     * Saves the given region to damage history.
-     */
-    void addToDamageHistory(const QRegion &region);
 
     /**
      * The backend specific extensions (e.g. EGL/GLX extensions).
@@ -241,10 +234,6 @@ private:
      * @brief Whether the initialization failed, of course default to @c false.
      */
     bool m_failed;
-    /**
-     * @brief The damage history for the past 10 frames.
-     */
-    QList<QRegion> m_damageHistory;
     QList<QByteArray> m_extensions;
 };
 

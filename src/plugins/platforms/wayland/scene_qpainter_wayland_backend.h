@@ -11,6 +11,7 @@
 #define KWIN_SCENE_QPAINTER_WAYLAND_BACKEND_H
 
 #include "qpainterbackend.h"
+#include "utils.h"
 
 #include <QObject>
 #include <QImage>
@@ -34,6 +35,17 @@ class WaylandBackend;
 class WaylandOutput;
 class WaylandQPainterBackend;
 
+class WaylandQPainterBufferSlot
+{
+public:
+    WaylandQPainterBufferSlot(QSharedPointer<KWayland::Client::Buffer> buffer);
+    ~WaylandQPainterBufferSlot();
+
+    QSharedPointer<KWayland::Client::Buffer> buffer;
+    QImage image;
+    int age = 0;
+};
+
 class WaylandQPainterOutput : public QObject
 {
     Q_OBJECT
@@ -45,26 +57,26 @@ public:
     void updateSize(const QSize &size);
     void remapBuffer();
 
-    void prepareRenderingFrame();
+    WaylandQPainterBufferSlot *back() const;
+
+    WaylandQPainterBufferSlot *acquire();
     void present(const QRegion &damage);
 
-    bool needsFullRepaint() const;
-    void setNeedsFullRepaint(bool set);
-
+    QRegion accumulateDamage(int bufferAge) const;
     QRegion mapToLocal(const QRegion &region) const;
 
 private:
     WaylandOutput *m_waylandOutput;
     KWayland::Client::ShmPool *m_pool;
+    DamageJournal m_damageJournal;
 
-    QWeakPointer<KWayland::Client::Buffer> m_buffer;
-    QImage m_backBuffer;
-    bool m_needsFullRepaint = true;
+    QVector<WaylandQPainterBufferSlot *> m_slots;
+    WaylandQPainterBufferSlot *m_back = nullptr;
 
     friend class WaylandQPainterBackend;
 };
 
-class WaylandQPainterBackend : public QObject, public QPainterBackend
+class WaylandQPainterBackend : public QPainterBackend
 {
     Q_OBJECT
 public:
@@ -73,10 +85,8 @@ public:
 
     QImage *bufferForScreen(int screenId) override;
 
-    void endFrame(int screenId, int mask, const QRegion& damage) override;
-    void beginFrame(int screenId) override;
-
-    bool needsFullRepaint(int screenId) const override;
+    void endFrame(int screenId, const QRegion& damage) override;
+    QRegion beginFrame(int screenId) override;
 
 private:
     void createOutput(AbstractOutput *waylandOutput);

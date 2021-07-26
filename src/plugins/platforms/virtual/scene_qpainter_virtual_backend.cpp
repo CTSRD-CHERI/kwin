@@ -32,15 +32,9 @@ QImage *VirtualQPainterBackend::bufferForScreen(int screen)
     return &m_backBuffers[screen];
 }
 
-bool VirtualQPainterBackend::needsFullRepaint(int screenId) const
+QRegion VirtualQPainterBackend::beginFrame(int screenId)
 {
-    Q_UNUSED(screenId)
-    return true;
-}
-
-void VirtualQPainterBackend::beginFrame(int screenId)
-{
-    Q_UNUSED(screenId)
+    return screens()->geometry(screenId);
 }
 
 void VirtualQPainterBackend::createOutputs()
@@ -53,9 +47,8 @@ void VirtualQPainterBackend::createOutputs()
     }
 }
 
-void VirtualQPainterBackend::endFrame(int screenId, int mask, const QRegion &damage)
+void VirtualQPainterBackend::endFrame(int screenId, const QRegion &damage)
 {
-    Q_UNUSED(mask)
     Q_UNUSED(damage)
 
     VirtualOutput *output = static_cast<VirtualOutput *>(m_backend->findOutput(screenId));

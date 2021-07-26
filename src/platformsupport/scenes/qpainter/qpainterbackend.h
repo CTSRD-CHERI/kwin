@@ -12,6 +12,8 @@
 #include <config-kwin.h>
 #include <kwinconfig.h>
 
+#include <QObject>
+
 class QImage;
 class QRegion;
 class QSize;
@@ -24,8 +26,10 @@ class PlatformSurfaceTexture;
 class SurfacePixmapInternal;
 class SurfacePixmapWayland;
 
-class QPainterBackend
+class QPainterBackend : public QObject
 {
+    Q_OBJECT
+
 public:
     virtual ~QPainterBackend();
 
@@ -34,8 +38,8 @@ public:
     PlatformSurfaceTexture *createPlatformSurfaceTextureWayland(SurfacePixmapWayland *pixmap);
 #endif
 
-    virtual void endFrame(int screenId, int mask, const QRegion &damage) = 0;
-    virtual void beginFrame(int screenId) = 0;
+    virtual void endFrame(int screenId, const QRegion &damage) = 0;
+    virtual QRegion beginFrame(int screenId) = 0;
     /**
      * @brief React on screen geometry changes.
      *
@@ -62,7 +66,6 @@ public:
      * @todo Get a better identifier for screen then a counter variable
      */
     virtual QImage *bufferForScreen(int screenId) = 0;
-    virtual bool needsFullRepaint(int screenId) const = 0;
 
 protected:
     QPainterBackend();

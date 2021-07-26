@@ -19,7 +19,7 @@ namespace KWin
 
 class VirtualBackend;
 
-class VirtualQPainterBackend : public QObject, public QPainterBackend
+class VirtualQPainterBackend : public QPainterBackend
 {
     Q_OBJECT
 public:
@@ -27,9 +27,8 @@ public:
     ~VirtualQPainterBackend() override;
 
     QImage *bufferForScreen(int screenId) override;
-    bool needsFullRepaint(int screenId) const override;
-    void beginFrame(int screenId) override;
-    void endFrame(int screenId, int mask, const QRegion &damage) override;
+    QRegion beginFrame(int screenId) override;
+    void endFrame(int screenId, const QRegion &damage) override;
 
 private:
     void createOutputs();

@@ -49,21 +49,14 @@ QImage *X11WindowedQPainterBackend::bufferForScreen(int screen)
     return &m_outputs.at(screen)->buffer;
 }
 
-bool X11WindowedQPainterBackend::needsFullRepaint(int screenId) const
-{
-    const Output *rendererOutput = m_outputs.value(screenId);
-    Q_ASSERT(rendererOutput);
-    return rendererOutput->needsFullRepaint;
-}
-
-void X11WindowedQPainterBackend::beginFrame(int screenId)
+QRegion X11WindowedQPainterBackend::beginFrame(int screenId)
 {
     Q_UNUSED(screenId)
+    return screens()->geometry(screenId);
 }
 
-void X11WindowedQPainterBackend::endFrame(int screenId, int mask, const QRegion &damage)
+void X11WindowedQPainterBackend::endFrame(int screenId, const QRegion &damage)
 {
-    Q_UNUSED(mask)
     Q_UNUSED(damage)
 
     X11WindowedOutput *output = static_cast<X11WindowedOutput *>(kwinApp()->platform()->findOutput(screenId));
@@ -84,8 +77,6 @@ void X11WindowedQPainterBackend::endFrame(int screenId, int mask, const QRegion 
     xcb_put_image(c, XCB_IMAGE_FORMAT_Z_PIXMAP, rendererOutput->window,
                   m_gc, buffer.width(), buffer.height(), 0, 0, 0, 24,
                   buffer.sizeInBytes(), buffer.constBits());
-
-    rendererOutput->needsFullRepaint = false;
 }
 
 }
