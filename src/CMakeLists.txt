@@ -236,10 +236,14 @@ target_link_libraries(kwin
 
     Threads::Threads
 )
+
+if (KScreenLocker_FOUND)
+  target_link_libraries(kwin PW::KScreenLocker)
+endif()
+
 if(KWIN_BUILD_WAYLAND)
   target_link_libraries(kwin
                         KF5::WaylandClient
-                        PW::KScreenLocker
                         Plasma::KWaylandServer
     Libinput::Libinput
     epoxy::epoxy
