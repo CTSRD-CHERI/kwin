@@ -122,11 +122,10 @@ set(kwin_SRCS
     xkb.cpp
 )
 
-if (KWIN_BUILD_WAYLAND)
+if (KWIN_BUILD_OPENGL)
   set(kwin_SRCS ${kwin_SRCS}
       abstract_opengl_context_attribute_builder.cpp
       egl_context_attribute_builder.cpp
-      scripting/thumbnailitem.cpp
   )
 endif()
 if (KWIN_BUILD_WAYLAND)
