@@ -93,9 +93,12 @@ Shadow *Shadow::createShadowFromDecoration(Toplevel *toplevel)
     return shadow;
 }
 
-#if HAVE_WAYLAND
 Shadow *Shadow::createShadowFromWayland(Toplevel *toplevel)
 {
+#if !HAVE_WAYLAND
+    Q_UNREACHABLE();
+    return nullptr;
+#else
     auto surface = toplevel->surface();
     if (!surface) {
         return nullptr;
@@ -110,8 +113,8 @@ Shadow *Shadow::createShadowFromWayland(Toplevel *toplevel)
         return nullptr;
     }
     return shadow;
-}
 #endif
+}
 
 Shadow *Shadow::createShadowFromInternalWindow(Toplevel *toplevel)
 {
