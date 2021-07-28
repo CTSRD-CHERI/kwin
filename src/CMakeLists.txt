@@ -72,6 +72,7 @@ set(kwin_SRCS
     plugin.cpp
     pluginmanager.cpp
     pointer_input.cpp
+    popup_input_filter.cpp
     renderjournal.cpp
     renderloop.cpp
     rootinfo_filter.cpp
@@ -145,7 +146,6 @@ if (KWIN_BUILD_WAYLAND)
       layershellv1client.cpp
       layershellv1integration.cpp
       linux_dmabuf.cpp
-      popup_input_filter.cpp
       subsurfacemonitor.cpp
       surfaceitem_wayland.cpp
       virtualkeyboard_dbus.cpp
