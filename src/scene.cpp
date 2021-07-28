@@ -69,7 +69,6 @@
 #include "x11client.h"
 #include "deleted.h"
 #include "effects.h"
-#include "overlaywindow.h"
 #include "renderloop.h"
 #include "screens.h"
 #include "shadow.h"
@@ -531,14 +530,6 @@ void Scene::extendPaintRegion(QRegion &region, bool opaqueFullscreen)
     Q_UNUSED(opaqueFullscreen);
 }
 
-void Scene::screenGeometryChanged(const QSize &size)
-{
-    if (!overlayWindow()) {
-        return;
-    }
-    overlayWindow()->resize(size);
-}
-
 bool Scene::makeOpenGLContextCurrent()
 {
     return false;
@@ -604,7 +595,6 @@ PlatformSurfaceTexture *Scene::createPlatformSurfaceTextureWayland(SurfacePixmap
 Scene::Window::Window(Toplevel *client, QObject *parent)
     : QObject(parent)
     , toplevel(client)
-    , filter(ImageFilterFast)
     , disable_painting(0)
 {
 #if HAVE_WAYLAND

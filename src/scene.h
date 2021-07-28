@@ -109,13 +109,6 @@ public:
      * @param toplevel The Toplevel for which the Shadow needs to be created.
      */
     virtual Shadow *createShadow(Toplevel *toplevel) = 0;
-    /**
-     * Method invoked when the screen geometry is changed.
-     * Reimplementing classes should also invoke the parent method
-     * as it takes care of resizing the overlay window.
-     * @param size The new screen geometry size
-     */
-    virtual void screenGeometryChanged(const QSize &size);
     // Flags controlling how painting is done.
     enum {
         // Window (or at least part of it) will be painted opaque.
@@ -137,11 +130,6 @@ public:
         // Window will be painted with a lanczos filter.
         PAINT_WINDOW_LANCZOS = 1 << 8
         // PAINT_SCREEN_WITH_TRANSFORMED_WINDOWS_WITHOUT_FULL_REPAINTS = 1 << 9 has been removed
-    };
-    // types of filtering available
-    enum ImageFilterType {
-        ImageFilterFast,
-        ImageFilterGood,
     };
     virtual OverlayWindow* overlayWindow() const = 0;
 
@@ -346,7 +334,6 @@ public:
 
 protected:
     Toplevel* toplevel;
-    ImageFilterType filter;
 private:
     void referencePreviousPixmap_helper(SurfaceItem *item);
     void unreferencePreviousPixmap_helper(SurfaceItem *item);

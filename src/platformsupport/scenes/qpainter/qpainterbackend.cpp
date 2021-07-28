@@ -36,11 +36,6 @@ PlatformSurfaceTexture *QPainterBackend::createPlatformSurfaceTextureWayland(Sur
 }
 #endif
 
-void QPainterBackend::screenGeometryChanged(const QSize &size)
-{
-    Q_UNUSED(size)
-}
-
 void QPainterBackend::setFailed(const QString &reason)
 {
     qCWarning(KWIN_QPAINTER) << "Creating the QPainter backend failed: " << reason;
