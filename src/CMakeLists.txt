@@ -138,6 +138,7 @@ if (KWIN_BUILD_WAYLAND)
       inputmethod.cpp
       inputpanelv1client.cpp
       inputpanelv1integration.cpp
+      # The libinput sources assume wayland support (and aren't needed for X11 only)
       libinput/connection.cpp
       libinput/context.cpp
       libinput/device.cpp
