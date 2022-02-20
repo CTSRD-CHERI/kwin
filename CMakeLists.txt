@@ -193,11 +193,14 @@ set_package_properties(Wayland PROPERTIES
     TYPE REQUIRED
     PURPOSE "Required for building KWin with Wayland support"
 )
-add_feature_info("Wayland::EGL" Wayland_Egl_FOUND "Enable building of Wayland backend.")
+option(KWIN_BUILD_DRM_BACKEND "Enable building of KWin DRM backend" ON)
+option(KWIN_BUILD_WAYLAND_EGL "Enable building of KWin Wayland EGL output" ON)
+
 set(HAVE_WAYLAND_EGL FALSE)
-if (Wayland_Egl_FOUND)
+if (KWIN_BUILD_WAYLAND_EGL AND Wayland_Egl_FOUND)
     set(HAVE_WAYLAND_EGL TRUE)
 endif()
+add_feature_info("Wayland::EGL" HAVE_WAYLAND_EGL "Enable building of Wayland EGL backend.")
 
 find_package(XKB 0.7.0)
 set_package_properties(XKB PROPERTIES
@@ -218,15 +221,17 @@ set_package_properties(UDev PROPERTIES
     PURPOSE "Required for input handling on Wayland."
 )
 
-find_package(Libdrm 2.4.62)
-set_package_properties(Libdrm PROPERTIES TYPE REQUIRED PURPOSE "Required for drm output on Wayland.")
+if (KWIN_BUILD_DRM_BACKEND OR HAVE_WAYLAND_EGL)
+    find_package(Libdrm 2.4.62)
+    set_package_properties(Libdrm PROPERTIES TYPE REQUIRED PURPOSE "Required for drm output on Wayland.")
 
-find_package(gbm)
-set_package_properties(gbm PROPERTIES TYPE REQUIRED PURPOSE "Required for egl output of drm backend.")
-if (${gbm_VERSION} GREATER_EQUAL 21.1)
-    set(HAVE_GBM_BO_GET_FD_FOR_PLANE 1)
-else()
-    set(HAVE_GBM_BO_GET_FD_FOR_PLANE 0)
+    find_package(gbm)
+    set_package_properties(gbm PROPERTIES TYPE REQUIRED PURPOSE "Required for egl output of drm backend.")
+    if ("${gbm_VERSION}" GREATER_EQUAL 21.1)
+        set(HAVE_GBM_BO_GET_FD_FOR_PLANE 1)
+    else()
+        set(HAVE_GBM_BO_GET_FD_FOR_PLANE 0)
+    endif()
 endif()
 
 find_package(X11)
