@@ -12,7 +12,7 @@
 #ifndef KWIN_ATOMS_H
 #define KWIN_ATOMS_H
 
-#include "xcbutils.h"
+#include "utils/xcbutils.h"
 
 namespace KWin
 {
@@ -77,6 +77,7 @@ public:
     Xcb::Atom delete_atom;
     Xcb::Atom incr;
     Xcb::Atom wl_selection;
+    Xcb::Atom primary;
 
     /**
      * @internal

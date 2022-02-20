@@ -18,7 +18,11 @@
 #include <memory>
 
 #include <QElapsedTimer>
+#include <QIcon>
+#include <QKeySequence>
 #include <QPointer>
+
+class QMouseEvent;
 
 namespace KWaylandServer
 {
@@ -71,8 +75,15 @@ class KWIN_EXPORT AbstractClient : public Toplevel
     /**
      * The desktop this Client is on. If the Client is on all desktops the property has value -1.
      * This is a legacy property, use x11DesktopIds instead
+     *
+     * @deprecated Use the desktops property instead.
      */
     Q_PROPERTY(int desktop READ desktop WRITE setDesktop NOTIFY desktopChanged)
+
+    /**
+     * The virtual desktops this client is on. If it's on all desktops, the list is empty.
+     */
+    Q_PROPERTY(QVector<KWin::VirtualDesktop *> desktops READ desktops WRITE setDesktops NOTIFY desktopChanged)
 
     /**
      * Whether the Client is on all desktops. That is desktop is -1.
@@ -86,6 +97,8 @@ class KWIN_EXPORT AbstractClient : public Toplevel
 
     /**
      * The x11 ids for all desktops this client is in. On X11 this list will always have a length of 1
+     *
+     * @deprecated prefer using apis that use VirtualDesktop objects
      */
     Q_PROPERTY(QVector<uint> x11DesktopIds READ x11DesktopIds NOTIFY x11DesktopIdsChanged)
 
@@ -105,10 +118,9 @@ class KWIN_EXPORT AbstractClient : public Toplevel
     Q_PROPERTY(bool skipSwitcher READ skipSwitcher WRITE setSkipSwitcher NOTIFY skipSwitcherChanged)
 
     /**
-     * Whether the window can be closed by the user. The value is evaluated each time the getter is called.
-     * Because of that no changed signal is provided.
+     * Whether the window can be closed by the user.
      */
-    Q_PROPERTY(bool closeable READ isCloseable)
+    Q_PROPERTY(bool closeable READ isCloseable NOTIFY closeableChanged)
 
     Q_PROPERTY(QIcon icon READ icon NOTIFY iconChanged)
 
@@ -322,6 +334,11 @@ class KWIN_EXPORT AbstractClient : public Toplevel
 
     Q_PROPERTY(KWin::Layer layer READ layer)
 
+    /**
+     * Whether this client is hidden. It's usually the case with auto-hide panels.
+     */
+    Q_PROPERTY(bool hidden READ isHiddenInternal NOTIFY hiddenChanged)
+
 public:
     ~AbstractClient() override;
 
@@ -414,11 +431,10 @@ public:
     virtual QString captionSuffix() const = 0;
     virtual bool isPlaceable() const;
     virtual bool isCloseable() const = 0;
-    // TODO: remove boolean trap
-    virtual bool isShown(bool shaded_is_shown) const = 0;
+    virtual bool isShown() const = 0;
     virtual bool isHiddenInternal() const = 0;
-    // TODO: remove boolean trap
-    virtual void hideClient(bool hide) = 0;
+    virtual void hideClient() = 0;
+    virtual void showClient() = 0;
     virtual bool isFullScreenable() const;
     virtual bool isFullScreen() const;
     virtual bool isRequestedFullScreen() const;
@@ -455,8 +471,8 @@ public:
      * false for Normal, Dialog, Utility and Menu (and Toolbar??? - not yet) TODO
      */
     bool isSpecialWindow() const;
-    void sendToScreen(int screen);
-    void updateGeometryRestoresForFullscreen(int screen);
+    void sendToOutput(AbstractOutput *output);
+    void updateGeometryRestoresForFullscreen(AbstractOutput *output);
     const QKeySequence &shortcut() const {
         return _shortcut;
     }
@@ -473,13 +489,12 @@ public:
      */
     void setDesktops(QVector<VirtualDesktop *> desktops);
 
-    int desktop() const override {
-        return m_desktops.isEmpty() ? (int)NET::OnAllDesktops : m_desktops.last()->x11DesktopNumber();
-    }
+    int desktop() const override;
     QVector<VirtualDesktop *> desktops() const override {
         return m_desktops;
     }
     QVector<uint> x11DesktopIds() const;
+    QStringList desktopIds() const;
 
     void setMinimized(bool set);
     /**
@@ -568,7 +583,7 @@ public:
      * The default implementation returns @c false.
      */
     virtual bool dockWantsInput() const;
-    void checkWorkspacePosition(QRect oldGeometry = QRect(), int oldDesktop = -2,  QRect oldClientGeometry = QRect());
+    void checkWorkspacePosition(QRect oldGeometry = QRect(), const VirtualDesktop *oldDesktop = nullptr);
     virtual xcb_timestamp_t userTime() const;
     virtual void updateWindowRules(Rules::Types selection);
 
@@ -583,25 +598,10 @@ public:
     void endInteractiveMoveResize();
     void keyPressEvent(uint key_code);
 
-    void enterEvent(const QPoint &globalPos);
-    void leaveEvent();
+    virtual void pointerEnterEvent(const QPoint &globalPos);
+    virtual void pointerLeaveEvent();
 
-    /**
-     * These values represent positions inside an area
-     */
-    enum Position {
-        // without prefix, they'd conflict with Qt::TopLeftCorner etc. :(
-        PositionCenter         = 0x00,
-        PositionLeft           = 0x01,
-        PositionRight          = 0x02,
-        PositionTop            = 0x04,
-        PositionBottom         = 0x08,
-        PositionTopLeft        = PositionLeft | PositionTop,
-        PositionTopRight       = PositionRight | PositionTop,
-        PositionBottomLeft     = PositionLeft | PositionBottom,
-        PositionBottomRight    = PositionRight | PositionBottom
-    };
-    Position titlebarPosition() const;
+    Qt::Edge titlebarPosition() const;
     bool titlebarPositionUnderMouse() const;
 
     // a helper for the workspace window packing. tests for screen validity and updates since in maximization case as with normal moving
@@ -619,8 +619,6 @@ public:
     }
     Layer layer() const override;
     void updateLayer();
-
-    void placeIn(const QRect &area);
 
     void move(const QPoint &point);
     void resize(const QSize &size);
@@ -643,7 +641,7 @@ public:
 
     virtual QSize constrainClientSize(const QSize &size, SizeMode mode = SizeModeAny) const;
     QSize constrainFrameSize(const QSize &size, SizeMode mode = SizeModeAny) const;
-    QSize adjustedSize() const;
+    QSize implicitSize() const;
 
     /**
      * Calculates the matching client position for the given frame position @p point.
@@ -697,13 +695,13 @@ public:
      * Returns @c true if the Client is being interactively moved; otherwise @c false.
      */
     bool isInteractiveMove() const {
-        return isInteractiveMoveResize() && interactiveMoveResizePointerMode() == PositionCenter;
+        return isInteractiveMoveResize() && interactiveMoveResizeGravity() == Gravity::None;
     }
     /**
      * Returns @c true if the Client is being interactively resized; otherwise @c false.
      */
     bool isInteractiveResize() const {
-        return isInteractiveMoveResize() && interactiveMoveResizePointerMode() != PositionCenter;
+        return isInteractiveMoveResize() && interactiveMoveResizeGravity() != Gravity::None;
     }
     /**
      * Cursor shape for move/resize mode.
@@ -731,10 +729,10 @@ public:
 
     // decoration related
     KDecoration2::Decoration *decoration() {
-        return m_decoration.decoration;
+        return m_decoration.decoration.data();
     }
     const KDecoration2::Decoration *decoration() const {
-        return m_decoration.decoration;
+        return m_decoration.decoration.data();
     }
     bool isDecorated() const {
         return m_decoration.decoration != nullptr;
@@ -743,16 +741,13 @@ public:
     void setDecoratedClient(QPointer<Decoration::DecoratedClientImpl> client);
     bool decorationHasAlpha() const;
     void triggerDecorationRepaint();
-    virtual void layoutDecorationRects(QRect &left, QRect &top, QRect &right, QRect &bottom) const;
+    void layoutDecorationRects(QRect &left, QRect &top, QRect &right, QRect &bottom) const;
     void processDecorationMove(const QPoint &localPos, const QPoint &globalPos);
     bool processDecorationButtonPress(QMouseEvent *event, bool ignoreMenu = false);
     void processDecorationButtonRelease(QMouseEvent *event);
     bool wantsShadowToBeRendered() const override;
 
-    /**
-     * TODO: fix boolean traps
-     */
-    virtual void updateDecoration(bool check_workspace_pos, bool force = false);
+    virtual void invalidateDecoration();
 
     /**
      * Returns whether the window provides context help or not. If it does,
@@ -866,16 +861,6 @@ public:
     virtual Group *group();
 
     /**
-     * Returns whether this is an internal client.
-     *
-     * Internal clients are created by KWin and used for special purpose windows,
-     * like the task switcher, etc.
-     *
-     * Default implementation returns @c false.
-     */
-    virtual bool isInternal() const;
-
-    /**
      * Returns whether window rules can be applied to this client.
      *
      * Default implementation returns @c false.
@@ -944,6 +929,7 @@ Q_SIGNALS:
     void applicationMenuActiveChanged(bool);
     void unresponsiveChanged(bool);
     void decorationChanged();
+    void hiddenChanged();
 
 protected:
     AbstractClient();
@@ -1043,7 +1029,9 @@ protected:
     bool isElectricBorderMaximizing() const {
         return m_electricMaximizing;
     }
-    QRect electricBorderMaximizeGeometry(QPoint pos, int desktop);
+    void updateElectricGeometryRestore();
+    QRect quickTileGeometryRestore() const;
+    QRect quickTileGeometry(QuickTileMode mode, const QPoint &pos) const;
     void updateQuickTileMode(QuickTileMode newMode) {
         m_quickTileMode = newMode;
     }
@@ -1116,11 +1104,11 @@ protected:
      */
     void updateInitialMoveResizeGeometry();
     void setMoveResizeGeometry(const QRect &geo);
-    Position interactiveMoveResizePointerMode() const {
-        return m_interactiveMoveResize.pointer;
+    Gravity interactiveMoveResizeGravity() const {
+        return m_interactiveMoveResize.gravity;
     }
-    void setInteractiveMoveResizePointerMode(Position mode) {
-        m_interactiveMoveResize.pointer = mode;
+    void setInteractiveMoveResizeGravity(Gravity gravity) {
+        m_interactiveMoveResize.gravity = gravity;
     }
     bool isInteractiveMoveResizePointerButtonDown() const {
         return m_interactiveMoveResize.buttonDown;
@@ -1128,8 +1116,8 @@ protected:
     void setInteractiveMoveResizePointerButtonDown(bool down) {
         m_interactiveMoveResize.buttonDown = down;
     }
-    int interactiveMoveResizeStartScreen() const {
-        return m_interactiveMoveResize.startScreen;
+    AbstractOutput *interactiveMoveResizeStartOutput() const {
+        return m_interactiveMoveResize.startOutput;
     }
     void checkUnrestrictedInteractiveMoveResize();
     /**
@@ -1157,8 +1145,6 @@ protected:
      * ensures that the internal mode is properly ended.
      */
     virtual void leaveInteractiveMoveResize();
-    virtual void positionGeometryTip();
-    void performInteractiveMoveResize();
     /*
      * Checks if the mouse cursor is near the edge of the screen and if so
      * activates quick tiling or maximization
@@ -1183,22 +1169,12 @@ protected:
     virtual QSize resizeIncrements() const;
 
     /**
-     * Returns the position depending on the Decoration's section under mouse.
-     * If no decoration it returns PositionCenter.
+     * Returns the interactive move resize gravity depending on the Decoration's section
+     * under mouse. If no decoration it returns Gravity::None.
      */
-    Position mousePosition() const;
+    Gravity mouseGravity() const;
 
-    static bool haveResizeEffect() {
-        return s_haveResizeEffect;
-    }
-    static void updateHaveResizeEffect();
-    static void resetHaveResizeEffect() {
-        s_haveResizeEffect = false;
-    }
-
-    void setDecoration(KDecoration2::Decoration *decoration);
-    virtual void createDecoration(const QRect &oldGeometry);
-    virtual void destroyDecoration();
+    void setDecoration(QSharedPointer<KDecoration2::Decoration> decoration);
     void startDecorationDoubleClickTimer();
     void invalidateDecorationDoubleClickTimer();
     void updateDecorationInputShape();
@@ -1239,6 +1215,8 @@ protected:
 
     void cleanTabBox();
 
+    QStringList m_activityList;
+
 private Q_SLOTS:
     void shadeHover();
     void shadeUnhover();
@@ -1266,7 +1244,6 @@ private:
     ShadeMode m_shadeMode = ShadeNone;
     QVector <VirtualDesktop *> m_desktops;
 
-    QStringList m_activityList;
     int m_activityUpdatesBlocked = 0;
     bool m_blockedActivityUpdatesRequireTransients = false;
 
@@ -1284,6 +1261,7 @@ private:
 
     // electric border/quick tiling
     QuickTileMode m_electricMode = QuickTileFlag::None;
+    QRect m_electricGeometryRestore;
     bool m_electricMaximizing = false;
     // The quick tile mode of this window.
     int m_quickTileMode = int(QuickTileFlag::None);
@@ -1304,15 +1282,15 @@ private:
         QPoint offset;
         QPoint invertedOffset;
         QRect initialGeometry;
-        Position pointer = PositionCenter;
+        Gravity gravity = Gravity::None;
         bool buttonDown = false;
         CursorShape cursor = Qt::ArrowCursor;
-        int startScreen = 0;
+        AbstractOutput *startOutput = nullptr;
         QTimer *delayedTimer = nullptr;
     } m_interactiveMoveResize;
 
     struct {
-        KDecoration2::Decoration *decoration = nullptr;
+        QSharedPointer<KDecoration2::Decoration> decoration;
         QPointer<Decoration::DecoratedClientImpl> client;
         QElapsedTimer doubleClickTimer;
         QRegion inputRegion;
@@ -1328,8 +1306,6 @@ private:
     QKeySequence _shortcut;
 
     WindowRules m_rules;
-
-    static bool s_haveResizeEffect;
 };
 
 /**

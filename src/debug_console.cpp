@@ -8,47 +8,55 @@
 */
 #include "debug_console.h"
 #include "composite.h"
-#include "x11client.h"
 #include "input_event.h"
+#include "inputdevice.h"
 #include "internal_client.h"
+#include "keyboard_input.h"
 #include "main.h"
 #include "scene.h"
 #include "unmanaged.h"
-#if HAVE_WAYLAND
+#include "utils/subsurfacemonitor.h"
+#include "wayland_server.h"
 #include "waylandclient.h"
-#endif
 #include "workspace.h"
-#include "keyboard_input.h"
-#include "input_event.h"
-#include "subsurfacemonitor.h"
-#include "libinput/connection.h"
-#include "libinput/device.h"
-#if QT_CONFIG(opengl)
+#include "x11client.h"
 #include <kwinglplatform.h>
 #include <kwinglutils.h>
-#endif
+#include <cerrno>
 
 #include "ui_debug_console.h"
 
 // KWayland
-#if HAVE_WAYLAND
-#include <KWaylandServer/shmclientbuffer.h>
+#include <KWaylandServer/abstract_data_source.h>
 #include <KWaylandServer/clientconnection.h>
+#include <KWaylandServer/datacontrolsource_v1_interface.h>
+#include <KWaylandServer/datasource_interface.h>
+#include <KWaylandServer/display.h>
+#include <KWaylandServer/primaryselectionsource_v1_interface.h>
+#include <KWaylandServer/seat_interface.h>
+#include <KWaylandServer/shmclientbuffer.h>
 #include <KWaylandServer/subcompositor_interface.h>
 #include <KWaylandServer/surface_interface.h>
-#endif
 // frameworks
 #include <KLocalizedString>
 #include <NETWM>
 // Qt
-#include <QMouseEvent>
+#include <QFutureWatcher>
 #include <QMetaProperty>
 #include <QMetaType>
+#include <QMouseEvent>
+#include <QScopeGuard>
+#include <QtConcurrentRun>
+
+#include <wayland-server-core.h>
 
 // xkb
 #include <xkbcommon/xkbcommon.h>
 
+#include <fcntl.h>
 #include <functional>
+#include <sys/poll.h>
+#include <unistd.h>
 
 namespace KWin
 {
@@ -138,12 +146,12 @@ static QString buttonToString(Qt::MouseButton button)
     }
 }
 
-static QString deviceRow(LibInput::Device *device)
+static QString deviceRow(InputDevice *device)
 {
     if (!device) {
         return tableRow(i18n("Input Device"), i18nc("The input device of the event is not known", "Unknown"));
     }
-    return tableRow(i18n("Input Device"), QStringLiteral("%1 (%2)").arg(device->name()).arg(device->sysName()));
+    return tableRow(i18n("Input Device"), QStringLiteral("%1 (%2)").arg(device->name(), device->sysName()));
 }
 
 static QString buttonsToString(Qt::MouseButtons buttons)
@@ -558,6 +566,28 @@ void DebugConsoleFilter::tabletPadRingEvent(int number, int position, bool isFin
     m_textEdit->ensureCursorVisible();
 }
 
+static QString sourceString(const KWaylandServer::AbstractDataSource *const source)
+{
+    if (!source) {
+        return QString();
+    }
+
+    if (!source->client()) {
+        return QStringLiteral("XWayland source");
+    }
+
+    const QString executable = waylandServer()->display()->getConnection(source->client())->executablePath();
+
+    if (auto dataSource = qobject_cast<const KWaylandServer::DataSourceInterface *const>(source)) {
+        return QStringLiteral("wl_data_source@%1 of %2").arg(wl_resource_get_id(dataSource->resource())).arg(executable);
+    } else if (qobject_cast<const KWaylandServer::PrimarySelectionSourceV1Interface *const>(source)) {
+        return QStringLiteral("zwp_primary_selection_source_v1 of %2").arg(executable);
+    } else if (qobject_cast<const KWaylandServer::DataControlSourceV1Interface *const>(source)) {
+        return QStringLiteral("data control by %1").arg(executable);
+    }
+    return QStringLiteral("unknown source of").arg(executable);
+}
+
 DebugConsole::DebugConsole()
     : QWidget()
     , m_ui(new Ui::DebugConsole)
@@ -566,15 +596,11 @@ DebugConsole::DebugConsole()
     m_ui->setupUi(this);
     m_ui->windowsView->setItemDelegate(new DebugConsoleDelegate(this));
     m_ui->windowsView->setModel(new DebugConsoleModel(this));
-#if HAVE_WAYLAND
     m_ui->surfacesView->setModel(new SurfaceTreeModel(this));
-#endif
-    if (kwinApp()->usesLibinput()) {
-#if HAVE_LIBINPUT
-        m_ui->inputDevicesView->setModel(new InputDeviceModel(this));
-        m_ui->inputDevicesView->setItemDelegate(new DebugConsoleDelegate(this));
-#endif
-    }
+    m_ui->clipboardContent->setModel(new DataSourceModel(this));
+    m_ui->primaryContent->setModel(new DataSourceModel(this));
+    m_ui->inputDevicesView->setModel(new InputDeviceModel(this));
+    m_ui->inputDevicesView->setItemDelegate(new DebugConsoleDelegate(this));
     m_ui->quitButton->setIcon(QIcon::fromTheme(QStringLiteral("application-exit")));
     m_ui->tabWidget->setTabIcon(0, QIcon::fromTheme(QStringLiteral("view-list-tree")));
     m_ui->tabWidget->setTabIcon(1, QIcon::fromTheme(QStringLiteral("view-list-tree")));
@@ -582,9 +608,7 @@ DebugConsole::DebugConsole()
     if (kwinApp()->operationMode() == Application::OperationMode::OperationModeX11) {
         m_ui->tabWidget->setTabEnabled(1, false);
         m_ui->tabWidget->setTabEnabled(2, false);
-    }
-    if (!kwinApp()->usesLibinput()) {
-        m_ui->tabWidget->setTabEnabled(3, false);
+        m_ui->tabWidget->setTabEnabled(6, false);
     }
 
     connect(m_ui->quitButton, &QAbstractButton::clicked, this, &DebugConsole::deleteLater);
@@ -598,6 +622,20 @@ DebugConsole::DebugConsole()
             if (index == 5) {
                 updateKeyboardTab();
                 connect(input(), &InputRedirection::keyStateChanged, this, &DebugConsole::updateKeyboardTab);
+            }
+            if (index == 6) {
+                static_cast<DataSourceModel *>(m_ui->clipboardContent->model())->setSource(waylandServer()->seat()->selection());
+                m_ui->clipboardSource->setText(sourceString(waylandServer()->seat()->selection()));
+                connect(waylandServer()->seat(), &KWaylandServer::SeatInterface::selectionChanged, this, [this](KWaylandServer::AbstractDataSource *source) {
+                    static_cast<DataSourceModel *>(m_ui->clipboardContent->model())->setSource(source);
+                    m_ui->clipboardSource->setText(sourceString(source));
+                });
+                static_cast<DataSourceModel *>(m_ui->primaryContent->model())->setSource(waylandServer()->seat()->primarySelection());
+                m_ui->primarySource->setText(sourceString(waylandServer()->seat()->primarySelection()));
+                connect(waylandServer()->seat(), &KWaylandServer::SeatInterface::primarySelectionChanged, this, [this](KWaylandServer::AbstractDataSource *source) {
+                    static_cast<DataSourceModel *>(m_ui->primaryContent->model())->setSource(source);
+                    m_ui->primarySource->setText(sourceString(source));
+                });
             }
         }
     );
@@ -617,7 +655,6 @@ void DebugConsole::initGLTab()
         m_ui->glInfoScrollArea->setVisible(false);
         return;
     }
-#if QT_CONFIG(opengl)
     GLPlatform *gl = GLPlatform::instance();
     m_ui->noOpenGLLabel->setVisible(false);
     m_ui->glInfoScrollArea->setVisible(true);
@@ -641,7 +678,6 @@ void DebugConsole::initGLTab()
 
     m_ui->platformExtensionsLabel->setText(extensionsString(Compositor::self()->scene()->openGLPlatformInterfaceExtensions()));
     m_ui->openGLExtensionsLabel->setText(extensionsString(openGLExtensions()));
-#endif
 }
 
 template <typename T>
@@ -732,7 +768,6 @@ QString DebugConsoleDelegate::displayText(const QVariant &value, const QLocale &
         return QStringLiteral("%1,%2 %3x%4").arg(r.x()).arg(r.y()).arg(r.width()).arg(r.height());
     }
     default:
-#if HAVE_WAYLAND
         if (value.userType() == qMetaTypeId<KWaylandServer::SurfaceInterface*>()) {
             if (auto s = value.value<KWaylandServer::SurfaceInterface*>()) {
                 return QStringLiteral("KWaylandServer::SurfaceInterface(0x%1)").arg(qulonglong(s), 0, 16);
@@ -740,7 +775,6 @@ QString DebugConsoleDelegate::displayText(const QVariant &value, const QLocale &
                 return QStringLiteral("nullptr");
             }
         }
-#endif
         if (value.userType() == qMetaTypeId<Qt::MouseButtons>()) {
             const auto buttons = value.value<Qt::MouseButtons>();
             if (buttons == Qt::NoButton) {
@@ -919,13 +953,11 @@ void DebugConsoleModel::handleClientAdded(AbstractClient *client)
         return;
     }
 
-#if HAVE_WAYLAND
     WaylandClient *waylandClient = qobject_cast<WaylandClient *>(client);
     if (waylandClient) {
         add(s_waylandClientId - 1, m_waylandClients, waylandClient);
         return;
     }
-#endif
 }
 
 void DebugConsoleModel::handleClientRemoved(AbstractClient *client)
@@ -936,13 +968,11 @@ void DebugConsoleModel::handleClientRemoved(AbstractClient *client)
         return;
     }
 
-#if HAVE_WAYLAND
     WaylandClient *waylandClient = qobject_cast<WaylandClient *>(client);
     if (waylandClient) {
         remove(s_waylandClientId - 1, m_waylandClients, waylandClient);
         return;
     }
-#endif
 }
 
 DebugConsoleModel::~DebugConsoleModel() = default;
@@ -995,10 +1025,8 @@ int DebugConsoleModel::rowCount(const QModelIndex &parent) const
         return propertyCount(parent, &DebugConsoleModel::x11Client);
     } else if (parent.internalId() < s_idDistance * (s_x11UnmanagedId + 1)) {
         return propertyCount(parent, &DebugConsoleModel::unmanaged);
-#if HAVE_WAYLAND
     } else if (parent.internalId() < s_idDistance * (s_waylandClientId + 1)) {
         return propertyCount(parent, &DebugConsoleModel::waylandClient);
-#endif
     } else if (parent.internalId() < s_idDistance * (s_workspaceInternalId + 1)) {
         return propertyCount(parent, &DebugConsoleModel::internalClient);
     }
@@ -1062,10 +1090,8 @@ QModelIndex DebugConsoleModel::index(int row, int column, const QModelIndex &par
         return indexForProperty(row, column, parent, &DebugConsoleModel::x11Client);
     } else if (parent.internalId() < s_idDistance * (s_x11UnmanagedId + 1)) {
         return indexForProperty(row, column, parent, &DebugConsoleModel::unmanaged);
-#if HAVE_WAYLAND
     } else if (parent.internalId() < s_idDistance * (s_waylandClientId + 1)) {
         return indexForProperty(row, column, parent, &DebugConsoleModel::waylandClient);
-#endif
     } else if (parent.internalId() < s_idDistance * (s_workspaceInternalId + 1)) {
         return indexForProperty(row, column, parent, &DebugConsoleModel::internalClient);
     }
@@ -1204,12 +1230,9 @@ QVariant DebugConsoleModel::data(const QModelIndex &index, int role) const
         if (index.column() >= 2 || role != Qt::DisplayRole) {
             return QVariant();
         }
-#if HAVE_WAYLAND
         if (AbstractClient *c = waylandClient(index)) {
             return propertyData(c, index, role);
-        } else
-#endif
-        if (InternalClient *c = internalClient(index)) {
+        } else if (InternalClient *c = internalClient(index)) {
             return propertyData(c, index, role);
         } else if (X11Client *c = x11Client(index)) {
             return propertyData(c, index, role);
@@ -1239,10 +1262,8 @@ QVariant DebugConsoleModel::data(const QModelIndex &index, int role) const
             }
             break;
         }
-#if HAVE_WAYLAND
         case s_waylandClientId:
             return clientData<WaylandClient>(index, role, m_waylandClients, generic);
-#endif
         case s_workspaceInternalId:
             return clientData<InternalClient>(index, role, m_internalClients, generic);
         default:
@@ -1263,12 +1284,10 @@ static T *clientForIndex(const QModelIndex &index, const QVector<T*> &clients, i
     return clients.at(row);
 }
 
-#if HAVE_WAYLAND
 WaylandClient *DebugConsoleModel::waylandClient(const QModelIndex &index) const
 {
     return clientForIndex(index, m_waylandClients, s_waylandClientId);
 }
-#endif
 
 InternalClient *DebugConsoleModel::internalClient(const QModelIndex &index) const
 {
@@ -1286,7 +1305,6 @@ Unmanaged *DebugConsoleModel::unmanaged(const QModelIndex &index) const
 }
 
 /////////////////////////////////////// SurfaceTreeModel
-#if HAVE_WAYLAND
 SurfaceTreeModel::SurfaceTreeModel(QObject *parent)
     : QAbstractItemModel(parent)
 {
@@ -1459,27 +1477,25 @@ QVariant SurfaceTreeModel::data(const QModelIndex &index, int role) const
     }
     return QVariant();
 }
-#endif // HAVE_WAYLAND
 
-#if HAVE_LIBINPUT
 InputDeviceModel::InputDeviceModel(QObject *parent)
     : QAbstractItemModel(parent)
-    , m_devices(LibInput::Connection::self()->devices())
+    , m_devices(input()->devices())
 {
     for (auto it = m_devices.constBegin(); it != m_devices.constEnd(); ++it) {
         setupDeviceConnections(*it);
     }
-    auto c = LibInput::Connection::self();
-    connect(c, &LibInput::Connection::deviceAdded, this,
-        [this] (LibInput::Device *d) {
+
+    connect(input(), &InputRedirection::deviceAdded, this,
+        [this] (InputDevice *d) {
             beginInsertRows(QModelIndex(), m_devices.count(), m_devices.count());
             m_devices << d;
             setupDeviceConnections(d);
             endInsertRows();
         }
     );
-    connect(c, &LibInput::Connection::deviceRemoved, this,
-        [this] (LibInput::Device *d) {
+    connect(input(), &InputRedirection::deviceRemoved, this,
+        [this] (InputDevice *d) {
             const int index = m_devices.indexOf(d);
             if (index == -1) {
                 return;
@@ -1506,17 +1522,16 @@ QVariant InputDeviceModel::data(const QModelIndex &index, int role) const
         return QVariant();
     }
     if (!index.parent().isValid() && index.column() == 0) {
-        const auto devices = LibInput::Connection::self()->devices();
-        if (index.row() >= devices.count()) {
+        if (index.row() >= m_devices.count()) {
             return QVariant();
         }
         if (role == Qt::DisplayRole) {
-            return devices.at(index.row())->name();
+            return m_devices.at(index.row())->name();
         }
     }
     if (index.parent().isValid()) {
         if (role == Qt::DisplayRole) {
-            const auto device = LibInput::Connection::self()->devices().at(index.parent().row());
+            const auto device = m_devices.at(index.parent().row());
             const auto property = device->metaObject()->property(index.row());
             if (index.column() == 0) {
                 return property.name();
@@ -1537,12 +1552,12 @@ QModelIndex InputDeviceModel::index(int row, int column, const QModelIndex &pare
         if (parent.internalId() & s_propertyBitMask) {
             return QModelIndex();
         }
-        if (row >= LibInput::Connection::self()->devices().at(parent.row())->metaObject()->propertyCount()) {
+        if (row >= m_devices.at(parent.row())->metaObject()->propertyCount()) {
             return QModelIndex();
         }
         return createIndex(row, column, quint32(row + 1) << 16 | parent.internalId());
     }
-    if (row >= LibInput::Connection::self()->devices().count()) {
+    if (row >= m_devices.count()) {
         return QModelIndex();
     }
     return createIndex(row, column, row + 1);
@@ -1551,13 +1566,13 @@ QModelIndex InputDeviceModel::index(int row, int column, const QModelIndex &pare
 int InputDeviceModel::rowCount(const QModelIndex &parent) const
 {
     if (!parent.isValid()) {
-        return LibInput::Connection::self()->devices().count();
+        return m_devices.count();
     }
     if (parent.internalId() & s_propertyBitMask) {
         return 0;
     }
 
-    return LibInput::Connection::self()->devices().at(parent.row())->metaObject()->propertyCount();
+    return m_devices.at(parent.row())->metaObject()->propertyCount();
 }
 
 QModelIndex InputDeviceModel::parent(const QModelIndex &child) const
@@ -1569,31 +1584,140 @@ QModelIndex InputDeviceModel::parent(const QModelIndex &child) const
     return QModelIndex();
 }
 
-void InputDeviceModel::setupDeviceConnections(LibInput::Device *device)
+void InputDeviceModel::slotPropertyChanged()
 {
-    connect(device, &LibInput::Device::enabledChanged, this,
-        [this, device] {
+    const auto device = static_cast<InputDevice *>(sender());
+
+    for (int i = 0; i < device->metaObject()->propertyCount(); ++i) {
+        const QMetaProperty metaProperty = device->metaObject()->property(i);
+        if (metaProperty.notifySignalIndex() == senderSignalIndex()) {
             const QModelIndex parent = index(m_devices.indexOf(device), 0, QModelIndex());
-            const QModelIndex child = index(device->metaObject()->indexOfProperty("enabled"), 1, parent);
+            const QModelIndex child = index(i, 1, parent);
             Q_EMIT dataChanged(child, child, QVector<int>{Qt::DisplayRole});
         }
-    );
-    connect(device, &LibInput::Device::leftHandedChanged, this,
-        [this, device] {
-            const QModelIndex parent = index(m_devices.indexOf(device), 0, QModelIndex());
-            const QModelIndex child = index(device->metaObject()->indexOfProperty("leftHanded"), 1, parent);
-            Q_EMIT dataChanged(child, child, QVector<int>{Qt::DisplayRole});
-        }
-    );
-    connect(device, &LibInput::Device::pointerAccelerationChanged, this,
-        [this, device] {
-            const QModelIndex parent = index(m_devices.indexOf(device), 0, QModelIndex());
-            const QModelIndex child = index(device->metaObject()->indexOfProperty("pointerAcceleration"), 1, parent);
-            Q_EMIT dataChanged(child, child, QVector<int>{Qt::DisplayRole});
-        }
-    );
+    }
 }
 
-#endif // HAVE_LIBINPUT
+void InputDeviceModel::setupDeviceConnections(InputDevice *device)
+{
+    QMetaMethod handler = metaObject()->method(metaObject()->indexOfMethod("slotPropertyChanged()"));
+    for (int i = 0; i < device->metaObject()->propertyCount(); ++i) {
+        const QMetaProperty metaProperty = device->metaObject()->property(i);
+        if (metaProperty.hasNotifySignal()) {
+            connect(device, metaProperty.notifySignal(), this, handler);
+        }
+    }
+}
 
+QModelIndex DataSourceModel::index(int row, int column, const QModelIndex &parent) const
+{
+    if (!m_source || parent.isValid() || column >= 2 || row >= m_source->mimeTypes().size()) {
+        return QModelIndex();
+    }
+    return createIndex(row, column, nullptr);
+}
+
+QModelIndex DataSourceModel::parent(const QModelIndex &child) const
+{
+    return QModelIndex();
+}
+
+int DataSourceModel::rowCount(const QModelIndex &parent) const
+{
+    if (!parent.isValid()) {
+        return m_source ? m_source->mimeTypes().count() : 0;
+    }
+    return 0;
+}
+
+QVariant DataSourceModel::headerData(int section, Qt::Orientation orientation, int role) const
+{
+    if (role != Qt::DisplayRole || orientation != Qt::Horizontal || section >= 2) {
+        return QVariant();
+    }
+    return section == 0 ? QStringLiteral("Mime type") : QStringLiteral("Content");
+}
+
+QVariant DataSourceModel::data(const QModelIndex &index, int role) const
+{
+    if (!checkIndex(index, CheckIndexOption::ParentIsInvalid | CheckIndexOption::IndexIsValid)) {
+        return QVariant();
+    }
+    const QString mimeType = m_source->mimeTypes().at(index.row());
+    ;
+    if (index.column() == 0 && role == Qt::DisplayRole) {
+        return mimeType;
+    } else if (index.column() == 1 && index.row() < m_data.count()) {
+        const QByteArray &data = m_data.at(index.row());
+        if (mimeType.contains(QLatin1String("image"))) {
+            if (role == Qt::DecorationRole) {
+                return QImage::fromData(data);
+            }
+        } else if (role == Qt::DisplayRole) {
+            return data;
+        }
+    }
+    return QVariant();
+}
+
+static QByteArray readData(int fd)
+{
+    pollfd pfd;
+    pfd.fd = fd;
+    pfd.events = POLLIN;
+    auto closeFd = qScopeGuard([fd] {
+        close(fd);
+    });
+    QByteArray data;
+    while (true) {
+        const int ready = poll(&pfd, 1, 1000);
+        if (ready < 0) {
+            if (errno != EINTR) {
+                return QByteArrayLiteral("poll() failed: ") + strerror(errno);
+            }
+        } else if (ready == 0) {
+            return QByteArrayLiteral("timeout reading from pipe");
+        } else {
+            char buf[4096];
+            int n = read(fd, buf, sizeof buf);
+
+            if (n < 0) {
+                return QByteArrayLiteral("read failed: ") + strerror(errno);
+            } else if (n == 0) {
+                return data;
+            } else if (n > 0) {
+                data.append(buf, n);
+            }
+        }
+    }
+}
+
+void DataSourceModel::setSource(KWaylandServer::AbstractDataSource *source)
+{
+    beginResetModel();
+    m_source = source;
+    m_data.clear();
+    if (source) {
+        m_data.resize(m_source->mimeTypes().size());
+        for (auto type = m_source->mimeTypes().cbegin(); type != m_source->mimeTypes().cend(); ++type) {
+            int pipeFds[2];
+            if (pipe2(pipeFds, O_CLOEXEC) != 0) {
+                continue;
+            }
+            source->requestData(*type, pipeFds[1]);
+            QFuture<QByteArray> data = QtConcurrent::run(readData, pipeFds[0]);
+            auto watcher = new QFutureWatcher<QByteArray>(this);
+            watcher->setFuture(data);
+            const int index = type - m_source->mimeTypes().cbegin();
+            connect(watcher, &QFutureWatcher<QByteArray>::finished, this, [this, watcher, index, source = QPointer(source)] {
+                watcher->deleteLater();
+                if (source && source == m_source) {
+                    m_data[index] = watcher->result();
+                    Q_EMIT dataChanged(this->index(index, 1), this->index(index, 1), {Qt::DecorationRole | Qt::DisplayRole});
+                }
+            });
+        }
+    }
+    endResetModel();
+}
 }

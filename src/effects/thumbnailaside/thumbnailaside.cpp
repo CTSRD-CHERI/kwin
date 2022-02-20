@@ -55,7 +55,7 @@ void ThumbnailAsideEffect::paintScreen(int mask, const QRegion &region, ScreenPa
     effects->paintScreen(mask, region, data);
 
     const QMatrix4x4 projectionMatrix = data.projectionMatrix();
-    Q_FOREACH (const Data & d, windows) {
+    for (const Data &d : qAsConst(windows)) {
         if (painted.intersects(d.rect)) {
             WindowPaintData data(d.window, projectionMatrix);
             data.multiplyOpacity(opacity);
@@ -75,7 +75,7 @@ void ThumbnailAsideEffect::paintWindow(EffectWindow *w, int mask, QRegion region
 
 void ThumbnailAsideEffect::slotWindowDamaged(EffectWindow* w, const QRegion&)
 {
-    Q_FOREACH (const Data & d, windows) {
+    for (const Data &d : qAsConst(windows)) {
         if (d.window == w)
             effects->addRepaint(d.rect);
     }
@@ -83,7 +83,7 @@ void ThumbnailAsideEffect::slotWindowDamaged(EffectWindow* w, const QRegion&)
 
 void ThumbnailAsideEffect::slotWindowFrameGeometryChanged(EffectWindow* w, const QRect& old)
 {
-    Q_FOREACH (const Data & d, windows) {
+    for (const Data &d : qAsConst(windows)) {
         if (d.window == w) {
             if (w->size() == old.size())
                 effects->addRepaint(d.rect);
@@ -144,12 +144,16 @@ void ThumbnailAsideEffect::arrange()
     int height = 0;
     QVector< int > pos(windows.size());
     int mwidth = 0;
-    Q_FOREACH (const Data & d, windows) {
+    for (const Data &d : qAsConst(windows)) {
         height += d.window->height();
         mwidth = qMax(mwidth, d.window->width());
         pos[ d.index ] = d.window->height();
     }
-    QRect area = effects->clientArea(MaximizeArea, screen, effects->currentDesktop());
+    EffectScreen *effectiveScreen = effects->findScreen(screen);
+    if (!effectiveScreen ) {
+        effectiveScreen = effects->activeScreen();
+    }
+    QRect area = effects->clientArea(MaximizeArea, effectiveScreen, effects->currentDesktop());
     double scale = area.height() / double(height);
     scale = qMin(scale, maxwidth / double(mwidth));    // don't be wider than maxwidth pixels
     int add = 0;
@@ -172,8 +176,9 @@ void ThumbnailAsideEffect::arrange()
 
 void ThumbnailAsideEffect::repaintAll()
 {
-    Q_FOREACH (const Data & d, windows)
-    effects->addRepaint(d.rect);
+    for (const Data &d : qAsConst(windows)) {
+        effects->addRepaint(d.rect);
+    }
 }
 
 bool ThumbnailAsideEffect::isActive() const

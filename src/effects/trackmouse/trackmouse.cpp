@@ -119,7 +119,7 @@ void TrackMouseEffect::paintScreen(int mask, const QRegion &region, ScreenPaintD
             mvp.translate(m_lastRect[i].x(), m_lastRect[i].y());
             shader->setUniform(GLShader::ModelViewProjectionMatrix, mvp);
             m_texture[i]->bind();
-            m_texture[i]->render(region, m_lastRect[i]);
+            m_texture[i]->render(m_lastRect[i]);
             m_texture[i]->unbind();
         }
         glDisable(GL_BLEND);
@@ -146,9 +146,9 @@ void TrackMouseEffect::postPaintScreen()
 bool TrackMouseEffect::init()
 {
     effects->makeOpenGLContextCurrent();
-    if (!m_texture[0] || m_image[0].isNull()) {
+    if (!m_texture[0] && m_image[0].isNull()) {
         loadTexture();
-        if (!m_texture[0] || m_image[0].isNull())
+        if (!m_texture[0] && m_image[0].isNull())
             return false;
     }
     m_lastRect[0].moveCenter(cursorPos());

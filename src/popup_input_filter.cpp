@@ -11,9 +11,7 @@
 #include "wayland_server.h"
 #include "workspace.h"
 
-#if HAVE_WAYLAND
 #include <KWaylandServer/seat_interface.h>
-#endif
 #include <QMouseEvent>
 
 namespace KWin
@@ -74,7 +72,7 @@ bool PopupInputFilter::keyEvent(QKeyEvent *event)
     if (m_popupClients.isEmpty()) {
         return false;
     }
-#if HAVE_WAYLAND
+
     auto seat = waylandServer()->seat();
 
     auto last = m_popupClients.last();
@@ -83,19 +81,37 @@ bool PopupInputFilter::keyEvent(QKeyEvent *event)
     }
 
     seat->setFocusedKeyboardSurface(last->surface());
-    switch (event->type()) {
-    case QEvent::KeyPress:
-        seat->notifyKeyboardKey(event->nativeScanCode(), KWaylandServer::KeyboardKeyState::Pressed);
-        break;
-    case QEvent::KeyRelease:
-        seat->notifyKeyboardKey(event->nativeScanCode(), KWaylandServer::KeyboardKeyState::Released);
-        break;
-    default:
-        break;
+
+    if (!passToInputMethod(event)) {
+        passToWaylandServer(event);
     }
-#endif
 
     return true;
+}
+
+bool PopupInputFilter::touchDown(qint32 id, const QPointF &pos, quint32 time)
+{
+    Q_UNUSED(id)
+    Q_UNUSED(time)
+    if (m_popupClients.isEmpty()) {
+        return false;
+    }
+    auto pointerFocus = qobject_cast<AbstractClient*>(input()->findToplevel(pos.toPoint()));
+    if (!pointerFocus || !AbstractClient::belongToSameApplication(pointerFocus, qobject_cast<AbstractClient*>(m_popupClients.constLast()))) {
+        // a touch on a window (or no window) not belonging to the popup window
+        cancelPopups();
+        // filter out this touch
+        return true;
+    }
+    if (pointerFocus && pointerFocus->isDecorated()) {
+        // test whether it is on the decoration
+        const QRect clientRect = QRect(pointerFocus->clientPos(), pointerFocus->clientSize()).translated(pointerFocus->pos());
+        if (!clientRect.contains(pos.toPoint())) {
+            cancelPopups();
+            return true;
+        }
+    }
+    return false;
 }
 
 void PopupInputFilter::cancelPopups()

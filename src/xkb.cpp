@@ -7,14 +7,12 @@
     SPDX-License-Identifier: GPL-2.0-or-later
 */
 #include "xkb.h"
-#include "utils.h"
+#include "utils/common.h"
 // frameworks
 #include <KConfigGroup>
 // KWayland
-#if HAVE_WAYLAND
 #include <KWaylandServer/keyboard_interface.h>
 #include <KWaylandServer/seat_interface.h>
-#endif
 // Qt
 #include <QTemporaryFile>
 #include <QKeyEvent>
@@ -80,7 +78,7 @@ Xkb::Xkb(QObject *parent)
     , m_keysym(XKB_KEY_NoSymbol)
     , m_leds()
 {
-    qRegisterMetaType<KWin::Xkb::LEDs>();
+    qRegisterMetaType<KWin::LEDs>();
     if (!m_context) {
         qCDebug(KWIN_XKB) << "Could not create xkb context";
     } else {
@@ -173,8 +171,6 @@ void Xkb::applyEnvironmentRules(xkb_rule_names &ruleNames)
     if (ruleNames.options == nullptr) {
         ruleNames.options = getenv("XKB_DEFAULT_OPTIONS");
     }
-
-    m_layoutList = QString::fromLatin1(ruleNames.layout).split(QLatin1Char(','));
 }
 
 xkb_keymap *Xkb::loadKeymapFromConfig()
@@ -193,9 +189,16 @@ xkb_keymap *Xkb::loadKeymapFromConfig()
         .model = model.constData(),
         .layout = layout.constData(),
         .variant = variant.constData(),
-        .options = options.constData()
+        .options = nullptr,
     };
+
+    if (m_configGroup.readEntry("ResetOldOptions", false)) {
+        ruleNames.options = options.constData();
+    }
+
     applyEnvironmentRules(ruleNames);
+
+    m_layoutList = QString::fromLatin1(ruleNames.layout).split(QLatin1Char(','));
 
     return xkb_keymap_new_from_names(m_context, &ruleNames, XKB_KEYMAP_COMPILE_NO_FLAGS);
 }
@@ -204,6 +207,7 @@ xkb_keymap *Xkb::loadDefaultKeymap()
 {
     xkb_rule_names ruleNames = {};
     applyEnvironmentRules(ruleNames);
+    m_layoutList = QString::fromLatin1(ruleNames.layout).split(QLatin1Char(','));
     return xkb_keymap_new_from_names(m_context, &ruleNames, XKB_KEYMAP_COMPILE_NO_FLAGS);
 }
 
@@ -235,6 +239,15 @@ void Xkb::updateKeymap(xkb_keymap *keymap)
         xkb_keymap_unref(keymap);
         return;
     }
+
+    // save Locks
+    bool numLockIsOn, capsLockIsOn;
+    static bool s_startup = true;
+    if (!s_startup) {
+        numLockIsOn = xkb_state_mod_index_is_active(m_state, m_numModifier, XKB_STATE_MODS_LOCKED);
+        capsLockIsOn = xkb_state_mod_index_is_active(m_state, m_capsModifier, XKB_STATE_MODS_LOCKED);
+    }
+
     // now release the old ones
     xkb_state_unref(m_state);
     xkb_keymap_unref(m_keymap);
@@ -259,24 +272,32 @@ void Xkb::updateKeymap(xkb_keymap *keymap)
     m_modifierState.latched = xkb_state_serialize_mods(m_state, xkb_state_component(XKB_STATE_MODS_LATCHED));
     m_modifierState.locked = xkb_state_serialize_mods(m_state, xkb_state_component(XKB_STATE_MODS_LOCKED));
 
-    static bool s_startup = true;
+    auto setLock = [this](xkb_mod_index_t modifier, bool value)
+    {
+        if (m_ownership == Ownership::Server && modifier != XKB_MOD_INVALID) {
+            std::bitset<sizeof(xkb_mod_mask_t)*8> mask{m_modifierState.locked};
+            if (mask.size() > modifier) {
+                mask[modifier] = value;
+                m_modifierState.locked = mask.to_ulong();
+                xkb_state_update_mask(m_state, m_modifierState.depressed, m_modifierState.latched, m_modifierState.locked, 0, 0, m_currentLayout);
+                m_modifierState.locked = xkb_state_serialize_mods(m_state, xkb_state_component(XKB_STATE_MODS_LOCKED));
+            }
+        }
+    };
+
     if (s_startup || qEnvironmentVariableIsSet("KWIN_FORCE_NUM_LOCK_EVALUATION")) {
         s_startup = false;
-        if (m_ownership == Ownership::Server && m_numModifier != XKB_MOD_INVALID && m_numLockConfig) {
+        if (m_numLockConfig) {
             const KConfigGroup config = m_numLockConfig->group("Keyboard");
             // STATE_ON = 0,  STATE_OFF = 1, STATE_UNCHANGED = 2, see plasma-desktop/kcms/keyboard/kcmmisc.h
             const auto setting = config.readEntry("NumLock", 2);
-            const bool numLockIsOn = xkb_state_mod_index_is_active(m_state, m_numModifier, XKB_STATE_MODS_LOCKED);
-            if ((setting == 0 && !numLockIsOn) || (setting == 1 && numLockIsOn)) {
-                std::bitset<sizeof(xkb_mod_mask_t)*8> mask{m_modifierState.locked};
-                if (mask.size() > m_numModifier) {
-                    mask[m_numModifier] = (setting == 0);
-                    m_modifierState.locked = mask.to_ulong();
-                    xkb_state_update_mask(m_state, m_modifierState.depressed, m_modifierState.latched, m_modifierState.locked, 0, 0, m_currentLayout);
-                    m_modifierState.locked = xkb_state_serialize_mods(m_state, xkb_state_component(XKB_STATE_MODS_LOCKED));
-                }
+            if (setting != 2) {
+                setLock(m_numModifier, !setting);
             }
         }
+    } else {
+        setLock(m_numModifier, numLockIsOn);
+        setLock(m_capsModifier, capsLockIsOn);
     }
 
     createKeymapFile();
@@ -290,18 +311,14 @@ void Xkb::createKeymapFile()
     if (currentKeymap.isEmpty()) {
         return;
     }
-#if HAVE_WAYLAND
     m_seat->keyboard()->setKeymap(currentKeymap);
-#endif
 }
 
 QByteArray Xkb::keymapContents() const
 {
-#if HAVE_WAYLAND
     if (!m_seat || !m_seat->keyboard()) {
         return {};
     }
-#endif
     // TODO: uninstall keymap on server?
     if (!m_keymap) {
         return {};
@@ -319,7 +336,10 @@ void Xkb::updateModifiers(uint32_t modsDepressed, uint32_t modsLatched, uint32_t
     if (!m_keymap || !m_state) {
         return;
     }
-    xkb_state_update_mask(m_state, modsDepressed, modsLatched, modsLocked, 0, 0, group);
+    // Avoid to create a infinite loop between input method and compositor.
+    if (xkb_state_update_mask(m_state, modsDepressed, modsLatched, modsLocked, 0, 0, group) == 0) {
+        return;
+    }
     updateModifiers();
     forwardModifiers();
 }
@@ -389,15 +409,23 @@ void Xkb::updateModifiers()
         Q_EMIT ledsChanged(m_leds);
     }
 
-    m_currentLayout = xkb_state_serialize_layout(m_state, XKB_STATE_LAYOUT_EFFECTIVE);
-    m_modifierState.depressed = xkb_state_serialize_mods(m_state, xkb_state_component(XKB_STATE_MODS_DEPRESSED));
-    m_modifierState.latched = xkb_state_serialize_mods(m_state, xkb_state_component(XKB_STATE_MODS_LATCHED));
-    m_modifierState.locked = xkb_state_serialize_mods(m_state, xkb_state_component(XKB_STATE_MODS_LOCKED));
+    const uint32_t newLayout = xkb_state_serialize_layout(m_state, XKB_STATE_LAYOUT_EFFECTIVE);
+    const uint32_t depressed = xkb_state_serialize_mods(m_state, XKB_STATE_MODS_DEPRESSED);
+    const uint32_t latched = xkb_state_serialize_mods(m_state, XKB_STATE_MODS_LATCHED);
+    const uint32_t locked = xkb_state_serialize_mods(m_state, XKB_STATE_MODS_LOCKED);
+
+    if (newLayout != m_currentLayout || depressed != m_modifierState.depressed || latched != m_modifierState.latched || locked != m_modifierState.locked) {
+        m_currentLayout = newLayout;
+        m_modifierState.depressed = depressed;
+        m_modifierState.latched = latched;
+        m_modifierState.locked = locked;
+
+        Q_EMIT modifierStateChanged();
+    }
 }
 
 void Xkb::forwardModifiers()
 {
-#if HAVE_WAYLAND
     if (!m_seat || !m_seat->keyboard()) {
         return;
     }
@@ -405,7 +433,6 @@ void Xkb::forwardModifiers()
                                     m_modifierState.latched,
                                     m_modifierState.locked,
                                     m_currentLayout);
-#endif
 }
 
 QString Xkb::layoutName(xkb_layout_index_t index) const
@@ -421,9 +448,9 @@ QString Xkb::layoutName() const
     return layoutName(m_currentLayout);
 }
 
-const QString &Xkb::layoutShortName(int index) const
+QString Xkb::layoutShortName(int index) const
 {
-    return m_layoutList.at(index);
+    return m_layoutList.value(index);
 }
 
 void Xkb::updateConsumedModifiers(uint32_t key)
@@ -571,11 +598,9 @@ quint32 Xkb::numberOfLayouts() const
     return xkb_keymap_num_layouts(m_keymap);
 }
 
-#if HAVE_WAYLAND
 void Xkb::setSeat(KWaylandServer::SeatInterface *seat)
 {
     m_seat = QPointer<KWaylandServer::SeatInterface>(seat);
 }
-#endif
 
 }

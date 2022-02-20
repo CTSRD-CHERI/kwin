@@ -31,19 +31,10 @@ Window::Window(QWindow *window)
     , m_windowId(++s_windowId)
     , m_scale(std::max(qreal(1), screens()->maxScale()))
 {
-    if (window->surfaceType() == QSurface::OpenGLSurface) {
-        // The window will use OpenGL for drawing.
-        if (!kwinApp()->platform()->supportsSurfacelessContext()) {
-            createPbuffer();
-        }
-    }
 }
 
 Window::~Window()
 {
-    if (m_eglSurface != EGL_NO_SURFACE) {
-        eglDestroySurface(m_eglDisplay, m_eglSurface);
-    }
     unmap();
 }
 
@@ -61,6 +52,11 @@ void Window::setVisible(bool visible)
 QSurfaceFormat Window::format() const
 {
     return m_format;
+}
+
+void Window::requestActivateWindow()
+{
+    QWindowSystemInterface::handleWindowActivated(window());
 }
 
 void Window::setGeometry(const QRect &rect)
@@ -139,32 +135,6 @@ void Window::createFBO()
     m_resized = false;
 }
 
-void Window::createPbuffer()
-{
-    const QSurfaceFormat requestedFormat = window()->requestedFormat();
-    const EGLConfig config = configFromFormat(m_eglDisplay,
-                                              requestedFormat,
-                                              EGL_PBUFFER_BIT);
-    if (config == EGL_NO_CONFIG_KHR) {
-        qCWarning(KWIN_QPA) << "Could not find any EGL config for:" << requestedFormat;
-        return;
-    }
-
-    // The size doesn't matter as we render into a framebuffer object.
-    const EGLint attribs[] = {
-        EGL_WIDTH, 16,
-        EGL_HEIGHT, 16,
-        EGL_NONE
-    };
-
-    m_eglSurface = eglCreatePbufferSurface(m_eglDisplay, config, attribs);
-    if (m_eglSurface != EGL_NO_SURFACE) {
-        m_format = formatFromConfig(m_eglDisplay, config);
-    } else {
-        qCWarning(KWIN_QPA, "Failed to create a pbuffer for window: 0x%x", eglGetError());
-    }
-}
-
 void Window::map()
 {
     if (m_handle) {
@@ -188,7 +158,7 @@ void Window::unmap()
 
 EGLSurface Window::eglSurface() const
 {
-    return m_eglSurface;
+    return EGL_NO_SURFACE; // EGL_KHR_surfaceless_context is required.
 }
 
 }

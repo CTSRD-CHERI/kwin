@@ -13,6 +13,7 @@
 
 namespace KWin
 {
+
 class KWIN_EXPORT VirtualKeyboardDBus : public QObject
 {
     Q_OBJECT
@@ -31,6 +32,8 @@ public:
     bool isAvailable() const;
     void setEnabled(bool enabled);
     void setActive(bool active);
+
+    Q_SCRIPTABLE bool willShowOnActive() const;
 
 Q_SIGNALS:
     Q_SCRIPTABLE void enabledChanged();

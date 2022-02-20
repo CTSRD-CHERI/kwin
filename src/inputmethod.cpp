@@ -12,12 +12,14 @@
 #include "input.h"
 #include "inputpanelv1client.h"
 #include "keyboard_input.h"
-#include "utils.h"
+#include "utils/common.h"
 #include "screens.h"
 #include "wayland_server.h"
 #include "workspace.h"
 #include "screenlockerwatcher.h"
 #include "deleted.h"
+#include "touch_input.h"
+#include "tablet_input.h"
 
 #include <KWaylandServer/display.h>
 #include <KWaylandServer/keyboard_interface.h>
@@ -27,7 +29,6 @@
 #include <KWaylandServer/inputmethod_v1_interface.h>
 
 #include <KShell>
-#include <KStatusNotifierItem>
 #include <KLocalizedString>
 
 #include <QDBusConnection>
@@ -61,7 +62,11 @@ InputMethod::InputMethod(QObject *parent)
     }
 }
 
-InputMethod::~InputMethod() = default;
+InputMethod::~InputMethod()
+{
+    stopInputMethod();
+    s_self = nullptr;
+}
 
 void InputMethod::init()
 {
@@ -73,10 +78,6 @@ void InputMethod::init()
     });
     connect(ScreenLockerWatcher::self(), &ScreenLockerWatcher::aboutToLock, this, &InputMethod::hide);
 
-    updateSni();
-
-    connect(this, &InputMethod::enabledChanged, this, &InputMethod::updateSni);
-
     new VirtualKeyboardDBus(this);
     qCDebug(KWIN_VIRTUALKEYBOARD) << "Registering the DBus interface";
 
@@ -84,7 +85,6 @@ void InputMethod::init()
         new TextInputManagerV2Interface(waylandServer()->display());
         new TextInputManagerV3Interface(waylandServer()->display());
 
-        connect(workspace(), &Workspace::clientAdded, this, &InputMethod::clientAdded);
         connect(waylandServer()->seat(), &SeatInterface::focusedTextInputSurfaceChanged, this, &InputMethod::handleFocusedSurfaceChanged);
 
         TextInputV2Interface *textInputV2 = waylandServer()->seat()->textInputV2();
@@ -103,17 +103,38 @@ void InputMethod::init()
             connect(textInputV2, &TextInputV2Interface::enabledChanged, this, &InputMethod::textInputInterfaceV2EnabledChanged);
             connect(textInputV3, &TextInputV3Interface::enabledChanged, this, &InputMethod::textInputInterfaceV3EnabledChanged);
         }
+
+        connect(input()->keyboard()->xkb(), &Xkb::modifierStateChanged, this, [this]() {
+            m_hasPendingModifiers = true;
+        });
     }
 }
 
 void InputMethod::show()
 {
-    setActive(true);
+    if (m_inputClient) {
+        m_inputClient->showClient();
+        updateInputPanelState();
+    }
 }
 
 void InputMethod::hide()
 {
-    setActive(false);
+    if (m_inputClient) {
+        m_inputClient->hideClient();
+        updateInputPanelState();
+    }
+    auto inputContext = waylandServer()->inputMethod()->context();
+    if (!inputContext) {
+        return;
+    }
+    inputContext->sendReset();
+}
+
+bool InputMethod::shouldShowOnActive() const
+{
+    return input()->touch() == input()->lastInputHandler()
+        || input()->tablet() == input()->lastInputHandler();
 }
 
 void InputMethod::setActive(bool active)
@@ -130,8 +151,6 @@ void InputMethod::setActive(bool active)
 
         if (!wasActive) {
             waylandServer()->inputMethod()->sendActivate();
-        } else {
-            waylandServer()->inputMethod()->context()->sendReset();
         }
         adoptInputMethodContext();
     } else {
@@ -143,18 +162,14 @@ void InputMethod::setActive(bool active)
     }
 }
 
-void InputMethod::clientAdded(AbstractClient *_client)
+void InputMethod::setPanel(InputPanelV1Client *client)
 {
-    if (!_client->isInputMethod()) {
-        return;
-    }
-
+    Q_ASSERT(client->isInputMethod());
     if (m_inputClient) {
-        qCWarning(KWIN_VIRTUALKEYBOARD) << "Replacing input client" << m_inputClient << "with" << _client;
+        qCWarning(KWIN_VIRTUALKEYBOARD) << "Replacing input client" << m_inputClient << "with" << client;
         disconnect(m_inputClient, nullptr, this, nullptr);
     }
 
-    const auto client = dynamic_cast<InputPanelV1Client *>(_client);
     m_inputClient = client;
     connect(client->surface(), &SurfaceInterface::inputChanged, this, &InputMethod::updateInputPanelState);
     connect(client, &QObject::destroyed, this, [this] {
@@ -248,6 +263,9 @@ void InputMethod::textInputInterfaceV2StateUpdated(quint32 serial, KWaylandServe
     if (!t2 || !t2->isEnabled()) {
         return;
     }
+    if (m_inputClient && shouldShowOnActive()) {
+        m_inputClient->allow();
+    }
     switch (reason) {
     case KWaylandServer::TextInputV2Interface::UpdateReason::StateChange:
         break;
@@ -281,9 +299,7 @@ void InputMethod::textInputInterfaceV3EnabledChanged()
     setActive(t3->isEnabled());
     if (!t3->isEnabled()) {
         // reset value of preedit when textinput is disabled
-        preedit.text = QString();
-        preedit.begin = 0;
-        preedit.end = 0;
+        resetPendingPreedit();
     }
     auto context = waylandServer()->inputMethod()->context();
     if (context) {
@@ -356,7 +372,7 @@ static quint32 keysymToKeycode(quint32 sym)
     }
 }
 
-void InputMethod::keysymReceived(quint32 serial, quint32 time, quint32 sym, bool pressed, Qt::KeyboardModifiers modifiers)
+void InputMethod::keysymReceived(quint32 serial, quint32 time, quint32 sym, bool pressed, quint32 modifiers)
 {
     Q_UNUSED(serial)
     Q_UNUSED(time)
@@ -400,13 +416,29 @@ void InputMethod::commitString(qint32 serial, const QString &text)
 
 void InputMethod::deleteSurroundingText(int32_t index, uint32_t length)
 {
+    // zwp_input_method_v1 Delete surrounding text interface is designed for text-input-v1.
+    // The parameter has different meaning in text-input-v{2,3}.
+    // Current cursor is at index 0.
+    // The actualy deleted text range is [index, index + length].
+    // In v{2,3}'s before/after style, text to be deleted with v{2,3} interface is [-before, after].
+    // And before/after are all unsigned, which make it impossible to do certain things.
+    // Those request will be ignored.
+
+    // Verify we can handle such request.
+    if (index > 0 || index + static_cast<ssize_t>(length) < 0) {
+        return;
+    }
+    const quint32 before = -index;
+    const quint32 after = index + length;
+
     auto t2 = waylandServer()->seat()->textInputV2();
     if (t2 && t2->isEnabled()) {
-        t2->deleteSurroundingText(index, length);
+        t2->deleteSurroundingText(before, after);
     }
     auto t3 = waylandServer()->seat()->textInputV3();
     if (t3 && t3->isEnabled()) {
-        t3->deleteSurroundingText(index, length);
+        t3->deleteSurroundingText(before, after);
+        t3->done();
     }
 }
 
@@ -444,12 +476,24 @@ void InputMethod::setPreeditCursor(qint32 index)
     }
     auto t3 = waylandServer()->seat()->textInputV3();
     if (t3 && t3->isEnabled()) {
-        preedit.begin = index;
-        preedit.end = index;
-        t3->sendPreEditString(preedit.text, preedit.begin, preedit.end);
+        preedit.cursor = index;
     }
 }
 
+void InputMethod::setPreeditStyling(quint32 index, quint32 length, quint32 style)
+{
+    auto t2 = waylandServer()->seat()->textInputV2();
+    if (t2 && t2->isEnabled()) {
+        t2->preEditStyling(index, length, style);
+    }
+    auto t3 = waylandServer()->seat()->textInputV3();
+    if (t3 && t3->isEnabled()) {
+        // preedit style: highlight(4) or selection(6)
+        if (style == 4 || style == 6) {
+            preedit.highlightRanges.emplace_back(index, index + length);
+        }
+    }
+}
 
 void InputMethod::setPreeditString(uint32_t serial, const QString &text, const QString &commit)
 {
@@ -461,8 +505,37 @@ void InputMethod::setPreeditString(uint32_t serial, const QString &text, const Q
     auto t3 = waylandServer()->seat()->textInputV3();
     if (t3 && t3->isEnabled()) {
         preedit.text = text;
-        t3->sendPreEditString(preedit.text, preedit.begin, preedit.end);
+        if (!preedit.text.isEmpty()) {
+            quint32 cursor = 0, cursorEnd = 0;
+            if (preedit.cursor > 0) {
+                cursor = cursorEnd = preedit.cursor;
+            }
+            // Check if we can convert highlight style to a range of selection.
+            if (!preedit.highlightRanges.empty()) {
+                std::sort(preedit.highlightRanges.begin(), preedit.highlightRanges.end());
+                // Check if starting point matches.
+                if (preedit.highlightRanges.front().first == cursor) {
+                    quint32 end = preedit.highlightRanges.front().second;
+                    bool nonContinousHighlight = false;
+                    for (size_t i = 1 ; i < preedit.highlightRanges.size(); i ++) {
+                        if (end >= preedit.highlightRanges[i].first) {
+                            end = std::max(end, preedit.highlightRanges[i].second);
+                        } else {
+                            nonContinousHighlight = true;
+                            break;
+                        }
+                    }
+                    if (!nonContinousHighlight) {
+                        cursorEnd = end;
+                    }
+                }
+            }
+
+            t3->sendPreEditString(preedit.text, cursor, cursorEnd);
+        }
+        t3->done();
     }
+    resetPendingPreedit();
 }
 
 void InputMethod::key(quint32 /*serial*/, quint32 /*time*/, quint32 keyCode, bool pressed)
@@ -475,6 +548,23 @@ void InputMethod::modifiers(quint32 serial, quint32 mods_depressed, quint32 mods
     Q_UNUSED(serial)
     auto xkb = input()->keyboard()->xkb();
     xkb->updateModifiers(mods_depressed, mods_latched, mods_locked, group);
+}
+
+void InputMethod::forwardModifiers(ForwardModifiersForce force)
+{
+    const bool sendModifiers = m_hasPendingModifiers || force == Force;
+    m_hasPendingModifiers = false;
+    if (!sendModifiers) {
+        return;
+    }
+    auto xkb = input()->keyboard()->xkb();
+    if (m_keyboardGrab) {
+        m_keyboardGrab->sendModifiers(waylandServer()->display()->nextSerial(),
+                                      xkb->modifierState().depressed,
+                                      xkb->modifierState().latched,
+                                      xkb->modifierState().locked,
+                                      xkb->currentLayout());
+    }
 }
 
 void InputMethod::adoptInputMethodContext()
@@ -504,49 +594,11 @@ void InputMethod::adoptInputMethodContext()
     connect(inputContext, &KWaylandServer::InputMethodContextV1Interface::commitString, this, &InputMethod::commitString, Qt::UniqueConnection);
     connect(inputContext, &KWaylandServer::InputMethodContextV1Interface::deleteSurroundingText, this, &InputMethod::deleteSurroundingText, Qt::UniqueConnection);
     connect(inputContext, &KWaylandServer::InputMethodContextV1Interface::cursorPosition, this, &InputMethod::setCursorPosition, Qt::UniqueConnection);
+    connect(inputContext, &KWaylandServer::InputMethodContextV1Interface::preeditStyling, this, &InputMethod::setPreeditStyling, Qt::UniqueConnection);
     connect(inputContext, &KWaylandServer::InputMethodContextV1Interface::preeditString, this, &InputMethod::setPreeditString, Qt::UniqueConnection);
     connect(inputContext, &KWaylandServer::InputMethodContextV1Interface::preeditCursor, this, &InputMethod::setPreeditCursor, Qt::UniqueConnection);
     connect(inputContext, &KWaylandServer::InputMethodContextV1Interface::keyboardGrabRequested, this, &InputMethod::installKeyboardGrab, Qt::UniqueConnection);
-}
-
-void InputMethod::updateSni()
-{
-    if (m_inputMethodCommand.isEmpty()) {
-        m_sni.reset();
-        return;
-    }
-    if (!m_sni) {
-        qCDebug(KWIN_VIRTUALKEYBOARD) << "Registering the SNI";
-        m_sni.reset(new KStatusNotifierItem(QStringLiteral("kwin-virtual-keyboard"), this));
-
-        connect(m_sni.get(), &KStatusNotifierItem::activateRequested, this,
-            [this] {
-                setEnabled(!m_enabled);
-            }
-        );
-
-        QMenu *sniMenu = new QMenu;
-        sniMenu->addAction(i18n("Configure virtual keyboards..."), this, [] {
-            QProcess::startDetached("systemsettings5", {"kcm_virtualkeyboard"});
-        });
-
-        m_sni->setContextMenu(sniMenu);
-    }
-    m_sni->setStandardActionsEnabled(false);
-    m_sni->setCategory(KStatusNotifierItem::Hardware);
-    m_sni->setStatus(KStatusNotifierItem::Passive);
-    m_sni->setTitle(i18n("Virtual Keyboard"));
-    m_sni->setToolTipTitle(i18n("Whether to show the virtual keyboard on demand."));
-
-    if (m_enabled) {
-        m_sni->setIconByName(QStringLiteral("input-keyboard-virtual-on"));
-        m_sni->setTitle(i18n("Virtual Keyboard: enabled"));
-        m_sni->setOverlayIconByName({});
-    } else {
-        m_sni->setIconByName(QStringLiteral("input-keyboard-virtual-off"));
-        m_sni->setTitle(i18n("Virtual Keyboard: disabled"));
-        m_sni->setOverlayIconByName({});
-    }
+    connect(inputContext, &KWaylandServer::InputMethodContextV1Interface::modifiersMap, this, &InputMethod::updateModifiersMap, Qt::UniqueConnection);
 }
 
 void InputMethod::updateInputPanelState()
@@ -561,9 +613,13 @@ void InputMethod::updateInputPanelState()
         return;
     }
 
+    if (m_inputClient && shouldShowOnActive()) {
+        m_inputClient->allow();
+    }
+
     QRect overlap = QRect(0, 0, 0, 0);
     if (m_trackedClient) {
-        const bool bottomKeyboard = m_inputClient && m_inputClient->mode() != InputPanelV1Client::Overlay && m_inputClient->isShown(false);
+        const bool bottomKeyboard = m_inputClient && m_inputClient->mode() != InputPanelV1Client::Overlay && m_inputClient->isShown();
         m_trackedClient->setVirtualKeyboardGeometry(bottomKeyboard ? m_inputClient->inputGeometry() : QRect());
 
         if (m_inputClient) {
@@ -571,7 +627,7 @@ void InputMethod::updateInputPanelState()
             overlap.moveTo(m_trackedClient->mapToLocal(overlap.topLeft()));
         }
     }
-    t->setInputPanelState(m_inputClient && m_inputClient->isShown(false), overlap);
+    t->setInputPanelState(m_inputClient && m_inputClient->isShown(), overlap);
 }
 
 void InputMethod::setInputMethodCommand(const QString &command)
@@ -585,7 +641,6 @@ void InputMethod::setInputMethodCommand(const QString &command)
     if (m_enabled) {
         startInputMethod();
     }
-    updateSni();
     Q_EMIT availableChanged();
 }
 
@@ -601,11 +656,10 @@ void InputMethod::stopInputMethod()
         m_inputMethodProcess->kill();
         m_inputMethodProcess->waitForFinished();
     }
-    if (waylandServer()) {
-        waylandServer()->destroyInputMethodConnection();
-    }
     m_inputMethodProcess->deleteLater();
     m_inputMethodProcess = nullptr;
+
+    waylandServer()->destroyInputMethodConnection();
 }
 
 void InputMethod::startInputMethod()
@@ -614,8 +668,6 @@ void InputMethod::startInputMethod()
     if (m_inputMethodCommand.isEmpty() || kwinApp()->isTerminating()) {
         return;
     }
-
-    connect(waylandServer(), &WaylandServer::terminatingInternalClientConnection, this, &InputMethod::stopInputMethod, Qt::UniqueConnection);
 
     QStringList arguments = KShell::splitArgs(m_inputMethodCommand);
     if (arguments.isEmpty()) {
@@ -634,11 +686,8 @@ void InputMethod::startInputMethod()
     QProcessEnvironment environment = kwinApp()->processStartupEnvironment();
     environment.insert(QStringLiteral("WAYLAND_SOCKET"), QByteArray::number(socket));
     environment.insert(QStringLiteral("QT_QPA_PLATFORM"), QStringLiteral("wayland"));
-    environment.remove("DISPLAY");
-    environment.remove("WAYLAND_DISPLAY");
-    environment.remove("XAUTHORITY");
 
-    m_inputMethodProcess = new Process(this);
+    m_inputMethodProcess = new QProcess(this);
     m_inputMethodProcess->setProcessChannelMode(QProcess::ForwardedErrorChannel);
     m_inputMethodProcess->setProcessEnvironment(environment);
     m_inputMethodProcess->setProgram(program);
@@ -664,43 +713,42 @@ bool InputMethod::isActive() const
     return waylandServer()->inputMethod()->context();
 }
 
-class InputKeyboardFilter : public InputEventFilter {
-public:
-    InputKeyboardFilter(KWaylandServer::InputMethodGrabV1 *grab)
-        : m_keyboardGrab(grab)
-    {
-    }
-
-    bool keyEvent(QKeyEvent *event) override {
-        if (event->isAutoRepeat()) {
-            return true;
-        }
-        auto newState = event->type() == QEvent::KeyPress ? KWaylandServer::KeyboardKeyState::Pressed : KWaylandServer::KeyboardKeyState::Released;
-        m_keyboardGrab->sendKey(waylandServer()->display()->nextSerial(), event->timestamp(), event->nativeScanCode(), newState);
-        return true;
-    }
-    InputMethodGrabV1 *const m_keyboardGrab;
-};
+KWaylandServer::InputMethodGrabV1 *InputMethod::keyboardGrab()
+{
+    return isActive() ? m_keyboardGrab : nullptr;
+}
 
 void InputMethod::installKeyboardGrab(KWaylandServer::InputMethodGrabV1 *keyboardGrab)
 {
     auto xkb = input()->keyboard()->xkb();
-    auto filter = new InputKeyboardFilter(keyboardGrab);
+    m_keyboardGrab = keyboardGrab;
     keyboardGrab->sendKeymap(xkb->keymapContents());
-    input()->prependInputEventFilter(filter);
-    connect(keyboardGrab, &QObject::destroyed, input(), [filter] {
-        input()->uninstallInputEventFilter(filter);
-    });
+    forwardModifiers(Force);
+}
+
+void InputMethod::updateModifiersMap(const QByteArray &modifiers)
+{
+    TextInputV2Interface *t2 = waylandServer()->seat()->textInputV2();
+
+    if (t2 && t2->isEnabled()) {
+        t2->setModifiersMap(modifiers);
+    }
 }
 
 bool InputMethod::isVisible() const
 {
-    return m_inputClient && m_inputClient->isShown(false);
+    return m_inputClient && m_inputClient->isShown();
 }
 
 bool InputMethod::isAvailable() const
 {
     return !m_inputMethodCommand.isEmpty();
+}
+
+void InputMethod::resetPendingPreedit() {
+    preedit.text = QString();
+    preedit.cursor = 0;
+    preedit.highlightRanges.clear();
 }
 
 }

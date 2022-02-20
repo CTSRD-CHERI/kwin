@@ -15,13 +15,6 @@
 #include <QObject>
 #include <QPoint>
 
-namespace KWayland
-{
-namespace Client
-{
-class DataDevice;
-}
-}
 namespace KWaylandServer
 {
 class DataDeviceInterface;
@@ -36,6 +29,7 @@ namespace Xwl
 {
 class Clipboard;
 class Dnd;
+class Primary;
 enum class DragEventReply;
 
 /**
@@ -55,14 +49,6 @@ public:
 
     DragEventReply dragMoveFilter(Toplevel *target, const QPoint &pos);
 
-    KWayland::Client::DataDevice *dataDevice() const
-    {
-        return m_dataDevice;
-    }
-    KWaylandServer::DataDeviceInterface *dataDeviceIface() const
-    {
-        return m_dataDeviceInterface;
-    }
     Dnd *dnd() const
     {
         return m_dnd;
@@ -75,10 +61,7 @@ private:
 
     Clipboard *m_clipboard = nullptr;
     Dnd *m_dnd = nullptr;
-
-    /* Internal data device interface */
-    KWayland::Client::DataDevice *m_dataDevice = nullptr;
-    KWaylandServer::DataDeviceInterface *m_dataDeviceInterface = nullptr;
+    Primary *m_primary = nullptr;
 
     KWIN_SINGLETON(DataBridge)
 };

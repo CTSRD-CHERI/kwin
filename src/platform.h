@@ -10,20 +10,18 @@
 #define KWIN_PLATFORM_H
 #include <kwin_export.h>
 #include <kwinglobals.h>
+#include <epoxy/egl.h>
 #include "input.h"
 
 #include <QImage>
 #include <QObject>
-#if QT_CONFIG(opengl)
-#include <epoxy/egl.h>
-#endif
 
 #include <functional>
 
 class QAction;
 
 namespace KWaylandServer {
-class OutputConfigurationInterface;
+class OutputConfigurationV2Interface;
 }
 
 namespace KWin
@@ -33,16 +31,17 @@ class AbstractOutput;
 class Edge;
 class Compositor;
 class DmaBufTexture;
+class InputBackend;
 class OverlayWindow;
 class OpenGLBackend;
 class Outline;
 class OutlineVisual;
 class QPainterBackend;
-class RenderLoop;
 class Scene;
 class ScreenEdges;
 class Session;
 class Toplevel;
+class WaylandOutputConfig;
 
 class KWIN_EXPORT Outputs : public QVector<AbstractOutput*>
 {
@@ -63,9 +62,8 @@ public:
 
     virtual Session *session() const = 0;
     virtual bool initialize() = 0;
-#if QT_CONFIG(opengl)
+    virtual InputBackend *createInputBackend();
     virtual OpenGLBackend *createOpenGLBackend();
-#endif
     virtual QPainterBackend *createQPainterBackend();
     virtual DmaBufTexture *createDmaBufTexture(const QSize &size) {
         Q_UNUSED(size);
@@ -84,32 +82,14 @@ public:
     virtual void createPlatformCursor(QObject *parent = nullptr);
     virtual void warpPointer(const QPointF &globalPos);
     /**
-     * Whether our Compositing EGL display allows a surface less context
-     * so that a sharing context could be created.
-     */
-    bool supportsSurfacelessContext() const;
-    /**
      * Whether our Compositing EGL display supports creating native EGL fences.
      */
     bool supportsNativeFence() const;
-#if QT_CONFIG(opengl)
     /**
      * The EGLDisplay used by the compositing scene.
      */
     EGLDisplay sceneEglDisplay() const;
     void setSceneEglDisplay(EGLDisplay display);
-    /**
-     * The EGLContext used by the compositing scene.
-     */
-    virtual EGLContext sceneEglContext() const {
-        return m_context;
-    }
-    /**
-     * Sets the @p context used by the compositing scene.
-     */
-    void setSceneEglContext(EGLContext context) {
-        m_context = context;
-    }
     /**
      * Returns the compositor-wide shared EGL context. This function may return EGL_NO_CONTEXT
      * if the underlying rendering backend does not use EGL.
@@ -123,20 +103,7 @@ public:
      * by rendering backends.
      */
     void setSceneEglGlobalShareContext(EGLContext context);
-    /**
-     * The EglConfig used by the compositing scene.
-     */
-    EGLConfig sceneEglConfig() const {
-        return m_eglConfig;
-    }
-    /**
-     * Sets the @p config used by the compositing scene.
-     * @see sceneEglConfig
-     */
-    void setSceneEglConfig(EGLConfig config) {
-        m_eglConfig = config;
-    }
-#endif
+
     /**
      * Implementing subclasses should provide a size in case the backend represents
      * a basic screen and uses the BasicScreens.
@@ -151,7 +118,7 @@ public:
      * Base implementation warns that the current backend does not implement this
      * functionality.
      */
-    void requestOutputsChange(KWaylandServer::OutputConfigurationInterface *config);
+    void requestOutputsChange(KWaylandServer::OutputConfigurationV2Interface *config);
 
     /**
      * Whether the Platform requires compositing for rendering.
@@ -252,26 +219,6 @@ public:
     virtual void setupActionForGlobalAccel(QAction *action);
 
     /**
-     * Returns @c true if the software cursor is being used; otherwise returns @c false.
-     */
-    bool usesSoftwareCursor() const;
-
-    /**
-     * Returns @c true if the software cursor is being forced; otherwise returns @c false.
-     *
-     * Note that the value returned by this function not always matches usesSoftwareCursor().
-     * If this function returns @c true, then it is guaranteed that the compositor will
-     * use the software cursor. However, this doesn't apply vice versa.
-     *
-     * If the compositor uses a software cursor, this function may return @c false. This
-     * is typically the case if the current cursor image can't be displayed using hardware
-     * cursors, for example due to buffer size limitations, etc.
-     *
-     * @see usesSoftwareCursor()
-     */
-    bool isSoftwareCursorForced() const;
-
-    /**
      * Returns a PlatformCursorImage. By default this is created by softwareCursor and
      * softwareCursorHotspot. An implementing subclass can use this to provide a better
      * suited PlatformCursorImage.
@@ -282,33 +229,6 @@ public:
      */
     virtual PlatformCursorImage cursorImage() const;
 
-    /**
-     * The Platform cursor image should be hidden.
-     * @see showCursor
-     * @see doHideCursor
-     * @see isCursorHidden
-     * @since 5.9
-     */
-    void hideCursor();
-
-    /**
-     * The Platform cursor image should be shown again.
-     * @see hideCursor
-     * @see doShowCursor
-     * @see isCursorHidden
-     * @since 5.9
-     */
-    void showCursor();
-
-    /**
-     * Whether the cursor is currently hidden.
-     * @see showCursor
-     * @see hideCursor
-     * @since 5.9
-     */
-    bool isCursorHidden() const {
-        return m_hideCursorCounter > 0;
-    }
     bool isReady() const {
         return m_ready;
     }
@@ -387,6 +307,8 @@ public:
     }
     AbstractOutput *findOutput(int screenId) const;
     AbstractOutput *findOutput(const QUuid &uuid) const;
+    AbstractOutput *findOutput(const QString &name) const;
+    AbstractOutput *outputAt(const QPoint &pos) const;
 
     /**
      * A string of information to include in kwin debug output
@@ -421,11 +343,25 @@ public:
      */
     bool isPerScreenRenderingEnabled() const;
 
+    virtual AbstractOutput *createVirtualOutput(const QString &name, const QSize &size, qreal scaling);
+    virtual void removeVirtualOutput(AbstractOutput *output);
+
     /**
-     * If the Platform doesn't support per screen rendering, this function returns the
-     * RenderLoop that drives compositing.
+     * @returns the primary output amomg the enabled outputs
      */
-    virtual RenderLoop *renderLoop() const;
+    AbstractOutput *primaryOutput() const {
+        return m_primaryOutput;
+    }
+
+    /**
+     * Assigns a the @p primary output among the enabled outputs
+     */
+    void setPrimaryOutput(AbstractOutput *primary);
+
+    /**
+     * Applies the output changes. Default implementation only sets values common between platforms
+     */
+    virtual bool applyOutputChanges(const WaylandOutputConfig &config);
 
 public Q_SLOTS:
     void pointerMotion(const QPointF &position, quint32 time);
@@ -445,7 +381,6 @@ public Q_SLOTS:
     void cancelTouchSequence();
     void touchCancel();
     void touchFrame();
-    int touchPointCount();
 
     void processSwipeGestureBegin(int fingerCount, quint32 time);
     void processSwipeGestureUpdate(const QSizeF &delta, quint32 time);
@@ -456,7 +391,6 @@ public Q_SLOTS:
     void processPinchGestureEnd(quint32 time);
     void processPinchGestureCancelled(quint32 time);
 
-    void cursorRendered(const QRect &geometry);
     virtual void sceneInitialized() {};
 
 Q_SIGNALS:
@@ -485,10 +419,10 @@ Q_SIGNALS:
      */
     void outputDisabled(AbstractOutput *output);
 
+    void primaryOutputChanged(AbstractOutput *primaryOutput);
+
 protected:
     explicit Platform(QObject *parent = nullptr);
-    void setSoftwareCursor(bool set);
-    void setSoftwareCursorForced(bool forced);
     void repaint(const QRect &rect);
     void setReady(bool ready);
     void setPerScreenRenderingEnabled(bool enabled);
@@ -512,55 +446,20 @@ protected:
         m_supportsOutputChanges = true;
     }
 
-    /**
-     * Actual platform specific way to hide the cursor.
-     * Sub-classes need to implement if they support hiding the cursor.
-     *
-     * This method is invoked by hideCursor if the cursor needs to be hidden.
-     * The default implementation does nothing.
-     *
-     * @see doShowCursor
-     * @see hideCursor
-     * @see showCursor
-     */
-    virtual void doHideCursor();
-    /**
-     * Actual platform specific way to show the cursor.
-     * Sub-classes need to implement if they support showing the cursor.
-     *
-     * This method is invoked by showCursor if the cursor needs to be shown again.
-     *
-     * @see doShowCursor
-     * @see hideCursor
-     * @see showCursor
-     */
-    virtual void doShowCursor();
-    virtual void doSetSoftwareCursor();
-
 private:
-    void triggerCursorRepaint();
-    bool m_softwareCursor = false;
-    bool m_softwareCursorForced = false;
-    struct {
-        QRect lastRenderedGeometry;
-    } m_cursor;
     bool m_ready = false;
     QSize m_initialWindowSize;
     QByteArray m_deviceIdentifier;
     bool m_pointerWarping = false;
     int m_initialOutputCount = 1;
     qreal m_initialOutputScale = 1;
-#if QT_CONFIG(opengl)
     EGLDisplay m_eglDisplay;
-    EGLConfig m_eglConfig = nullptr;
-    EGLContext m_context = EGL_NO_CONTEXT;
     EGLContext m_globalShareContext = EGL_NO_CONTEXT;
-#endif
-    int m_hideCursorCounter = 0;
     bool m_supportsGammaControl = false;
     bool m_supportsOutputChanges = false;
     bool m_isPerScreenRenderingEnabled = false;
     CompositingType m_selectedCompositor = NoCompositing;
+    AbstractOutput *m_primaryOutput = nullptr;
 };
 
 }

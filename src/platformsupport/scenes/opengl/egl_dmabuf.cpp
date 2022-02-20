@@ -10,7 +10,9 @@
 #include "egl_dmabuf.h"
 #include "drm_fourcc.h"
 #include "kwineglext.h"
+#include "kwineglutils_p.h"
 
+#include "utils/common.h"
 #include "wayland_server.h"
 
 #include <unistd.h>
@@ -384,7 +386,7 @@ void filterFormatsWithMultiplePlanes(QVector<uint32_t> &formats)
     while (it != formats.end()) {
         for (auto linuxFormat : s_multiPlaneFormats) {
             if (*it == linuxFormat) {
-                qDebug() << "Filter multi-plane format" << *it;
+                qCDebug(KWIN_OPENGL) << "Filter multi-plane format" << *it;
                 it = formats.erase(it);
                 it--;
                 break;
@@ -394,6 +396,34 @@ void filterFormatsWithMultiplePlanes(QVector<uint32_t> &formats)
     }
 }
 
+static int bpcForFormat(uint32_t format)
+{
+    switch(format) {
+    case DRM_FORMAT_XRGB8888:
+    case DRM_FORMAT_XBGR8888:
+    case DRM_FORMAT_RGBX8888:
+    case DRM_FORMAT_BGRX8888:
+    case DRM_FORMAT_ARGB8888:
+    case DRM_FORMAT_ABGR8888:
+    case DRM_FORMAT_RGBA8888:
+    case DRM_FORMAT_BGRA8888:
+    case DRM_FORMAT_RGB888:
+    case DRM_FORMAT_BGR888:
+        return 8;
+    case DRM_FORMAT_XRGB2101010:
+    case DRM_FORMAT_XBGR2101010:
+    case DRM_FORMAT_RGBX1010102:
+    case DRM_FORMAT_BGRX1010102:
+    case DRM_FORMAT_ARGB2101010:
+    case DRM_FORMAT_ABGR2101010:
+    case DRM_FORMAT_RGBA1010102:
+    case DRM_FORMAT_BGRA1010102:
+        return 10;
+    default:
+        return -1;
+    }
+};
+
 void EglDmabuf::setSupportedFormatsAndModifiers()
 {
     const EGLDisplay eglDisplay = m_backend->eglDisplay();
@@ -401,41 +431,66 @@ void EglDmabuf::setSupportedFormatsAndModifiers()
     EGLBoolean success = eglQueryDmaBufFormatsEXT(eglDisplay, 0, nullptr, &count);
 
     if (!success || count == 0) {
+        qCCritical(KWIN_OPENGL) << "eglQueryDmaBufFormatsEXT failed!" << getEglErrorString();
         return;
     }
 
     QVector<uint32_t> formats(count);
     if (!eglQueryDmaBufFormatsEXT(eglDisplay, count, (EGLint *) formats.data(), &count)) {
+        qCCritical(KWIN_OPENGL) << "eglQueryDmaBufFormatsEXT with count" << count << "failed!" << getEglErrorString();
         return;
     }
 
     filterFormatsWithMultiplePlanes(formats);
 
-    QHash<uint32_t, QSet<uint64_t> > set;
-
+    QHash<uint32_t, QSet<uint64_t>> supportedFormats;
     for (auto format : qAsConst(formats)) {
         if (eglQueryDmaBufModifiersEXT != nullptr) {
-            count = 0;
-            success = eglQueryDmaBufModifiersEXT(eglDisplay, format, 0, nullptr, nullptr, &count);
-
+            EGLint count = 0;
+            const EGLBoolean success = eglQueryDmaBufModifiersEXT(eglDisplay, format, 0, nullptr, nullptr, &count);
             if (success && count > 0) {
                 QVector<uint64_t> modifiers(count);
-                if (eglQueryDmaBufModifiersEXT(eglDisplay,
-                                               format, count, modifiers.data(),
-                                               nullptr, &count)) {
+                if (eglQueryDmaBufModifiersEXT(eglDisplay, format, count, modifiers.data(), nullptr, &count)) {
                     QSet<uint64_t> modifiersSet;
-                    for (auto mod : qAsConst(modifiers)) {
+                    for (const uint64_t &mod : qAsConst(modifiers)) {
                         modifiersSet.insert(mod);
                     }
-                    set.insert(format, modifiersSet);
+                    supportedFormats.insert(format, modifiersSet);
                     continue;
                 }
             }
         }
-        set.insert(format, QSet<uint64_t>());
+        supportedFormats.insert(format, {DRM_FORMAT_MOD_INVALID});
     }
+    qCDebug(KWIN_OPENGL) << "EGL driver advertises" << supportedFormats.count() << "supported dmabuf formats" << (eglQueryDmaBufModifiersEXT != nullptr ? "with" : "without") << "modifiers";
 
-    LinuxDmaBufV1RendererInterface::setSupportedFormatsAndModifiers(set);
+    auto filterFormats = [&supportedFormats](int bpc) {
+        QHash<uint32_t, QSet<uint64_t>> set;
+        for (auto it = supportedFormats.constBegin(); it != supportedFormats.constEnd(); it++) {
+            if (bpcForFormat(it.key()) == bpc) {
+                set.insert(it.key(), it.value());
+            }
+        }
+        return set;
+    };
+    if (m_backend->prefer10bpc()) {
+        m_tranches.append({
+            .device = m_backend->deviceId(),
+            .flags = {},
+            .formatTable = filterFormats(10),
+        });
+    }
+    m_tranches.append({
+        .device = m_backend->deviceId(),
+        .flags = {},
+        .formatTable = filterFormats(8),
+    });
+    m_tranches.append({
+        .device = m_backend->deviceId(),
+        .flags = {},
+        .formatTable = filterFormats(-1),
+    });
+    LinuxDmaBufV1RendererInterface::setSupportedFormatsAndModifiers(m_tranches);
 }
 
 }

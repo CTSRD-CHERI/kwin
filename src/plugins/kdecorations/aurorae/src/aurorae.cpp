@@ -7,7 +7,7 @@
 #include "aurorae.h"
 #include "auroraetheme.h"
 #include "config-kwin.h"
-#include "kwineffectquickview.h"
+#include "kwinoffscreenquickview.h"
 // qml imports
 #include "decorationoptions.h"
 // KDecoration2
@@ -30,7 +30,6 @@
 #include <QDirIterator>
 #include <QGuiApplication>
 #include <QLabel>
-#include <QStyleHints>
 #include <QOffscreenSurface>
 #include <QOpenGLContext>
 #include <QOpenGLFramebufferObject>
@@ -49,9 +48,10 @@
 K_PLUGIN_FACTORY_WITH_JSON(AuroraeDecoFactory,
                            "aurorae.json",
                            registerPlugin<Aurorae::Decoration>();
-                           registerPlugin<Aurorae::ThemeFinder>(QStringLiteral("themes"));
-                           registerPlugin<Aurorae::ConfigurationModule>(QStringLiteral("kcmodule"));
+                           registerPlugin<Aurorae::ThemeProvider>();
+                           registerPlugin<Aurorae::ConfigurationModule>();
                           )
+
 
 namespace Aurorae
 {
@@ -313,13 +313,13 @@ void Decoration::init()
         m_item->setParentItem(visualParent.value<QQuickItem*>());
         visualParent.value<QQuickItem*>()->setProperty("drawBackground", false);
     } else {
-        m_view = new KWin::EffectQuickView(this, KWin::EffectQuickView::ExportMode::Image);
+        m_view = new KWin::OffscreenQuickView(this, KWin::OffscreenQuickView::ExportMode::Image);
         m_item->setParentItem(m_view->contentItem());
         auto updateSize = [this]() { m_item->setSize(m_view->contentItem()->size()); };
         updateSize();
         connect(m_view->contentItem(), &QQuickItem::widthChanged, m_item, updateSize);
         connect(m_view->contentItem(), &QQuickItem::heightChanged, m_item, updateSize);
-        connect(m_view, &KWin::EffectQuickView::repaintNeeded, this, &Decoration::updateBuffer);
+        connect(m_view, &KWin::OffscreenQuickView::repaintNeeded, this, &Decoration::updateBuffer);
     }
     setupBorders(m_item);
 
@@ -516,13 +516,6 @@ void Decoration::mousePressEvent(QMouseEvent *event)
 {
     if (m_view) {
         m_view->forwardMouseEvent(event);
-        if (event->button() == Qt::LeftButton) {
-            if (!m_doubleClickTimer.hasExpired(QGuiApplication::styleHints()->mouseDoubleClickInterval())) {
-                QMouseEvent dc(QEvent::MouseButtonDblClick, event->localPos(), event->windowPos(), event->screenPos(), event->button(), event->buttons(), event->modifiers());
-                m_view->forwardMouseEvent(&dc);
-            }
-        }
-        m_doubleClickTimer.invalidate();
     }
     KDecoration2::Decoration::mousePressEvent(event);
 }
@@ -531,9 +524,6 @@ void Decoration::mouseReleaseEvent(QMouseEvent *event)
 {
     if (m_view) {
         m_view->forwardMouseEvent(event);
-        if (event->isAccepted() && event->button() == Qt::LeftButton) {
-            m_doubleClickTimer.start();
-        }
     }
     KDecoration2::Decoration::mouseReleaseEvent(event);
 }
@@ -600,28 +590,33 @@ KDecoration2::DecoratedClient *Decoration::clientPointer() const
     return client().toStrongRef().data();
 }
 
-ThemeFinder::ThemeFinder(QObject *parent, const QVariantList &args)
-    : QObject(parent)
+ThemeProvider::ThemeProvider(QObject *parent, const KPluginMetaData &data, const QVariantList &args)
+    : KDecoration2::DecorationThemeProvider(parent, data, args)
+    , m_data(data)
 {
-    Q_UNUSED(args)
     init();
 }
 
-void ThemeFinder::init()
+void ThemeProvider::init()
 {
     findAllQmlThemes();
     findAllSvgThemes();
 }
 
-void ThemeFinder::findAllQmlThemes()
+void ThemeProvider::findAllQmlThemes()
 {
     const auto offers = KPackage::PackageLoader::self()->findPackages(QStringLiteral("KWin/Decoration"), s_qmlPackageFolder);
     for (const auto &offer : offers) {
-        m_themes.insert(offer.name(), offer.pluginId());
+        KDecoration2::DecorationThemeMetaData data;
+        data.setPluginId(m_data.pluginId());
+        data.setThemeName(offer.pluginId());
+        data.setVisibleName(offer.name());
+        data.setHasConfiguration(hasConfiguration(offer.pluginId()));
+        m_themes.append(data);
     }
 }
 
-void ThemeFinder::findAllSvgThemes()
+void ThemeProvider::findAllSvgThemes()
 {
     QStringList themes;
     const QStringList dirs = QStandardPaths::locateAll(QStandardPaths::GenericDataLocation, QStringLiteral("aurorae/themes/"), QStandardPaths::LocateDirectory);
@@ -649,14 +644,19 @@ void ThemeFinder::findAllSvgThemes()
             name = packageName;
         }
 
-        m_themes.insert(name, QString(QLatin1String("__aurorae__svg__") + packageName));
+        KDecoration2::DecorationThemeMetaData data;
+        data.setPluginId(m_data.pluginId());
+        data.setThemeName(QLatin1String("__aurorae__svg__") + packageName);
+        data.setVisibleName(name);
+        data.setHasConfiguration(hasConfiguration(data.themeName()));
+        m_themes.append(data);
     }
 }
 
 static const QString s_configUiPath = QStringLiteral("kwin/decorations/%1/contents/ui/config.ui");
 static const QString s_configXmlPath = QStringLiteral("kwin/decorations/%1/contents/config/main.xml");
 
-bool ThemeFinder::hasConfiguration(const QString &theme) const
+bool ThemeProvider::hasConfiguration(const QString &theme)
 {
     if (theme.startsWith(QLatin1String("__aurorae__svg__"))) {
         return true;

@@ -11,7 +11,7 @@
 #include "tabboxhandler.h"
 #include <config-kwin.h>
 #include <kwinglobals.h>
-#include "xcbutils.h"
+#include "utils/xcbutils.h"
 // tabbox
 #include "clientmodel.h"
 #include "desktopmodel.h"
@@ -195,10 +195,13 @@ void TabBoxHandlerPrivate::endHighlightWindows(bool abort)
 {
     TabBoxClient *currentClient = q->client(index);
     if (config.isHighlightWindows() && q->isKWinCompositing()) {
-        Q_FOREACH (const QWeakPointer<TabBoxClient> &clientPointer, q->stackingOrder()) {
-            if (QSharedPointer<TabBoxClient> client = clientPointer.toStrongRef())
-            if (client != currentClient) // to not mess up with wanted ShadeActive/ShadeHover state
-                q->shadeClient(client.data(), true);
+        const auto stackingOrder = q->stackingOrder();
+        for (const QWeakPointer<TabBoxClient> &clientPointer : stackingOrder) {
+            if (QSharedPointer<TabBoxClient> client = clientPointer.toStrongRef()) {
+                if (client != currentClient) { // to not mess up with wanted ShadeActive/ShadeHover state
+                    q->shadeClient(client.data(), true);
+                }
+            }
         }
     }
     QWindow *w = window();
@@ -216,10 +219,11 @@ void TabBoxHandlerPrivate::endHighlightWindows(bool abort)
 QObject *TabBoxHandlerPrivate::createSwitcherItem(bool desktopMode)
 {
     // first try look'n'feel package
-    QString file = QStandardPaths::locate(QStandardPaths::GenericDataLocation,
-                                          QStringLiteral("plasma/look-and-feel/%1/contents/%2")
-                                              .arg(config.layoutName())
-                                              .arg(desktopMode ? QStringLiteral("desktopswitcher/DesktopSwitcher.qml") : QStringLiteral("windowswitcher/WindowSwitcher.qml")));
+    QString file = QStandardPaths::locate(
+        QStandardPaths::GenericDataLocation,
+        QStringLiteral("plasma/look-and-feel/%1/contents/%2")
+            .arg(config.layoutName(),
+                 desktopMode ? QStringLiteral("desktopswitcher/DesktopSwitcher.qml") : QStringLiteral("windowswitcher/WindowSwitcher.qml")));
     if (file.isNull()) {
         const QString folderName = QLatin1String(KWIN_NAME) + (desktopMode ? QLatin1String("/desktoptabbox/") : QLatin1String("/tabbox/"));
         auto findSwitcher = [this, desktopMode, folderName] {
@@ -287,6 +291,7 @@ void TabBoxHandlerPrivate::show()
 #ifndef KWIN_UNIT_TEST
     if (m_qmlContext.isNull()) {
         qmlRegisterType<SwitcherItem>("org.kde.kwin", 2, 0, "Switcher");
+        qmlRegisterType<SwitcherItem>("org.kde.kwin", 3, 0, "TabBoxSwitcher");
         m_qmlContext.reset(new QQmlContext(Scripting::self()->qmlEngine()));
     }
     if (m_qmlComponent.isNull()) {
@@ -386,9 +391,11 @@ void TabBoxHandler::show()
 void TabBoxHandler::initHighlightWindows()
 {
     if (isKWinCompositing()) {
-        Q_FOREACH (const QWeakPointer<TabBoxClient> &clientPointer, stackingOrder()) {
-        if (QSharedPointer<TabBoxClient> client = clientPointer.toStrongRef())
-            shadeClient(client.data(), false);
+        const auto stack = stackingOrder();
+        for (const QWeakPointer<TabBoxClient> &clientPointer : stack) {
+            if (QSharedPointer<TabBoxClient> client = clientPointer.toStrongRef()) {
+                shadeClient(client.data(), false);
+            }
         }
     }
     d->updateHighlightWindows();
@@ -560,7 +567,8 @@ void TabBoxHandler::createModel(bool partialReset)
         // TODO: C++11 use lambda function
         bool lastRaised = false;
         bool lastRaisedSucc = false;
-        Q_FOREACH (const QWeakPointer<TabBoxClient> &clientPointer, stackingOrder()) {
+        const auto clients = stackingOrder();
+        for (const auto &clientPointer : clients) {
             QSharedPointer<TabBoxClient> client = clientPointer.toStrongRef();
             if (!client) {
                 continue;

@@ -13,7 +13,7 @@
 // kwin libs
 #include <kwinglplatform.h>
 // kwin
-#include "abstract_output.h"
+#include "abstract_wayland_output.h"
 #ifdef KWIN_BUILD_ACTIVITIES
 #include "activities.h"
 #endif
@@ -49,7 +49,7 @@
 #include "virtualdesktops.h"
 #include "was_user_interaction_x11_filter.h"
 #include "wayland_server.h"
-#include "xcbutils.h"
+#include "utils/xcbutils.h"
 #include "main.h"
 #include "decorations/decorationbridge.h"
 #include "xwaylandclient.h"
@@ -97,7 +97,7 @@ void ColorMapper::update()
         }
     }
     if (cmap != m_installed) {
-        xcb_install_colormap(connection(), cmap);
+        xcb_install_colormap(kwinApp()->x11Connection(), cmap);
         m_installed = cmap;
     }
 }
@@ -106,7 +106,6 @@ Workspace* Workspace::_self = nullptr;
 
 Workspace::Workspace()
     : QObject(nullptr)
-    , m_compositor(nullptr)
     // Unsorted
     , m_quickTileCombineTimer(nullptr)
     , active_popup(nullptr)
@@ -174,14 +173,10 @@ Workspace::Workspace()
     TabBox::TabBox::create(this);
 #endif
 
-    if (Compositor::self()) {
-        m_compositor = Compositor::self();
-    } else {
+    if (!Compositor::self()) {
         Q_ASSERT(kwinApp()->operationMode() == Application::OperationMode::OperationModeX11);
-        m_compositor = X11Compositor::create(this);
+        X11Compositor::create(this);
     }
-    connect(this, &Workspace::currentDesktopChanged, m_compositor, &Compositor::addRepaintFull);
-    connect(m_compositor, &QObject::destroyed, this, [this] { m_compositor = nullptr; });
 
     auto decorationBridge = Decoration::DecorationBridge::create(this);
     decorationBridge->init();
@@ -207,12 +202,6 @@ Workspace::Workspace()
 void Workspace::init()
 {
     KSharedConfigPtr config = kwinApp()->config();
-    Screens *screens = Screens::self();
-    // get screen support
-    connect(screens, &Screens::changed, this, &Workspace::desktopResized);
-    screens->setConfig(config);
-    screens->reconfigure();
-    connect(options, &Options::configChanged, screens, &Screens::reconfigure);
     ScreenEdges *screenEdges = ScreenEdges::self();
     screenEdges->setConfig(config);
     screenEdges->init();
@@ -223,40 +212,25 @@ void Workspace::init()
     FocusChain *focusChain = FocusChain::create(this);
     connect(this, &Workspace::clientRemoved, focusChain, &FocusChain::remove);
     connect(this, &Workspace::clientActivated, focusChain, &FocusChain::setActiveClient);
-    connect(VirtualDesktopManager::self(), &VirtualDesktopManager::countChanged, focusChain, &FocusChain::resize);
-    connect(VirtualDesktopManager::self(), &VirtualDesktopManager::currentChanged, focusChain, &FocusChain::setCurrentDesktop);
+    connect(VirtualDesktopManager::self(), &VirtualDesktopManager::currentChanged, focusChain, [focusChain]() {
+        focusChain->setCurrentDesktop(VirtualDesktopManager::self()->currentDesktop());
+    });
     connect(options, &Options::separateScreenFocusChanged, focusChain, &FocusChain::setSeparateScreenFocus);
     focusChain->setSeparateScreenFocus(options->isSeparateScreenFocus());
 
+    Platform *platform = kwinApp()->platform();
+    connect(platform, &Platform::outputEnabled, this, &Workspace::slotOutputEnabled);
+    connect(platform, &Platform::outputDisabled, this, &Workspace::slotOutputDisabled);
+
+    const QVector<AbstractOutput *> outputs = platform->enabledOutputs();
+    for (AbstractOutput *output : outputs) {
+        slotOutputEnabled(output);
+    }
+
     // create VirtualDesktopManager and perform dependency injection
     VirtualDesktopManager *vds = VirtualDesktopManager::self();
-    connect(vds, &VirtualDesktopManager::desktopRemoved, this,
-        [this](KWin::VirtualDesktop *desktop) {
-            //Wayland
-            if (kwinApp()->operationMode() == Application::OperationModeWaylandOnly ||
-                kwinApp()->operationMode() == Application::OperationModeXwayland) {
-                for (auto it = m_allClients.constBegin(); it != m_allClients.constEnd(); ++it) {
-                    if (!(*it)->desktops().contains(desktop)) {
-                        continue;
-                    }
-                    if ((*it)->desktops().count() > 1) {
-                        (*it)->leaveDesktop(desktop);
-                    } else {
-                        sendClientToDesktop(*it, qMin(desktop->x11DesktopNumber(), VirtualDesktopManager::self()->count()), true);
-                    }
-                }
-            //X11
-            } else {
-                for (auto it = m_allClients.constBegin(); it != m_allClients.constEnd(); ++it) {
-                    if (!(*it)->isOnAllDesktops() && ((*it)->desktop() > static_cast<int>(VirtualDesktopManager::self()->count()))) {
-                        sendClientToDesktop(*it, VirtualDesktopManager::self()->count(), true);
-                    }
-                }
-            }
-        }
-    );
-
-    connect(vds, &VirtualDesktopManager::countChanged, this, &Workspace::slotDesktopCountChanged);
+    connect(vds, &VirtualDesktopManager::desktopCreated, this, &Workspace::slotDesktopAdded);
+    connect(vds, &VirtualDesktopManager::desktopRemoved, this, &Workspace::slotDesktopRemoved);
     connect(vds, &VirtualDesktopManager::currentChanged, this, &Workspace::slotCurrentDesktopChanged);
     vds->setNavigationWrappingAround(options->isRollOverDesktops());
     connect(options, &Options::rollOverDesktopsChanged, vds, &VirtualDesktopManager::setNavigationWrappingAround);
@@ -299,12 +273,10 @@ void Workspace::init()
 
     Scripting::create(this);
 
-#if HAVE_WAYLAND
     if (auto server = waylandServer()) {
         connect(server, &WaylandServer::shellClientAdded, this, &Workspace::addShellClient);
         connect(server, &WaylandServer::shellClientRemoved, this, &Workspace::removeShellClient);
     }
-#endif
 
     // SELI TODO: This won't work with unreasonable focus policies,
     // and maybe in rare cases also if the selected client doesn't
@@ -340,7 +312,10 @@ void Workspace::initializeX11()
     // Compatibility
     int32_t data = 1;
 
-    xcb_change_property(connection(), XCB_PROP_MODE_APPEND, rootWindow(), atoms->kwin_running,
+    xcb_change_property(kwinApp()->x11Connection(),
+                        XCB_PROP_MODE_APPEND,
+                        kwinApp()->x11RootWindow(),
+                        atoms->kwin_running,
                         atoms->kwin_running, 32, 1, &data);
 
     if (kwinApp()->operationMode() == Application::OperationModeX11) {
@@ -363,8 +338,12 @@ void Workspace::initializeX11()
 
     // TODO: only in X11 mode
     // Extra NETRootInfo instance in Client mode is needed to get the values of the properties
-    NETRootInfo client_info(connection(), NET::ActiveWindow | NET::CurrentDesktop);
-    if (!qApp->isSessionRestored()) {
+    NETRootInfo client_info(kwinApp()->x11Connection(), NET::ActiveWindow | NET::CurrentDesktop);
+    bool sessionRestored = false;
+#ifndef QT_NO_SESSIONMANAGER
+    sessionRestored = qApp->isSessionRestored();
+#endif
+    if (!sessionRestored) {
         m_initialDesktop = client_info.currentDesktop();
         vds->setCurrent(m_initialDesktop);
     }
@@ -373,14 +352,14 @@ void Workspace::initializeX11()
     rootInfo->setActiveWindow(XCB_WINDOW_NONE);
     focusToNull();
 
-    if (!qApp->isSessionRestored())
+    if (!sessionRestored)
         ++block_focus; // Because it will be set below
 
     {
         // Begin updates blocker block
         StackingUpdatesBlocker blocker(this);
 
-        Xcb::Tree tree(rootWindow());
+        Xcb::Tree tree(kwinApp()->x11RootWindow());
         xcb_window_t *wins = xcb_query_tree_children(tree.data());
 
         QVector<Xcb::WindowAttributes> windowAttributes(tree->children_len);
@@ -425,13 +404,10 @@ void Workspace::initializeX11()
         NETPoint* viewports = new NETPoint[VirtualDesktopManager::self()->count()];
         rootInfo->setDesktopViewport(VirtualDesktopManager::self()->count(), *viewports);
         delete[] viewports;
-        QRect geom;
-        for (int i = 0; i < screens()->count(); i++) {
-            geom |= screens()->geometry(i);
-        }
+
         NETSize desktop_geometry;
-        desktop_geometry.width = geom.width();
-        desktop_geometry.height = geom.height();
+        desktop_geometry.width = m_geometry.width();
+        desktop_geometry.height = m_geometry.height();
         rootInfo->setDesktopGeometry(desktop_geometry);
         setShowingDesktop(false);
 
@@ -439,7 +415,7 @@ void Workspace::initializeX11()
 
     // TODO: only on X11?
     AbstractClient* new_active_client = nullptr;
-    if (!qApp->isSessionRestored()) {
+    if (!sessionRestored) {
         --block_focus;
         new_active_client = findClient(Predicate::WindowMatch, client_info.activeWindow());
     }
@@ -447,9 +423,9 @@ void Workspace::initializeX11()
             && activeClient() == nullptr && should_get_focus.count() == 0) {
         // No client activated in manage()
         if (new_active_client == nullptr)
-            new_active_client = topClientOnDesktop(VirtualDesktopManager::self()->current(), -1);
+            new_active_client = topClientOnDesktop(VirtualDesktopManager::self()->currentDesktop());
         if (new_active_client == nullptr)
-            new_active_client = findDesktop(true, VirtualDesktopManager::self()->current());
+            new_active_client = findDesktop(true, VirtualDesktopManager::self()->currentDesktop());
     }
     if (new_active_client != nullptr)
         activateClient(new_active_client);
@@ -504,14 +480,12 @@ Workspace::~Workspace()
 
     cleanupX11();
 
-#if HAVE_WAYLAND
     if (waylandServer()) {
         const QList<AbstractClient *> shellClients = waylandServer()->clients();
         for (AbstractClient *client : shellClients) {
             client->destroyClient();
         }
     }
-#endif
 
     // We need a shadow copy because clients get removed as we go through them.
     const QList<InternalClient *> internalClients = m_internalClients;
@@ -521,6 +495,7 @@ Workspace::~Workspace()
 
     for (auto it = deleted.begin(); it != deleted.end();) {
         Q_EMIT deletedRemoved(*it);
+        (*it)->finishCompositing();
         it = deleted.erase(it);
     }
 
@@ -676,11 +651,7 @@ X11Client *Workspace::createClient(xcb_window_t w, bool is_mapped)
     if (kwinApp()->operationMode() == Application::OperationModeX11) {
         c = new X11Client();
     } else {
-#if !HAVE_WAYLAND
-        Q_UNREACHABLE();
-#else
         c = new XwaylandClient();
-#endif
     }
     setupClientConnections(c);
     if (X11Compositor *compositor = X11Compositor::self()) {
@@ -737,7 +708,7 @@ void Workspace::addClient(X11Client *c)
         raiseClient(c);
         // If there's no active client, make this desktop the active one
         if (activeClient() == nullptr && should_get_focus.count() == 0)
-            activateClient(findDesktop(true, VirtualDesktopManager::self()->current()));
+            activateClient(findDesktop(true, VirtualDesktopManager::self()->currentDesktop()));
     }
     c->checkActiveModal();
     checkTransients(c->window());   // SELI TODO: Does this really belong here?
@@ -810,19 +781,19 @@ void Workspace::addShellClient(AbstractClient *client)
     client->updateLayer();
 
     if (client->isPlaceable()) {
-        const QRect area = clientArea(PlacementArea, Screens::self()->current(), client->desktop());
+        const QRect area = clientArea(PlacementArea, client, activeOutput());
         bool placementDone = false;
         if (client->isRequestedFullScreen()) {
             placementDone = true;
         }
-        if (client->maximizeMode() == MaximizeMode::MaximizeFull) {
+        if (client->requestedMaximizeMode() == MaximizeMode::MaximizeFull) {
             placementDone = true;
         }
         if (client->rules()->checkPosition(invalidPoint, true) != invalidPoint) {
             placementDone = true;
         }
         if (!placementDone) {
-            client->placeIn(area);
+            Placement::self()->place(client, area);
         }
     }
     m_allClients.append(client);
@@ -894,7 +865,7 @@ void Workspace::updateToolWindows(bool also_hide)
     // TODO: What if Client's transiency/group changes? should this be called too? (I'm paranoid, am I not?)
     if (!options->isHideUtilityWindowsForInactive()) {
         for (auto it = m_x11Clients.constBegin(); it != m_x11Clients.constEnd(); ++it)
-            (*it)->hideClient(false);
+            (*it)->showClient();
         return;
     }
     const Group* group = nullptr;
@@ -962,12 +933,12 @@ void Workspace::updateToolWindows(bool also_hide)
             i >= 0;
             --i)  // From topmost
         // TODO: Since this is in stacking order, the order of taskbar entries changes :(
-        to_show.at(i)->hideClient(false);
+        to_show.at(i)->showClient();
     if (also_hide) {
         for (auto it = to_hide.constBegin();
                 it != to_hide.constEnd();
                 ++it)  // From bottommost
-            (*it)->hideClient(true);
+            (*it)->hideClient();
         updateToolWindowsTimer.stop();
     } else // setActiveClient() is after called with NULL client, quickly followed
         // by setting a new client, which would result in flickering
@@ -1039,15 +1010,15 @@ void Workspace::slotCurrentDesktopChanged(uint oldDesktop, uint newDesktop)
     closeActivePopup();
     ++block_focus;
     StackingUpdatesBlocker blocker(this);
-    updateClientVisibilityOnDesktopChange(newDesktop);
+    updateClientVisibilityOnDesktopChange(VirtualDesktopManager::self()->desktopForX11Id(newDesktop));
     // Restore the focus on this desktop
     --block_focus;
 
-    activateClientOnNewDesktop(newDesktop);
+    activateClientOnNewDesktop(VirtualDesktopManager::self()->desktopForX11Id(newDesktop));
     Q_EMIT currentDesktopChanged(oldDesktop, movingClient);
 }
 
-void Workspace::updateClientVisibilityOnDesktopChange(uint newDesktop)
+void Workspace::updateClientVisibilityOnDesktopChange(VirtualDesktop *newDesktop)
 {
     for (auto it = stacking_order.constBegin();
             it != stacking_order.constEnd();
@@ -1066,7 +1037,7 @@ void Workspace::updateClientVisibilityOnDesktopChange(uint newDesktop)
     }
 
     if (movingClient && !movingClient->isOnDesktop(newDesktop)) {
-        movingClient->setDesktop(newDesktop);
+        movingClient->setDesktops({newDesktop});
     }
 
     for (int i = stacking_order.size() - 1; i >= 0 ; --i) {
@@ -1081,7 +1052,7 @@ void Workspace::updateClientVisibilityOnDesktopChange(uint newDesktop)
         setShowingDesktop(false);
 }
 
-void Workspace::activateClientOnNewDesktop(uint desktop)
+void Workspace::activateClientOnNewDesktop(VirtualDesktop *desktop)
 {
     AbstractClient* c = nullptr;
     if (options->focusPolicyIsReasonable()) {
@@ -1090,7 +1061,7 @@ void Workspace::activateClientOnNewDesktop(uint desktop)
     // If "unreasonable focus policy" and active_client is on_all_desktops and
     // under mouse (Hence == old_active_client), conserve focus.
     // (Thanks to Volker Schatz <V.Schatz at thphys.uni-heidelberg.de>)
-    else if (active_client && active_client->isShown(true) && active_client->isOnCurrentDesktop())
+    else if (active_client && active_client->isShown() && active_client->isOnCurrentDesktop())
         c = active_client;
 
     if (!c)
@@ -1105,11 +1076,11 @@ void Workspace::activateClientOnNewDesktop(uint desktop)
         focusToNull();
 }
 
-AbstractClient *Workspace::findClientToActivateOnDesktop(uint desktop)
+AbstractClient *Workspace::findClientToActivateOnDesktop(VirtualDesktop *desktop)
 {
     if (movingClient != nullptr && active_client == movingClient &&
         FocusChain::self()->contains(active_client, desktop) &&
-        active_client->isShown(true) && active_client->isOnCurrentDesktop()) {
+        active_client->isShown() && active_client->isOnCurrentDesktop()) {
         // A requestFocus call will fail, as the client is already active
         return active_client;
     }
@@ -1122,8 +1093,8 @@ AbstractClient *Workspace::findClientToActivateOnDesktop(uint desktop)
                 continue;
             }
 
-            if (!(client->isShown(false) && client->isOnDesktop(desktop) &&
-                client->isOnCurrentActivity() && client->isOnActiveScreen()))
+            if (!(!client->isShade() && client->isShown() && client->isOnDesktop(desktop) &&
+                client->isOnCurrentActivity() && client->isOnActiveOutput()))
                 continue;
 
             if (client->frameGeometry().contains(Cursors::self()->mouse()->pos())) {
@@ -1197,18 +1168,16 @@ void Workspace::updateCurrentActivity(const QString &new_activity)
     AbstractClient* c = nullptr;
 
     //FIXME below here is a lot of focuschain stuff, probably all wrong now
-    if (options->focusPolicyIsReasonable()) {
-        // Search in focus chain
-        c = FocusChain::self()->getForActivation(VirtualDesktopManager::self()->current());
-    }
-    // If "unreasonable focus policy" and active_client is on_all_desktops and
-    // under mouse (Hence == old_active_client), conserve focus.
-    // (Thanks to Volker Schatz <V.Schatz at thphys.uni-heidelberg.de>)
-    else if (active_client && active_client->isShown(true) && active_client->isOnCurrentDesktop() && active_client->isOnCurrentActivity())
+     // Keep active client focused if it's on the new activity
+    if (active_client && active_client->isShown() && active_client->isOnCurrentDesktop() && active_client->isOnCurrentActivity()) {
         c = active_client;
+    } else if (options->focusPolicyIsReasonable()) {
+        // Search in focus chain
+        c = FocusChain::self()->getForActivation(VirtualDesktopManager::self()->currentDesktop());
+    }
 
     if (!c)
-        c = findDesktop(true, VirtualDesktopManager::self()->current());
+        c = findDesktop(true, VirtualDesktopManager::self()->currentDesktop());
 
     if (c != active_client)
         setActiveClient(nullptr);
@@ -1218,46 +1187,73 @@ void Workspace::updateCurrentActivity(const QString &new_activity)
     else
         focusToNull();
 
-    // Not for the very first time, only if something changed and there are more than 1 desktops
-
-    //if ( effects != NULL && old_desktop != 0 && old_desktop != new_desktop )
-    //    static_cast<EffectsHandlerImpl*>( effects )->desktopChanged( old_desktop );
-    if (Compositor::compositing() && m_compositor)
-        m_compositor->addRepaintFull();
+    Q_EMIT currentActivityChanged();
 #else
     Q_UNUSED(new_activity)
 #endif
 }
 
-void Workspace::slotDesktopCountChanged(uint previousCount, uint newCount)
+void Workspace::slotOutputEnabled(AbstractOutput *output)
 {
-    Q_UNUSED(previousCount)
-    Placement::self()->reinitCascading(0);
+    if (!m_activeOutput) {
+        m_activeOutput = output;
+    }
 
-    resetClientAreas(newCount);
+    connect(output, &AbstractOutput::geometryChanged, this, &Workspace::desktopResized);
+    desktopResized();
 }
 
-void Workspace::resetClientAreas(uint desktopCount)
+void Workspace::slotOutputDisabled(AbstractOutput *output)
 {
-    // Make it +1, so that it can be accessed as [1..numberofdesktops]
-    workarea.clear();
-    workarea.resize(desktopCount + 1);
-    restrictedmovearea.clear();
-    restrictedmovearea.resize(desktopCount + 1);
-    screenarea.clear();
+    if (m_activeOutput == output) {
+        m_activeOutput = kwinApp()->platform()->outputAt(output->geometry().center());
+    }
 
-    updateClientArea(true);
+    disconnect(output, &AbstractOutput::geometryChanged, this, &Workspace::desktopResized);
+    desktopResized();
+
+    const auto stack = xStackingOrder();
+    for (Toplevel *toplevel : stack) {
+        if (toplevel->output() == output) {
+            toplevel->setOutput(kwinApp()->platform()->outputAt(toplevel->frameGeometry().center()));
+        }
+    }
+}
+
+void Workspace::slotDesktopAdded(VirtualDesktop *desktop)
+{
+    FocusChain::self()->addDesktop(desktop);
+    Placement::self()->reinitCascading(0);
+    updateClientArea();
+}
+
+void Workspace::slotDesktopRemoved(VirtualDesktop *desktop)
+{
+    for (auto it = m_allClients.constBegin(); it != m_allClients.constEnd(); ++it) {
+        if (!(*it)->desktops().contains(desktop)) {
+            continue;
+        }
+        if ((*it)->desktops().count() > 1) {
+            (*it)->leaveDesktop(desktop);
+        } else {
+            sendClientToDesktop(*it, qMin(desktop->x11DesktopNumber(), VirtualDesktopManager::self()->count()), true);
+        }
+    }
+
+    updateClientArea();
+    Placement::self()->reinitCascading(0);
+    FocusChain::self()->removeDesktop(desktop);
 }
 
 void Workspace::selectWmInputEventMask()
 {
     uint32_t presentMask = 0;
-    Xcb::WindowAttributes attr(rootWindow());
+    Xcb::WindowAttributes attr(kwinApp()->x11RootWindow());
     if (!attr.isNull()) {
         presentMask = attr->your_event_mask;
     }
 
-    Xcb::selectInput(rootWindow(),
+    Xcb::selectInput(kwinApp()->x11RootWindow(),
                      presentMask |
                      XCB_EVENT_MASK_KEY_PRESS |
                      XCB_EVENT_MASK_PROPERTY_CHANGE |
@@ -1279,15 +1275,15 @@ void Workspace::sendClientToDesktop(AbstractClient* c, int desk, bool dont_activ
     if ((desk < 1 && desk != NET::OnAllDesktops) || desk > static_cast<int>(VirtualDesktopManager::self()->count()))
         return;
     int old_desktop = c->desktop();
-    bool was_on_desktop = c->isOnDesktop(desk) || c->isOnAllDesktops();
+    const bool wasOnCurrent = c->isOnCurrentDesktop();
     c->setDesktop(desk);
     if (c->desktop() != desk)   // No change or desktop forced
         return;
     desk = c->desktop(); // Client did range checking
 
-    if (c->isOnDesktop(VirtualDesktopManager::self()->current())) {
+    if (c->isOnCurrentDesktop()) {
         if (c->wantsTabFocus() && options->focusPolicyIsReasonable() &&
-                !was_on_desktop && // for stickyness changes
+                !wasOnCurrent && // for stickyness changes
                 !dont_activate)
             requestFocus(c);
         else
@@ -1295,7 +1291,7 @@ void Workspace::sendClientToDesktop(AbstractClient* c, int desk, bool dont_activ
     } else
         raiseClient(c);
 
-    c->checkWorkspacePosition( QRect(), old_desktop );
+    c->checkWorkspacePosition( QRect(), VirtualDesktopManager::self()->desktopForX11Id(old_desktop) );
 
     auto transients_stacking_order = ensureStackingOrder(c->transients());
     for (auto it = transients_stacking_order.constBegin();
@@ -1330,12 +1326,12 @@ bool Workspace::isOnCurrentHead()
         return !is_multihead;
     }
 
-    return rootWindow() == geometry->root;
+    return kwinApp()->x11RootWindow() == geometry->root;
 }
 
-void Workspace::sendClientToScreen(AbstractClient* c, int screen)
+void Workspace::sendClientToOutput(AbstractClient *client, AbstractOutput *output)
 {
-    c->sendToScreen(screen);
+    client->sendToOutput(output);
 }
 
 /**
@@ -1375,6 +1371,7 @@ bool Workspace::checkStartupNotification(xcb_window_t w, KStartupInfoId &id, KSt
 void Workspace::focusToNull()
 {
     if (m_nullFocus) {
+        should_get_focus.clear();
         m_nullFocus->focus();
     }
 }
@@ -1396,13 +1393,14 @@ void Workspace::setShowingDesktop(bool showing)
         if (c && c->isOnCurrentDesktop()) {
             if (c->isDock()) {
                 c->updateLayer();
-            } else if (c->isDesktop() && c->isShown(true)) {
+            } else if (c->isDesktop() && c->isShown()) {
                 c->updateLayer();
                 lowerClient(c);
                 if (!topDesk)
                     topDesk = c;
                 if (auto group = c->group()) {
-                    Q_FOREACH (X11Client *cm, group->members()) {
+                    const auto members = group->members();
+                    for (X11Client *cm : members) {
                         cm->updateLayer();
                     }
                 }
@@ -1414,7 +1412,7 @@ void Workspace::setShowingDesktop(bool showing)
     if (showing_desktop && topDesk) {
         requestFocus(topDesk);
     } else if (!showing_desktop && changed) {
-        const auto client = FocusChain::self()->getForActivation(VirtualDesktopManager::self()->current());
+        const auto client = FocusChain::self()->getForActivation(VirtualDesktopManager::self()->currentDesktop());
         if (client) {
             activateClient(client);
         }
@@ -1487,53 +1485,17 @@ QString Workspace::supportInformation() const
     support.append(QStringLiteral("=============\n"));
 
     support.append(QStringLiteral("KWIN_BUILD_DECORATIONS: "));
-#ifdef KWIN_BUILD_DECORATIONS
-    support.append(yes);
-#else
-    support.append(no);
-#endif
+    support.append(KWIN_BUILD_DECORATIONS ? yes : no);
     support.append(QStringLiteral("KWIN_BUILD_TABBOX: "));
-#ifdef KWIN_BUILD_TABBOX
-    support.append(yes);
-#else
-    support.append(no);
-#endif
+    support.append(KWIN_BUILD_TABBOX ? yes : no);
     support.append(QStringLiteral("KWIN_BUILD_ACTIVITIES: "));
-#ifdef KWIN_BUILD_ACTIVITIES
-    support.append(yes);
-#else
-    support.append(no);
-#endif
-    support.append(QStringLiteral("HAVE_GBM: "));
-#if HAVE_GBM
-    support.append(yes);
-#else
-    support.append(no);
-#endif
-    support.append(QStringLiteral("HAVE_EGL_STREAMS: "));
-#if HAVE_EGL_STREAMS
-    support.append(yes);
-#else
-    support.append(no);
-#endif
+    support.append(KWIN_BUILD_ACTIVITIES ? yes : no);
     support.append(QStringLiteral("HAVE_X11_XCB: "));
-#if HAVE_X11_XCB
-    support.append(yes);
-#else
-    support.append(no);
-#endif
+    support.append(HAVE_X11_XCB ? yes : no );
     support.append(QStringLiteral("HAVE_EPOXY_GLX: "));
-#if HAVE_EPOXY_GLX
-    support.append(yes);
-#else
-    support.append(no);
-#endif
+    support.append(HAVE_EPOXY_GLX ? yes : no);
     support.append(QStringLiteral("HAVE_WAYLAND_EGL: "));
-#if HAVE_WAYLAND_EGL
-    support.append(yes);
-#else
-    support.append(no);
-#endif
+    support.append(HAVE_WAYLAND_EGL ? yes : no);
     support.append(QStringLiteral("\n"));
 
     if (auto c = kwinApp()->x11Connection()) {
@@ -1545,9 +1507,8 @@ QString Workspace::supportInformation() const
         support.append(QStringLiteral("Protocol Version/Revision: %1/%2\n").arg(x11setup->protocol_major_version).arg(x11setup->protocol_minor_version));
         const auto extensions = Xcb::Extensions::self()->extensions();
         for (const auto &e : extensions) {
-            support.append(QStringLiteral("%1: %2; Version: 0x%3\n").arg(QString::fromUtf8(e.name))
-                                                                    .arg(e.present ? yes.trimmed() : no.trimmed())
-                                                                    .arg(QString::number(e.version, 16)));
+            support.append(QStringLiteral("%1: %2; Version: 0x%3\n")
+                               .arg(QString::fromUtf8(e.name), e.present ? yes.trimmed() : no.trimmed(), QString::number(e.version, 16)));
         }
         support.append(QStringLiteral("\n"));
     }
@@ -1576,7 +1537,7 @@ QString Workspace::supportInformation() const
     auto printProperty = [] (const QVariant &variant) {
         if (variant.type() == QVariant::Size) {
             const QSize &s = variant.toSize();
-            return QStringLiteral("%1x%2").arg(QString::number(s.width())).arg(QString::number(s.height()));
+            return QStringLiteral("%1x%2").arg(s.width()).arg(s.height());
         }
         if (QLatin1String(variant.typeName()) == QLatin1String("KWin::OpenGLPlatformInterface") ||
                 QLatin1String(variant.typeName()) == QLatin1String("KWin::Options::WindowOperation")) {
@@ -1589,7 +1550,7 @@ QString Workspace::supportInformation() const
         if (QLatin1String(property.name()) == QLatin1String("objectName")) {
             continue;
         }
-        support.append(QStringLiteral("%1: %2\n").arg(property.name()).arg(printProperty(options->property(property.name()))));
+        support.append(QStringLiteral("%1: %2\n").arg(property.name(), printProperty(options->property(property.name()))));
     }
     support.append(QStringLiteral("\nScreen Edges\n"));
     support.append(QStringLiteral(  "============\n"));
@@ -1599,7 +1560,7 @@ QString Workspace::supportInformation() const
         if (QLatin1String(property.name()) == QLatin1String("objectName")) {
             continue;
         }
-        support.append(QStringLiteral("%1: %2\n").arg(property.name()).arg(printProperty(ScreenEdges::self()->property(property.name()))));
+        support.append(QStringLiteral("%1: %2\n").arg(property.name(), printProperty(ScreenEdges::self()->property(property.name()))));
     }
     support.append(QStringLiteral("\nScreens\n"));
     support.append(QStringLiteral(  "=======\n"));
@@ -1611,27 +1572,30 @@ QString Workspace::supportInformation() const
         support.append(QStringLiteral("no\n"));
     }
     support.append(QStringLiteral("Active screen follows mouse: "));
-    if (screens()->isCurrentFollowsMouse())
+    if (options->activeMouseScreen())
         support.append(QStringLiteral(" yes\n"));
     else
         support.append(QStringLiteral(" no\n"));
-    support.append(QStringLiteral("Number of Screens: %1\n\n").arg(screens()->count()));
-    for (int i=0; i<screens()->count(); ++i) {
-        const QRect geo = screens()->geometry(i);
+    const QVector<AbstractOutput *> outputs = kwinApp()->platform()->enabledOutputs();
+    support.append(QStringLiteral("Number of Screens: %1\n\n").arg(outputs.count()));
+    for (int i = 0; i < outputs.count(); ++i) {
+        const auto output = outputs[i];
+        const QRect geo = outputs[i]->geometry();
         support.append(QStringLiteral("Screen %1:\n").arg(i));
         support.append(QStringLiteral("---------\n"));
-        support.append(QStringLiteral("Name: %1\n").arg(screens()->name(i)));
+        support.append(QStringLiteral("Name: %1\n").arg(output->name()));
         support.append(QStringLiteral("Geometry: %1,%2,%3x%4\n")
                               .arg(geo.x())
                               .arg(geo.y())
                               .arg(geo.width())
                               .arg(geo.height()));
-        support.append(QStringLiteral("Scale: %1\n").arg(screens()->scale(i)));
-        support.append(QStringLiteral("Refresh Rate: %1\n").arg(screens()->refreshRate(i)));
-        if (waylandServer()) {
+        support.append(QStringLiteral("Scale: %1\n").arg(output->scale()));
+        support.append(QStringLiteral("Refresh Rate: %1\n").arg(output->refreshRate()));
+        const auto waylandOutput = qobject_cast<AbstractWaylandOutput *>(output);
+        if (waylandOutput) {
             QString vrr = QStringLiteral("incapable");
-            if (screens()->isVrrCapable(i)) {
-                switch(screens()->vrrPolicy(i)) {
+            if (waylandOutput->capabilities() & AbstractWaylandOutput::Capability::Vrr) {
+                switch (waylandOutput->vrrPolicy()) {
                 case RenderLoop::VrrPolicy::Never:
                     vrr = QStringLiteral("never");
                     break;
@@ -1652,9 +1616,6 @@ QString Workspace::supportInformation() const
         support.append(QStringLiteral("Compositing is active\n"));
         switch (effects->compositingType()) {
         case OpenGLCompositing: {
-#if !QT_CONFIG(opengl)
-            Q_UNREACHABLE();
-#else
             GLPlatform *platform = GLPlatform::instance();
             if (platform->isGLES()) {
                 support.append(QStringLiteral("Compositing Type: OpenGL ES 2.0\n"));
@@ -1733,7 +1694,6 @@ QString Workspace::supportInformation() const
             }
 
             support.append(QStringLiteral("OpenGL 2 Shaders are used\n"));
-#endif
             break;
         }
         case QPainterCompositing:
@@ -1745,17 +1705,19 @@ QString Workspace::supportInformation() const
         }
         support.append(QStringLiteral("\nLoaded Effects:\n"));
         support.append(QStringLiteral(  "---------------\n"));
-        Q_FOREACH (const QString &effect, static_cast<EffectsHandlerImpl*>(effects)->loadedEffects()) {
+        const auto loadedEffects = static_cast<EffectsHandlerImpl*>(effects)->loadedEffects();
+        for (const QString &effect : loadedEffects) {
             support.append(effect + QStringLiteral("\n"));
         }
         support.append(QStringLiteral("\nCurrently Active Effects:\n"));
         support.append(QStringLiteral(  "-------------------------\n"));
-        Q_FOREACH (const QString &effect, static_cast<EffectsHandlerImpl*>(effects)->activeEffects()) {
+        const auto activeEffects = static_cast<EffectsHandlerImpl*>(effects)->activeEffects();
+        for (const QString &effect : activeEffects) {
             support.append(effect + QStringLiteral("\n"));
         }
         support.append(QStringLiteral("\nEffect Settings:\n"));
         support.append(QStringLiteral(  "----------------\n"));
-        Q_FOREACH (const QString &effect, static_cast<EffectsHandlerImpl*>(effects)->loadedEffects()) {
+        for (const QString &effect : loadedEffects) {
             support.append(static_cast<EffectsHandlerImpl*>(effects)->supportInformation(effect));
             support.append(QStringLiteral("\n"));
         }
@@ -1869,14 +1831,9 @@ void Workspace::forEachToplevel(std::function<void (Toplevel *)> func)
 
 bool Workspace::hasClient(const AbstractClient *c)
 {
-    if (auto cc = dynamic_cast<const X11Client *>(c)) {
-        return hasClient(cc);
-    } else {
-        return findAbstractClient([c](const AbstractClient *test) {
-            return test == c;
-        }) != nullptr;
-    }
-    return false;
+    return findAbstractClient([&c](const AbstractClient *test) {
+        return test == c;
+    }) != nullptr;
 }
 
 void Workspace::forEachAbstractClient(std::function< void (AbstractClient*) > func)
@@ -1942,8 +1899,8 @@ void Workspace::addInternalClient(InternalClient *client)
     client->updateLayer();
 
     if (client->isPlaceable()) {
-        const QRect area = clientArea(PlacementArea, screens()->current(), client->desktop());
-        client->placeIn(area);
+        const QRect area = clientArea(PlacementArea, client, workspace()->activeOutput());
+        Placement::self()->place(client, area);
     }
 
     markXStackingOrderAsDirty();
@@ -2024,8 +1981,10 @@ void Workspace::updateMinimizedOfTransients(AbstractClient* c)
             }
         }
         if (c->isModal()) { // if a modal dialog is minimized, minimize its mainwindow too
-            Q_FOREACH (AbstractClient * c2, c->mainClients())
-            c2->minimize();
+            const auto clients = c->mainClients();
+            for (AbstractClient * c2 :qAsConst(clients)) {
+                c2->minimize();
+            }
         }
     } else {
         // else unmiminize the transients
@@ -2038,8 +1997,10 @@ void Workspace::updateMinimizedOfTransients(AbstractClient* c)
             }
         }
         if (c->isModal()) {
-            Q_FOREACH (AbstractClient * c2, c->mainClients())
-            c2->unminimize();
+            const auto clients = c->mainClients();
+            for (AbstractClient * c2 :qAsConst(clients)) {
+                c2->unminimize();
+            }
         }
     }
 }
@@ -2072,11 +2033,18 @@ void Workspace::checkTransients(xcb_window_t w)
  */
 void Workspace::desktopResized()
 {
-    QRect geom = screens()->geometry();
+    const auto outputs = kwinApp()->platform()->enabledOutputs();
+
+    const QRect oldGeometry = m_geometry;
+    m_geometry = QRect();
+    for (const AbstractOutput *output : outputs) {
+        m_geometry = m_geometry.united(output->geometry());
+    }
+
     if (rootInfo()) {
         NETSize desktop_geometry;
-        desktop_geometry.width = geom.width();
-        desktop_geometry.height = geom.height();
+        desktop_geometry.width = m_geometry.width();
+        desktop_geometry.height = m_geometry.height();
         rootInfo()->setDesktopGeometry(desktop_geometry);
     }
 
@@ -2086,19 +2054,20 @@ void Workspace::desktopResized()
     // TODO: emit a signal instead and remove the deep function calls into edges and effects
     ScreenEdges::self()->recreateEdges();
 
-    if (effects) {
-        static_cast<EffectsHandlerImpl*>(effects)->desktopResized(geom.size());
+    if (m_geometry != oldGeometry) {
+        Q_EMIT geometryChanged();
     }
 }
 
 void Workspace::saveOldScreenSizes()
 {
-    olddisplaysize = screens()->displaySize();
-    oldscreensizes.clear();
-    for( int i = 0;
-         i < screens()->count();
-         ++i )
-        oldscreensizes.append( screens()->geometry( i ));
+    olddisplaysize = m_geometry.size();
+    m_oldScreenGeometries.clear();
+
+    const auto outputs = kwinApp()->platform()->enabledOutputs();
+    for (const AbstractOutput *output : outputs) {
+        m_oldScreenGeometries.insert(output, output->geometry());
+    }
 }
 
 /**
@@ -2115,8 +2084,9 @@ static bool hasOffscreenXineramaStrut(AbstractClient *client)
     region += client->strutRect(StrutAreaLeft);
 
     // Remove all visible areas so that only the invisible remain
-    for (int i = 0; i < screens()->count(); i ++) {
-        region -= screens()->geometry(i);
+    const auto outputs = kwinApp()->platform()->enabledOutputs();
+    for (const AbstractOutput *output : outputs) {
+        region -= output->geometry();
     }
 
     // If there's anything left then we have an offscreen strut
@@ -2136,7 +2106,7 @@ QRect Workspace::adjustClientArea(AbstractClient *client, const QRect &area) con
     // HACK: workarea handling is not xinerama aware, so if this strut
     // reserves place at a xinerama edge that's inside the virtual screen,
     // ignore the strut for workspace setting.
-    if (area == QRect(QPoint(0, 0), screens()->displaySize())) {
+    if (area == QRect(QPoint(0, 0), m_geometry.size())) {
         if (strutLeft.left() < screenArea.left()) {
             strutLeft = QRect();
         }
@@ -2178,47 +2148,34 @@ QRect Workspace::adjustClientArea(AbstractClient *client, const QRect &area) con
 /**
  * Updates the current client areas according to the current clients.
  *
- * If the area changes or force is @c true, the new areas are propagated to the world.
- *
  * The client area is the area that is available for clients (that
  * which is not taken by windows like panels, the top-of-screen menu
  * etc).
  *
  * @see clientArea()
  */
-void Workspace::updateClientArea(bool force)
+void Workspace::updateClientArea()
 {
-    const Screens *s = Screens::self();
-    int nscreens = s->count();
-    const int numberOfDesktops = VirtualDesktopManager::self()->count();
-    QVector< QRect > new_wareas(numberOfDesktops + 1);
-    QVector< StrutRects > new_rmoveareas(numberOfDesktops + 1);
-    QVector< QVector< QRect > > new_sareas(numberOfDesktops + 1);
-    QVector< QRect > screens(nscreens);
-    QRect desktopArea;
-    for (int i = 0; i < nscreens; i++) {
-        desktopArea |= s->geometry(i);
+    const QVector<AbstractOutput *> outputs = kwinApp()->platform()->enabledOutputs();
+    const QVector<VirtualDesktop *> desktops = VirtualDesktopManager::self()->desktops();
+
+    QHash<const VirtualDesktop *, QRect> workAreas;
+    QHash<const VirtualDesktop *, StrutRects> restrictedAreas;
+    QHash<const VirtualDesktop *, QHash<const AbstractOutput *, QRect>> screenAreas;
+
+    for (const VirtualDesktop *desktop : desktops) {
+        workAreas[desktop] = m_geometry;
+
+        for (const AbstractOutput *output : outputs) {
+            screenAreas[desktop][output] = output->geometry();
+        }
     }
-    for (int iS = 0;
-            iS < nscreens;
-            iS ++) {
-        screens [iS] = s->geometry(iS);
-    }
-    for (int i = 1;
-            i <= numberOfDesktops;
-            ++i) {
-        new_wareas[ i ] = desktopArea;
-        new_sareas[ i ].resize(nscreens);
-        for (int iS = 0;
-                iS < nscreens;
-                iS ++)
-            new_sareas[ i ][ iS ] = screens[ iS ];
-    }
+
     for (AbstractClient *client : qAsConst(m_allClients)) {
         if (!client->hasStrut()) {
             continue;
         }
-        QRect r = adjustClientArea(client, desktopArea);
+        QRect r = adjustClientArea(client, m_geometry);
 
         // This happens sometimes when the workspace size changes and the
         // struted clients haven't repositioned yet
@@ -2227,15 +2184,15 @@ void Workspace::updateClientArea(bool force)
         }
         // sanity check that a strut doesn't exclude a complete screen geometry
         // this is a violation to EWMH, as KWin just ignores the strut
-        for (int i = 0; i < Screens::self()->count(); i++) {
-            if (!r.intersects(Screens::self()->geometry(i))) {
+        for (const AbstractOutput *output : outputs) {
+            if (!r.intersects(output->geometry())) {
                 qCDebug(KWIN_CORE) << "Adjusted client area would exclude a complete screen, ignore";
-                r = desktopArea;
+                r = m_geometry;
                 break;
             }
         }
         StrutRects strutRegion = client->strutRects();
-        const QRect clientsScreenRect = KWin::screens()->geometry(client->screen());
+        const QRect clientsScreenRect = client->output()->geometry();
         for (auto strut = strutRegion.begin(); strut != strutRegion.end(); strut++) {
             *strut = StrutRect((*strut).intersected(clientsScreenRect), (*strut).area());
         }
@@ -2248,77 +2205,39 @@ void Workspace::updateClientArea(bool force)
         // or having some content appear offscreen (Relatively rare compared to other).
         bool hasOffscreenStrut = hasOffscreenXineramaStrut(client);
 
-        if (client->isOnAllDesktops()) {
-            for (int i = 1;
-                    i <= numberOfDesktops;
-                    ++i) {
-                if (!hasOffscreenStrut)
-                    new_wareas[ i ] = new_wareas[ i ].intersected(r);
-                new_rmoveareas[ i ] += strutRegion;
-                for (int iS = 0;
-                        iS < nscreens;
-                        iS ++) {
-                    const auto geo = new_sareas[ i ][ iS ].intersected(
-                                                adjustClientArea(client, screens[ iS ]));
-                    // ignore the geometry if it results in the screen getting removed completely
-                    if (!geo.isEmpty()) {
-                        new_sareas[ i ][ iS ] = geo;
-                    }
-                }
+        const auto vds = client->isOnAllDesktops() ? desktops : client->desktops();
+        for (VirtualDesktop *vd : vds) {
+            if (!hasOffscreenStrut) {
+                workAreas[vd] &= r;
             }
-        } else {
-            if (!hasOffscreenStrut)
-                new_wareas[client->desktop()] = new_wareas[client->desktop()].intersected(r);
-            new_rmoveareas[client->desktop()] += strutRegion;
-            for (int iS = 0;
-                    iS < nscreens;
-                    iS ++) {
-//                            qDebug() << "adjusting new_sarea: " << screens[ iS ];
-                const auto geo = new_sareas[client->desktop()][ iS ].intersected(
-                      adjustClientArea(client, screens[ iS ]));
+            restrictedAreas[vd] += strutRegion;
+            for (AbstractOutput *output : outputs) {
+                const auto geo = screenAreas[vd][output].intersected(adjustClientArea(client, output->geometry()));
                 // ignore the geometry if it results in the screen getting removed completely
                 if (!geo.isEmpty()) {
-                    new_sareas[client->desktop()][ iS ] = geo;
+                    screenAreas[vd][output] = geo;
                 }
             }
         }
     }
-#if 0
-    for (int i = 1;
-            i <= numberOfDesktops();
-            ++i) {
-        for (int iS = 0;
-                iS < nscreens;
-                iS ++)
-            qCDebug(KWIN_CORE) << "new_sarea: " << new_sareas[ i ][ iS ];
-    }
-#endif
 
-    bool changed = force || screenarea.isEmpty();
-    for (int i = 1;
-            !changed && i <= numberOfDesktops;
-            ++i) {
-        changed |= workarea[i] != new_wareas[i];
-        changed |= restrictedmovearea[i] != new_rmoveareas[i];
-        changed |= screenarea[i].size() != new_sareas[i].size();
-        for (int iS = 0; !changed && iS < nscreens; iS++) {
-            changed |= new_sareas[i][iS] != screenarea[i][iS];
-        }
-    }
+    if (m_workAreas != workAreas || m_restrictedAreas != restrictedAreas || m_screenAreas != screenAreas) {
+        m_workAreas = workAreas;
+        m_screenAreas = screenAreas;
 
-    if (changed) {
-        workarea = new_wareas;
-        oldrestrictedmovearea = restrictedmovearea;
-        restrictedmovearea = new_rmoveareas;
-        screenarea = new_sareas;
+        m_inUpdateClientArea = true;
+        m_oldRestrictedAreas = m_restrictedAreas;
+        m_restrictedAreas = restrictedAreas;
+
         if (rootInfo()) {
             NETRect r;
-            for (int i = 1; i <= numberOfDesktops; i++) {
-                r.pos.x = workarea[ i ].x();
-                r.pos.y = workarea[ i ].y();
-                r.size.width = workarea[ i ].width();
-                r.size.height = workarea[ i ].height();
-                rootInfo()->setWorkArea(i, r);
+            for (VirtualDesktop *desktop : desktops) {
+                const QRect &workArea = m_workAreas[desktop];
+                r.pos.x = workArea.x();
+                r.pos.y = workArea.y();
+                r.size.width = workArea.width();
+                r.size.height = workArea.height();
+                rootInfo()->setWorkArea(desktop->x11DesktopNumber(), r);
             }
         }
 
@@ -2328,75 +2247,84 @@ void Workspace::updateClientArea(bool force)
             (*it)->checkWorkspacePosition();
         }
 
-        oldrestrictedmovearea.clear(); // reset, no longer valid or needed
+        m_oldRestrictedAreas.clear(); // reset, no longer valid or needed
+        m_inUpdateClientArea = false;
     }
 }
-
-void Workspace::updateClientArea()
-{
-    updateClientArea(false);
-}
-
 
 /**
  * Returns the area available for clients. This is the desktop
  * geometry minus windows on the dock. Placement algorithms should
  * refer to this rather than Screens::geometry.
  */
-QRect Workspace::clientArea(clientAreaOption opt, int screen, int desktop) const
+QRect Workspace::clientArea(clientAreaOption opt, const AbstractOutput *output, const VirtualDesktop *desktop) const
 {
-    if (desktop == NETWinInfo::OnAllDesktops || desktop == 0)
-        desktop = VirtualDesktopManager::self()->current();
-    if (screen == -1)
-        screen = screens()->current();
-    const QSize displaySize = screens()->displaySize();
+    QRect workArea;
 
-    QRect sarea, warea;
+    const AbstractOutput *effectiveOutput = output;
+    if (is_multihead) {
+        effectiveOutput = kwinApp()->platform()->findOutput(screen_number);
+    }
+
+    QRect screenArea = m_screenAreas[desktop][effectiveOutput];
+    if (screenArea.isNull()) { // screens may be missing during KWin initialization or screen config changes
+        screenArea = effectiveOutput->geometry();
+    }
 
     if (is_multihead) {
-        sarea = (!screenarea.isEmpty()
-                   && screen < screenarea[ desktop ].size()) // screens may be missing during KWin initialization or screen config changes
-                  ? screenarea[ desktop ][ screen_number ]
-                  : screens()->geometry(screen_number);
-        warea = workarea[ desktop ].isNull()
-                ? screens()->geometry(screen_number)
-                : workarea[ desktop ];
+        workArea = m_workAreas[desktop];
+        if (workArea.isNull()) {
+            workArea = effectiveOutput->geometry();
+        }
     } else {
-        sarea = (!screenarea.isEmpty()
-                && screen < screenarea[ desktop ].size()) // screens may be missing during KWin initialization or screen config changes
-                ? screenarea[ desktop ][ screen ]
-                : screens()->geometry(screen);
-        warea = workarea[ desktop ].isNull()
-                ? QRect(0, 0, displaySize.width(), displaySize.height())
-                : workarea[ desktop ];
+        workArea = m_workAreas[desktop];
+        if (workArea.isNull()) {
+            workArea = QRect(QPoint(0, 0), m_geometry.size());
+        }
     }
 
     switch(opt) {
     case MaximizeArea:
     case PlacementArea:
-            return sarea;
+        return screenArea;
     case MaximizeFullArea:
     case FullScreenArea:
     case MovementArea:
     case ScreenArea:
-        if (is_multihead)
-            return screens()->geometry(screen_number);
-        else
-            return screens()->geometry(screen);
+        return effectiveOutput->geometry();
     case WorkArea:
         if (is_multihead)
-            return sarea;
+            return screenArea;
         else
-            return warea;
+            return workArea;
     case FullArea:
-        return QRect(0, 0, displaySize.width(), displaySize.height());
+        return QRect(QPoint(0, 0), m_geometry.size());
+
+    default:
+        Q_UNREACHABLE();
     }
-    abort();
 }
 
-QRect Workspace::clientArea(clientAreaOption opt, const AbstractOutput *output, int desktop) const
+QRect Workspace::clientArea(clientAreaOption opt, int screen, int desktop) const
 {
-    return clientArea(opt, output->geometry().center(), desktop);
+    VirtualDesktop *virtualDesktop;
+    AbstractOutput *output;
+
+    if (desktop == NETWinInfo::OnAllDesktops || desktop == 0) {
+        virtualDesktop = VirtualDesktopManager::self()->currentDesktop();
+    } else {
+        virtualDesktop = VirtualDesktopManager::self()->desktopForX11Id(desktop);
+        Q_ASSERT(virtualDesktop);
+    }
+
+    if (screen == -1) {
+        output = activeOutput();
+    } else {
+        output = kwinApp()->platform()->findOutput(screen);
+        Q_ASSERT(output);
+    }
+
+    return clientArea(opt, output, virtualDesktop);
 }
 
 QRect Workspace::clientArea(clientAreaOption opt, const QPoint& p, int desktop) const
@@ -2404,18 +2332,30 @@ QRect Workspace::clientArea(clientAreaOption opt, const QPoint& p, int desktop) 
     return clientArea(opt, screens()->number(p), desktop);
 }
 
-QRect Workspace::clientArea(clientAreaOption opt, const AbstractClient* c) const
+QRect Workspace::clientArea(clientAreaOption opt, const Toplevel *window) const
 {
-    return clientArea(opt, c->frameGeometry().center(), c->desktop());
+    return clientArea(opt, window, window->frameGeometry().center());
 }
 
-static QRegion strutsToRegion(int desktop, StrutAreas areas, const QVector<StrutRects> &struts)
+QRect Workspace::clientArea(clientAreaOption opt, const Toplevel *window, const AbstractOutput *output) const
 {
-    if (desktop == NETWinInfo::OnAllDesktops || desktop == 0)
-        desktop = VirtualDesktopManager::self()->current();
+    return clientArea(opt, window, output->geometry().center());
+}
+
+QRect Workspace::clientArea(clientAreaOption opt, const Toplevel *window, const QPoint &pos) const
+{
+    return clientArea(opt, screens()->number(pos), window->desktop());
+}
+
+QRect Workspace::geometry() const
+{
+    return m_geometry;
+}
+
+static QRegion strutsToRegion(StrutAreas areas, const StrutRects &strut)
+{
     QRegion region;
-    const StrutRects &rects = struts[desktop];
-    for (const StrutRect &rect : rects) {
+    for (const StrutRect &rect : strut) {
         if (areas & rect.area()) {
             region += rect;
         }
@@ -2423,24 +2363,24 @@ static QRegion strutsToRegion(int desktop, StrutAreas areas, const QVector<Strut
     return region;
 }
 
-QRegion Workspace::restrictedMoveArea(int desktop, StrutAreas areas) const
+QRegion Workspace::restrictedMoveArea(const VirtualDesktop *desktop, StrutAreas areas) const
 {
-    return strutsToRegion(desktop, areas, restrictedmovearea);
+    return strutsToRegion(areas, m_restrictedAreas[desktop]);
 }
 
 bool Workspace::inUpdateClientArea() const
 {
-    return !oldrestrictedmovearea.isEmpty();
+    return m_inUpdateClientArea;
 }
 
-QRegion Workspace::previousRestrictedMoveArea(int desktop, StrutAreas areas) const
+QRegion Workspace::previousRestrictedMoveArea(const VirtualDesktop *desktop, StrutAreas areas) const
 {
-    return strutsToRegion(desktop, areas, oldrestrictedmovearea);
+    return strutsToRegion(areas, m_oldRestrictedAreas[desktop]);
 }
 
-QVector< QRect > Workspace::previousScreenSizes() const
+QHash<const AbstractOutput *, QRect> Workspace::previousScreenSizes() const
 {
-    return oldscreensizes;
+    return m_oldScreenGeometries;
 }
 
 int Workspace::oldDisplayWidth() const
@@ -2451,6 +2391,29 @@ int Workspace::oldDisplayWidth() const
 int Workspace::oldDisplayHeight() const
 {
     return olddisplaysize.height();
+}
+
+AbstractOutput *Workspace::activeOutput() const
+{
+    if (options->activeMouseScreen()) {
+        return kwinApp()->platform()->outputAt(Cursors::self()->mouse()->pos());
+    }
+
+    if (active_client && !active_client->isOnOutput(m_activeOutput)) {
+        return active_client->output();
+    }
+
+    return m_activeOutput;
+}
+
+void Workspace::setActiveOutput(AbstractOutput *output)
+{
+    m_activeOutput = output;
+}
+
+void Workspace::setActiveOutput(const QPoint &pos)
+{
+    setActiveOutput(kwinApp()->platform()->outputAt(pos));
 }
 
 /**
@@ -2468,7 +2431,7 @@ QPoint Workspace::adjustClientPosition(AbstractClient* c, QPoint pos, bool unres
     QRect maxRect;
     int guideMaximized = MaximizeRestore;
     if (c->maximizeMode() != MaximizeRestore) {
-        maxRect = clientArea(MaximizeArea, pos + c->rect().center(), c->desktop());
+        maxRect = clientArea(MaximizeArea, c, pos + c->rect().center());
         QRect geo = c->frameGeometry();
         if (c->maximizeMode() & MaximizeHorizontal && (geo.x() == maxRect.left() || geo.right() == maxRect.right())) {
             guideMaximized |= MaximizeHorizontal;
@@ -2482,10 +2445,12 @@ QPoint Workspace::adjustClientPosition(AbstractClient* c, QPoint pos, bool unres
 
     if (options->windowSnapZone() || !borderSnapZone.isNull() || options->centerSnapZone()) {
 
+        const bool snappingToCenter = (options->centerSnapZone() * snapAdjust);
         const bool sOWO = options->isSnapOnlyWhenOverlapping();
-        const int screen = screens()->number(pos + c->rect().center());
-        if (maxRect.isNull())
-            maxRect = clientArea(MovementArea, screen, c->desktop());
+        const AbstractOutput *output = kwinApp()->platform()->outputAt(pos + c->rect().center());
+        if (maxRect.isNull()) {
+            maxRect = clientArea(MaximizeArea, c, output);
+        }
         const int xmin = maxRect.left();
         const int xmax = maxRect.right() + 1;             //desk size
         const int ymin = maxRect.top();
@@ -2509,42 +2474,22 @@ QPoint Workspace::adjustClientPosition(AbstractClient* c, QPoint pos, bool unres
         const int snapY = borderSnapZone.height() * snapAdjust;
         if (snapX || snapY) {
             QRect geo = c->frameGeometry();
-            QMargins frameMargins = c->frameMargins();
-
-            // snap to titlebar / snap to window borders on inner screen edges
-            AbstractClient::Position titlePos = c->titlebarPosition();
-            if (frameMargins.left() && (titlePos == AbstractClient::PositionLeft || (c->maximizeMode() & MaximizeHorizontal) ||
-                                        screens()->intersecting(geo.translated(maxRect.x() - (frameMargins.left() + geo.x()), 0)) > 1)) {
-                frameMargins.setLeft(0);
-            }
-            if (frameMargins.right() && (titlePos == AbstractClient::PositionRight || (c->maximizeMode() & MaximizeHorizontal) ||
-                                         screens()->intersecting(geo.translated(maxRect.right() + frameMargins.right() - geo.right(), 0)) > 1)) {
-                frameMargins.setRight(0);
-            }
-            if (frameMargins.top() && (titlePos == AbstractClient::PositionTop || (c->maximizeMode() & MaximizeVertical) ||
-                                       screens()->intersecting(geo.translated(0, maxRect.y() - (frameMargins.top() + geo.y()))) > 1)) {
-                frameMargins.setTop(0);
-            }
-            if (frameMargins.bottom() && (titlePos == AbstractClient::PositionBottom || (c->maximizeMode() & MaximizeVertical) ||
-                                          screens()->intersecting(geo.translated(0, maxRect.bottom() + frameMargins.bottom() - geo.bottom())) > 1)) {
-                frameMargins.setBottom(0);
-            }
             if ((sOWO ? (cx < xmin) : true) && (qAbs(xmin - cx) < snapX)) {
                 deltaX = xmin - cx;
-                nx = xmin - frameMargins.left();
+                nx = xmin;
             }
             if ((sOWO ? (rx > xmax) : true) && (qAbs(rx - xmax) < snapX) && (qAbs(xmax - rx) < deltaX)) {
                 deltaX = rx - xmax;
-                nx = xmax - cw + frameMargins.right();
+                nx = xmax - cw;
             }
 
             if ((sOWO ? (cy < ymin) : true) && (qAbs(ymin - cy) < snapY)) {
                 deltaY = ymin - cy;
-                ny = ymin - frameMargins.top();
+                ny = ymin;
             }
             if ((sOWO ? (ry > ymax) : true) && (qAbs(ry - ymax) < snapY) && (qAbs(ymax - ry) < deltaY)) {
                 deltaY = ry - ymax;
-                ny = ymax - ch + frameMargins.bottom();
+                ny = ymax - ch;
             }
         }
 
@@ -2554,11 +2499,11 @@ QPoint Workspace::adjustClientPosition(AbstractClient* c, QPoint pos, bool unres
             for (auto l = m_allClients.constBegin(); l != m_allClients.constEnd(); ++l) {
                 if ((*l) == c)
                     continue;
-                if ((*l)->isMinimized())
-                    continue; // is minimized
-                if (!(*l)->isShown(false))
+                if ((*l)->isMinimized() || (*l)->isShade())
                     continue;
-                if (!((*l)->isOnDesktop(c->desktop()) || c->isOnDesktop((*l)->desktop())))
+                if (!(*l)->isShown())
+                    continue;
+                if (!(*l)->isOnCurrentDesktop())
                     continue; // wrong virtual desktop
                 if (!(*l)->isOnCurrentActivity())
                     continue; // wrong activity
@@ -2621,8 +2566,7 @@ QPoint Workspace::adjustClientPosition(AbstractClient* c, QPoint pos, bool unres
         }
 
         // center snap
-        snap = options->centerSnapZone() * snapAdjust; //snap trigger
-        if (snap) {
+        if (snappingToCenter) { //snap trigger
             int diffX = qAbs((xmin + xmax) / 2 - (cx + cw / 2));
             int diffY = qAbs((ymin + ymax) / 2 - (cy + ch / 2));
             if (diffX < snap && diffY < snap && diffX < deltaX && diffY < deltaY) {
@@ -2647,7 +2591,7 @@ QPoint Workspace::adjustClientPosition(AbstractClient* c, QPoint pos, bool unres
     return pos;
 }
 
-QRect Workspace::adjustClientSize(AbstractClient* c, QRect moveResizeGeom, int mode)
+QRect Workspace::adjustClientSize(AbstractClient* c, QRect moveResizeGeom, Gravity gravity)
 {
     //adapted from adjustClientPosition on 29May2004
     //this function is called when resizing a window and will modify
@@ -2655,7 +2599,7 @@ QRect Workspace::adjustClientSize(AbstractClient* c, QRect moveResizeGeom, int m
     if (options->windowSnapZone() || options->borderSnapZone()) {  // || options->centerSnapZone )
         const bool sOWO = options->isSnapOnlyWhenOverlapping();
 
-        const QRect maxRect = clientArea(MovementArea, c->rect().center(), c->desktop());
+        const QRect maxRect = clientArea(MovementArea, c, c->rect().center());
         const int xmin = maxRect.left();
         const int xmax = maxRect.right();               //desk size
         const int ymin = maxRect.top();
@@ -2706,37 +2650,37 @@ QRect Workspace::adjustClientSize(AbstractClient* c, QRect moveResizeGeom, int m
         deltaX = qAbs(xmax-newrx); \
         newrx = xmax; \
     }
-            switch(mode) {
-            case AbstractClient::PositionBottomRight:
+            switch (gravity) {
+            case Gravity::BottomRight:
                 SNAP_BORDER_BOTTOM
                 SNAP_BORDER_RIGHT
                 break;
-            case AbstractClient::PositionRight:
+            case Gravity::Right:
                 SNAP_BORDER_RIGHT
                 break;
-            case AbstractClient::PositionBottom:
+            case Gravity::Bottom:
                 SNAP_BORDER_BOTTOM
                 break;
-            case AbstractClient::PositionTopLeft:
+            case Gravity::TopLeft:
                 SNAP_BORDER_TOP
                 SNAP_BORDER_LEFT
                 break;
-            case AbstractClient::PositionLeft:
+            case Gravity::Left:
                 SNAP_BORDER_LEFT
                 break;
-            case AbstractClient::PositionTop:
+            case Gravity::Top:
                 SNAP_BORDER_TOP
                 break;
-            case AbstractClient::PositionTopRight:
+            case Gravity::TopRight:
                 SNAP_BORDER_TOP
                 SNAP_BORDER_RIGHT
                 break;
-            case AbstractClient::PositionBottomLeft:
+            case Gravity::BottomLeft:
                 SNAP_BORDER_BOTTOM
                 SNAP_BORDER_LEFT
                 break;
             default:
-                abort();
+                Q_UNREACHABLE();
                 break;
             }
 
@@ -2749,7 +2693,7 @@ QRect Workspace::adjustClientSize(AbstractClient* c, QRect moveResizeGeom, int m
             deltaX = int(snap);
             deltaY = int(snap);
             for (auto l = m_allClients.constBegin(); l != m_allClients.constEnd(); ++l) {
-                if ((*l)->isOnDesktop(VirtualDesktopManager::self()->current()) &&
+                if ((*l)->isOnCurrentDesktop() &&
                         !(*l)->isMinimized()
                         && (*l) != c) {
                     lx = (*l)->x() - 1;
@@ -2822,49 +2766,49 @@ QRect Workspace::adjustClientSize(AbstractClient* c, QRect moveResizeGeom, int m
     newrx = lrx - 1; \
 }
 
-                    switch(mode) {
-                    case AbstractClient::PositionBottomRight:
+                    switch (gravity) {
+                    case Gravity::BottomRight:
                         SNAP_WINDOW_BOTTOM
                         SNAP_WINDOW_RIGHT
                         SNAP_WINDOW_C_BOTTOM
                         SNAP_WINDOW_C_RIGHT
                         break;
-                    case AbstractClient::PositionRight:
+                    case Gravity::Right:
                         SNAP_WINDOW_RIGHT
                         SNAP_WINDOW_C_RIGHT
                         break;
-                    case AbstractClient::PositionBottom:
+                    case Gravity::Bottom:
                         SNAP_WINDOW_BOTTOM
                         SNAP_WINDOW_C_BOTTOM
                         break;
-                    case AbstractClient::PositionTopLeft:
+                    case Gravity::TopLeft:
                         SNAP_WINDOW_TOP
                         SNAP_WINDOW_LEFT
                         SNAP_WINDOW_C_TOP
                         SNAP_WINDOW_C_LEFT
                         break;
-                    case AbstractClient::PositionLeft:
+                    case Gravity::Left:
                         SNAP_WINDOW_LEFT
                         SNAP_WINDOW_C_LEFT
                         break;
-                    case AbstractClient::PositionTop:
+                    case Gravity::Top:
                         SNAP_WINDOW_TOP
                         SNAP_WINDOW_C_TOP
                         break;
-                    case AbstractClient::PositionTopRight:
+                    case Gravity::TopRight:
                         SNAP_WINDOW_TOP
                         SNAP_WINDOW_RIGHT
                         SNAP_WINDOW_C_TOP
                         SNAP_WINDOW_C_RIGHT
                         break;
-                    case AbstractClient::PositionBottomLeft:
+                    case Gravity::BottomLeft:
                         SNAP_WINDOW_BOTTOM
                         SNAP_WINDOW_LEFT
                         SNAP_WINDOW_C_BOTTOM
                         SNAP_WINDOW_C_LEFT
                         break;
                     default:
-                        abort();
+                        Q_UNREACHABLE();
                         break;
                     }
                 }
@@ -2905,7 +2849,7 @@ void Workspace::setMoveResizeClient(AbstractClient *c)
 // (the property with the size of the frame remains on the window after the crash).
 void Workspace::fixPositionAfterCrash(xcb_window_t w, const xcb_get_geometry_reply_t *geometry)
 {
-    NETWinInfo i(connection(), w, rootWindow(), NET::WMFrameExtents, NET::Properties2());
+    NETWinInfo i(kwinApp()->x11Connection(), w, kwinApp()->x11RootWindow(), NET::WMFrameExtents, NET::Properties2());
     NETStrut frame = i.frameExtents();
 
     if (frame.left != 0 || frame.top != 0) {
@@ -2913,7 +2857,7 @@ void Workspace::fixPositionAfterCrash(xcb_window_t w, const xcb_get_geometry_rep
         const uint32_t left = frame.left;
         const uint32_t top = frame.top;
         const uint32_t values[] = { geometry->x - left, geometry->y - top };
-        xcb_configure_window(connection(), w, XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y, values);
+        xcb_configure_window(kwinApp()->x11Connection(), w, XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y, values);
     }
 }
 

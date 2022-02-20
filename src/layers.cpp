@@ -64,7 +64,7 @@
 
 */
 
-#include "utils.h"
+#include "utils/common.h"
 #include "x11client.h"
 #include "focuschain.h"
 #include "netinfo.h"
@@ -80,6 +80,9 @@
 #include "screenedge.h"
 #include "wayland_server.h"
 #include "internal_client.h"
+#include "virtualdesktops.h"
+
+#include <array>
 
 #include <QDebug>
 #include <QQueue>
@@ -105,10 +108,12 @@ void Workspace::updateStackingOrder(bool propagate_new_clients)
     if (changed || propagate_new_clients) {
         propagateClients(propagate_new_clients);
         markXStackingOrderAsDirty();
-        Q_EMIT stackingOrderChanged();
-        if (m_compositor) {
-            m_compositor->addRepaintFull();
+
+        for (int i = 0; i < stacking_order.size(); ++i) {
+            stacking_order[i]->setStackingOrder(i);
         }
+
+        Q_EMIT stackingOrderChanged();
 
         if (active_client)
             active_client->updateMouseGrab();
@@ -217,7 +222,7 @@ void Workspace::propagateClients(bool propagate_new_clients)
  * doesn't accept focus it's excluded.
  */
 // TODO misleading name for this method, too many slightly different ways to use it
-AbstractClient* Workspace::topClientOnDesktop(int desktop, int screen, bool unconstrained, bool only_normal) const
+AbstractClient *Workspace::topClientOnDesktop(VirtualDesktop *desktop, AbstractOutput *output, bool unconstrained, bool only_normal) const
 {
 // TODO    Q_ASSERT( block_stacking_updates == 0 );
     QList<Toplevel *> list;
@@ -232,8 +237,8 @@ AbstractClient* Workspace::topClientOnDesktop(int desktop, int screen, bool unco
         if (!c) {
             continue;
         }
-        if (c->isOnDesktop(desktop) && c->isShown(false) && c->isOnCurrentActivity()) {
-            if (screen != -1 && c->screen() != screen)
+        if (c->isOnDesktop(desktop) && c->isShown() && c->isOnCurrentActivity() && !c->isShade()) {
+            if (output && c->output() != output)
                 continue;
             if (!only_normal)
                 return c;
@@ -244,22 +249,22 @@ AbstractClient* Workspace::topClientOnDesktop(int desktop, int screen, bool unco
     return nullptr;
 }
 
-AbstractClient* Workspace::findDesktop(bool topmost, int desktop) const
+AbstractClient *Workspace::findDesktop(bool topmost, VirtualDesktop *desktop) const
 {
 // TODO    Q_ASSERT( block_stacking_updates == 0 );
     if (topmost) {
         for (int i = stacking_order.size() - 1; i >= 0; i--) {
             AbstractClient *c = qobject_cast<AbstractClient*>(stacking_order.at(i));
-            if (c && c->isOnDesktop(desktop) && c->isDesktop()
-                    && c->isShown(true))
+            if (c && c->isOnDesktop(desktop) && c->isDesktop() && c->isShown()) {
                 return c;
+            }
         }
     } else { // bottom-most
-        Q_FOREACH (Toplevel * c, stacking_order) {
+        for (Toplevel *c : qAsConst(stacking_order)) {
             AbstractClient *client = qobject_cast<AbstractClient*>(c);
-            if (client && c->isOnDesktop(desktop) && c->isDesktop()
-                    && client->isShown(true))
+            if (client && c->isOnDesktop(desktop) && c->isDesktop() && client->isShown()) {
                 return client;
+            }
         }
     }
     return nullptr;
@@ -267,10 +272,13 @@ AbstractClient* Workspace::findDesktop(bool topmost, int desktop) const
 
 void Workspace::raiseOrLowerClient(AbstractClient *c)
 {
-    if (!c) return;
+    if (!c || !c->isOnCurrentDesktop()) {
+        return;
+    }
+
     const AbstractClient *topmost =
-            topClientOnDesktop(c->isOnAllDesktops() ? VirtualDesktopManager::self()->current() : c->desktop(),
-                               options->isSeparateScreenFocus() ? c->screen() : -1);
+            topClientOnDesktop(VirtualDesktopManager::self()->currentDesktop(),
+                               options->isSeparateScreenFocus() ? c->output() : nullptr);
 
     if (c == topmost)
         lowerClient(c);
@@ -349,8 +357,9 @@ void Workspace::raiseClient(AbstractClient* c, bool nogroup)
         AbstractClient *transient_parent = c;
         while ((transient_parent = transient_parent->transientFor()))
             transients << transient_parent;
-        Q_FOREACH (transient_parent, transients)
+        for (const auto &transient_parent : qAsConst(transients)) {
             raiseClient(transient_parent, true);
+        }
     }
 
     unconstrained_stacking_order.removeAll(c);
@@ -477,7 +486,7 @@ static Layer layerForClient(const X11Client *client)
         for (const X11Client *member : members) {
             if (member == client) {
                 continue;
-            } else if (member->screen() != client->screen()) {
+            } else if (member->output() != client->output()) {
                 continue;
             }
             if (member->layer() == ActiveLayer) {
@@ -502,7 +511,7 @@ static Layer computeLayer(const Toplevel *toplevel)
  * Returns a stacking order based upon \a list that fulfills certain contained.
  */
 QList<Toplevel *> Workspace::constrainedStackingOrder()
-{ 
+{
     // Sort the windows based on their layers while preserving their relative order in the
     // unconstrained stacking order.
     std::array<QList<Toplevel *>, NumLayers> windows;
@@ -699,8 +708,8 @@ void X11Client::restackWindow(xcb_window_t above, int detail, NET::RequestSource
             }
             X11Client *c = qobject_cast<X11Client *>(*it);
 
-            if (!c || !(  (*it)->isNormalWindow() && c->isShown(true) &&
-                    (*it)->isOnCurrentDesktop() && (*it)->isOnCurrentActivity() && (*it)->isOnScreen(screen()) ))
+            if (!c || !(  (*it)->isNormalWindow() && c->isShown() &&
+                    (*it)->isOnCurrentDesktop() && (*it)->isOnCurrentActivity() && (*it)->isOnOutput(output()) ))
                 continue; // irrelevant clients
 
             if (*(it - 1) == other)
@@ -726,7 +735,8 @@ void X11Client::restackWindow(xcb_window_t above, int detail, NET::RequestSource
 
 bool X11Client::belongsToDesktop() const
 {
-    Q_FOREACH (const X11Client *c, group()->members()) {
+    const auto members = group()->members();
+    for (const X11Client *c : members) {
         if (c->isDesktop())
             return true;
     }

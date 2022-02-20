@@ -12,7 +12,6 @@
 #include <KDecoration2/Decoration>
 
 #include <KCModule>
-#include <KPluginLoader>
 #include <KPluginFactory>
 #include <KPluginMetaData>
 
@@ -108,11 +107,10 @@ void PreviewBridge::createFactory()
         return;
     }
 
-    const auto offers = KPluginLoader::findPlugins(s_pluginName);
+    const auto offers = KPluginMetaData::findPlugins(s_pluginName);
     auto item = std::find_if(offers.constBegin(), offers.constEnd(), [this](const auto &plugin) { return plugin.pluginId() == m_plugin; });
     if (item != offers.constEnd()) {
-        KPluginLoader loader(item->fileName());
-        m_factory = loader.factory();
+        m_factory = KPluginFactory::loadFactory(*item).plugin;
     }
 
     setValid(!m_factory.isNull());
@@ -149,7 +147,7 @@ DecorationButton *PreviewBridge::createButton(KDecoration2::Decoration *decorati
     if (!m_valid) {
         return nullptr;
     }
-    return m_factory->create<KDecoration2::DecorationButton>(QStringLiteral("button"), parent, QVariantList({QVariant::fromValue(type), QVariant::fromValue(decoration)}));
+    return m_factory->create<KDecoration2::DecorationButton>(parent, QVariantList({QVariant::fromValue(type), QVariant::fromValue(decoration)}));
 }
 
 void PreviewBridge::configure(QQuickItem *ctx)
@@ -169,7 +167,9 @@ void PreviewBridge::configure(QQuickItem *ctx)
     if (!m_theme.isNull()) {
         args.insert(QStringLiteral("theme"), m_theme);
     }
-    KCModule *kcm = m_factory->create<KCModule>(QStringLiteral("kcmodule"), dialog, QVariantList({args}));
+
+    KCModule *kcm = m_factory->create<KCModule>(dialog, QVariantList({args}));
+
     if (!kcm) {
         return;
     }

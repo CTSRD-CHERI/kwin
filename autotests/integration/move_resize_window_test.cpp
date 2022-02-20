@@ -8,6 +8,7 @@
     SPDX-License-Identifier: GPL-2.0-or-later
 */
 #include "kwin_wayland_test.h"
+#include "abstract_output.h"
 #include "atoms.h"
 #include "platform.h"
 #include "abstract_client.h"
@@ -67,8 +68,6 @@ private Q_SLOTS:
     void testResizeForVirtualKeyboardWithFullScreen();
     void testDestroyMoveClient();
     void testDestroyResizeClient();
-    void testSetFullScreenWhenMoving();
-    void testSetMaximizeWhenMoving();
 
 private:
     KWayland::Client::ConnectionThread *m_connection = nullptr;
@@ -86,8 +85,9 @@ void MoveResizeWindowTest::initTestCase()
     QVERIFY(waylandServer()->init(s_socketName));
     kwinApp()->start();
     QVERIFY(applicationStartedSpy.wait());
-    QCOMPARE(screens()->count(), 1);
-    QCOMPARE(screens()->geometry(0), QRect(0, 0, 1280, 1024));
+    const auto outputs = kwinApp()->platform()->enabledOutputs();
+    QCOMPARE(outputs.count(), 1);
+    QCOMPARE(outputs[0]->geometry(), QRect(0, 0, 1280, 1024));
 }
 
 void MoveResizeWindowTest::init()
@@ -97,7 +97,7 @@ void MoveResizeWindowTest::init()
     m_connection = Test::waylandConnection();
     m_compositor = Test::waylandCompositor();
 
-    screens()->setCurrent(0);
+    workspace()->setActiveOutput(QPoint(640, 512));
 }
 
 void MoveResizeWindowTest::cleanup()
@@ -109,7 +109,7 @@ void MoveResizeWindowTest::testMove()
 {
     using namespace KWayland::Client;
 
-    QScopedPointer<Surface> surface(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
     QVERIFY(!surface.isNull());
 
     QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
@@ -146,7 +146,7 @@ void MoveResizeWindowTest::testMove()
     QCOMPARE(moveResizedChangedSpy.count(), 1);
     QCOMPARE(windowStartUserMovedResizedSpy.count(), 1);
     QCOMPARE(c->isInteractiveMove(), true);
-    QCOMPARE(c->geometryRestore(), QRect(0, 0, 100, 50));
+    QCOMPARE(c->geometryRestore(), QRect());
 
     // send some key events, not going through input redirection
     const QPoint cursorPos = Cursors::self()->mouse()->pos();
@@ -189,11 +189,10 @@ void MoveResizeWindowTest::testResize()
     // a test case which manually resizes a window
     using namespace KWayland::Client;
 
-    QScopedPointer<Surface> surface(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
     QVERIFY(!surface.isNull());
 
-    QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(
-        surface.data(), surface.data(), Test::CreationSetup::CreateOnly));
+    QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data(), Test::CreationSetup::CreateOnly));
     QVERIFY(!shellSurface.isNull());
 
     // Wait for the initial configure event.
@@ -202,7 +201,7 @@ void MoveResizeWindowTest::testResize()
     QVERIFY(toplevelConfigureRequestedSpy.isValid());
     QSignalSpy surfaceConfigureRequestedSpy(shellSurface->xdgSurface(), &Test::XdgSurface::configureRequested);
     QVERIFY(surfaceConfigureRequestedSpy.isValid());
-    surface->commit(Surface::CommitFlag::None);
+    surface->commit(KWayland::Client::Surface::CommitFlag::None);
     QVERIFY(surfaceConfigureRequestedSpy.wait());
     QCOMPARE(surfaceConfigureRequestedSpy.count(), 1);
     QCOMPARE(toplevelConfigureRequestedSpy.count(), 1);
@@ -245,7 +244,7 @@ void MoveResizeWindowTest::testResize()
     QCOMPARE(startMoveResizedSpy.count(), 1);
     QCOMPARE(moveResizedChangedSpy.count(), 1);
     QCOMPARE(c->isInteractiveResize(), true);
-    QCOMPARE(c->geometryRestore(), QRect(0, 0, 100, 50));
+    QCOMPARE(c->geometryRestore(), QRect());
     QVERIFY(surfaceConfigureRequestedSpy.wait());
     QCOMPARE(surfaceConfigureRequestedSpy.count(), 3);
     QCOMPARE(toplevelConfigureRequestedSpy.count(), 3);
@@ -267,7 +266,7 @@ void MoveResizeWindowTest::testResize()
     QVERIFY(states.testFlag(Test::XdgToplevel::State::Activated));
     QVERIFY(states.testFlag(Test::XdgToplevel::State::Resizing));
     QCOMPARE(toplevelConfigureRequestedSpy.last().at(0).toSize(), QSize(108, 50));
-    QCOMPARE(clientStepUserMovedResizedSpy.count(), 0);
+    QCOMPARE(clientStepUserMovedResizedSpy.count(), 1);
 
     // Now render new size.
     shellSurface->xdgSurface()->ack_configure(surfaceConfigureRequestedSpy.last().at(0).value<quint32>());
@@ -321,17 +320,17 @@ void MoveResizeWindowTest::testPackTo_data()
     QTest::addColumn<QString>("methodCall");
     QTest::addColumn<QRect>("expectedGeometry");
 
-    QTest::newRow("left")  << QStringLiteral("slotWindowPackLeft")  << QRect(0, 487, 100, 50);
-    QTest::newRow("up")    << QStringLiteral("slotWindowPackUp")    << QRect(590, 0, 100, 50);
-    QTest::newRow("right") << QStringLiteral("slotWindowPackRight") << QRect(1180, 487, 100, 50);
-    QTest::newRow("down")  << QStringLiteral("slotWindowPackDown")  << QRect(590, 974, 100, 50);
+    QTest::newRow("left")  << QStringLiteral("slotWindowMoveLeft")  << QRect(0, 487, 100, 50);
+    QTest::newRow("up")    << QStringLiteral("slotWindowMoveUp")    << QRect(590, 0, 100, 50);
+    QTest::newRow("right") << QStringLiteral("slotWindowMoveRight") << QRect(1180, 487, 100, 50);
+    QTest::newRow("down")  << QStringLiteral("slotWindowMoveDown")  << QRect(590, 974, 100, 50);
 }
 
 void MoveResizeWindowTest::testPackTo()
 {
     using namespace KWayland::Client;
 
-    QScopedPointer<Surface> surface(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
     QVERIFY(!surface.isNull());
 
     QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
@@ -359,23 +358,23 @@ void MoveResizeWindowTest::testPackAgainstClient_data()
     QTest::addColumn<QString>("methodCall");
     QTest::addColumn<QRect>("expectedGeometry");
 
-    QTest::newRow("left")  << QStringLiteral("slotWindowPackLeft")  << QRect(10, 487, 100, 50);
-    QTest::newRow("up")    << QStringLiteral("slotWindowPackUp")    << QRect(590, 10, 100, 50);
-    QTest::newRow("right") << QStringLiteral("slotWindowPackRight") << QRect(1170, 487, 100, 50);
-    QTest::newRow("down")  << QStringLiteral("slotWindowPackDown")  << QRect(590, 964, 100, 50);
+    QTest::newRow("left")  << QStringLiteral("slotWindowMoveLeft")  << QRect(10, 487, 100, 50);
+    QTest::newRow("up")    << QStringLiteral("slotWindowMoveUp")    << QRect(590, 10, 100, 50);
+    QTest::newRow("right") << QStringLiteral("slotWindowMoveRight") << QRect(1170, 487, 100, 50);
+    QTest::newRow("down")  << QStringLiteral("slotWindowMoveDown")  << QRect(590, 964, 100, 50);
 }
 
 void MoveResizeWindowTest::testPackAgainstClient()
 {
     using namespace KWayland::Client;
 
-    QScopedPointer<Surface> surface1(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface1(Test::createSurface());
     QVERIFY(!surface1.isNull());
-    QScopedPointer<Surface> surface2(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface2(Test::createSurface());
     QVERIFY(!surface2.isNull());
-    QScopedPointer<Surface> surface3(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface3(Test::createSurface());
     QVERIFY(!surface3.isNull());
-    QScopedPointer<Surface> surface4(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface4(Test::createSurface());
     QVERIFY(!surface4.isNull());
 
     QScopedPointer<Test::XdgToplevel> shellSurface1(Test::createXdgToplevelSurface(surface1.data()));
@@ -386,7 +385,7 @@ void MoveResizeWindowTest::testPackAgainstClient()
     QVERIFY(!shellSurface3.isNull());
     QScopedPointer<Test::XdgToplevel> shellSurface4(Test::createXdgToplevelSurface(surface4.data()));
     QVERIFY(!shellSurface4.isNull());
-    auto renderWindow = [] (Surface *surface, const QString &methodCall, const QRect &expectedGeometry) {
+    auto renderWindow = [] (KWayland::Client::Surface *surface, const QString &methodCall, const QRect &expectedGeometry) {
         // let's render
         auto c = Test::renderAndWaitForShown(surface, QSize(10, 10), Qt::blue);
 
@@ -399,12 +398,12 @@ void MoveResizeWindowTest::testPackAgainstClient()
         QMetaObject::invokeMethod(workspace(), methodCall.toLocal8Bit().constData());
         QCOMPARE(c->frameGeometry(), expectedGeometry);
     };
-    renderWindow(surface1.data(), QStringLiteral("slotWindowPackLeft"),  QRect(0, 507, 10, 10));
-    renderWindow(surface2.data(), QStringLiteral("slotWindowPackUp"),    QRect(635, 0, 10, 10));
-    renderWindow(surface3.data(), QStringLiteral("slotWindowPackRight"), QRect(1270, 507, 10, 10));
-    renderWindow(surface4.data(), QStringLiteral("slotWindowPackDown"),  QRect(635, 1014, 10, 10));
+    renderWindow(surface1.data(), QStringLiteral("slotWindowMoveLeft"),  QRect(0, 507, 10, 10));
+    renderWindow(surface2.data(), QStringLiteral("slotWindowMoveUp"),    QRect(635, 0, 10, 10));
+    renderWindow(surface3.data(), QStringLiteral("slotWindowMoveRight"), QRect(1270, 507, 10, 10));
+    renderWindow(surface4.data(), QStringLiteral("slotWindowMoveDown"),  QRect(635, 1014, 10, 10));
 
-    QScopedPointer<Surface> surface(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
     QVERIFY(!surface.isNull());
     QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
     QVERIFY(!shellSurface.isNull());
@@ -426,8 +425,8 @@ void MoveResizeWindowTest::testGrowShrink_data()
     QTest::addColumn<QString>("methodCall");
     QTest::addColumn<QRect>("expectedGeometry");
 
-    QTest::newRow("grow vertical")     << QStringLiteral("slotWindowGrowVertical")     << QRect(590, 487, 100, 537);
-    QTest::newRow("grow horizontal")   << QStringLiteral("slotWindowGrowHorizontal")   << QRect(590, 487, 690, 50);
+    QTest::newRow("grow vertical")     << QStringLiteral("slotWindowExpandVertical")     << QRect(590, 487, 100, 537);
+    QTest::newRow("grow horizontal")   << QStringLiteral("slotWindowExpandHorizontal")   << QRect(590, 487, 690, 50);
     QTest::newRow("shrink vertical")   << QStringLiteral("slotWindowShrinkVertical")   << QRect(590, 487, 100, 23);
     QTest::newRow("shrink horizontal") << QStringLiteral("slotWindowShrinkHorizontal") << QRect(590, 487, 40, 50);
 }
@@ -437,16 +436,16 @@ void MoveResizeWindowTest::testGrowShrink()
     using namespace KWayland::Client;
 
     // block geometry helper
-    QScopedPointer<Surface> surface1(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface1(Test::createSurface());
     QVERIFY(!surface1.isNull());
     QScopedPointer<Test::XdgToplevel> shellSurface1(Test::createXdgToplevelSurface(surface1.data()));
     QVERIFY(!shellSurface1.isNull());
     Test::render(surface1.data(), QSize(650, 514), Qt::blue);
     QVERIFY(Test::waitForWaylandWindowShown());
-    workspace()->slotWindowPackRight();
-    workspace()->slotWindowPackDown();
+    workspace()->slotWindowMoveRight();
+    workspace()->slotWindowMoveDown();
 
-    QScopedPointer<Surface> surface(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
     QVERIFY(!surface.isNull());
 
     QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
@@ -499,7 +498,7 @@ void MoveResizeWindowTest::testPointerMoveEnd()
     // this test verifies that moving a window through pointer only ends if all buttons are released
     using namespace KWayland::Client;
 
-    QScopedPointer<Surface> surface(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
     QVERIFY(!surface.isNull());
 
     QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
@@ -545,7 +544,7 @@ void MoveResizeWindowTest::testClientSideMove()
     QSignalSpy buttonSpy(pointer.data(), &Pointer::buttonStateChanged);
     QVERIFY(buttonSpy.isValid());
 
-    QScopedPointer<Surface> surface(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
     auto c = Test::renderAndWaitForShown(surface.data(), QSize(100, 50), Qt::blue);
     QVERIFY(c);
@@ -600,7 +599,7 @@ void MoveResizeWindowTest::testPlasmaShellSurfaceMovable()
 {
     // this test verifies that certain window types from PlasmaShellSurface are not moveable or resizable
     using namespace KWayland::Client;
-    QScopedPointer<Surface> surface(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
     QVERIFY(!surface.isNull());
 
     QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
@@ -751,7 +750,7 @@ void MoveResizeWindowTest::testAdjustClientGeometryOfAutohidingX11Panel()
 
     // let's create a window
     using namespace KWayland::Client;
-    QScopedPointer<Surface> surface(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
     QVERIFY(!surface.isNull());
 
     QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
@@ -815,7 +814,7 @@ void MoveResizeWindowTest::testAdjustClientGeometryOfAutohidingWaylandPanel()
 
     // first create our panel
     using namespace KWayland::Client;
-    QScopedPointer<Surface> panelSurface(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> panelSurface(Test::createSurface());
     QVERIFY(!panelSurface.isNull());
     QScopedPointer<Test::XdgToplevel> panelShellSurface(Test::createXdgToplevelSurface(panelSurface.data()));
     QVERIFY(!panelShellSurface.isNull());
@@ -832,7 +831,7 @@ void MoveResizeWindowTest::testAdjustClientGeometryOfAutohidingWaylandPanel()
     QVERIFY(panel->isDock());
 
     // let's create a window
-    QScopedPointer<Surface> surface(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
     QVERIFY(!surface.isNull());
 
     QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
@@ -877,7 +876,7 @@ void MoveResizeWindowTest::testResizeForVirtualKeyboard()
 {
     using namespace KWayland::Client;
 
-    QScopedPointer<Surface> surface(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
     QVERIFY(!surface.isNull());
 
     QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
@@ -922,7 +921,7 @@ void MoveResizeWindowTest::testResizeForVirtualKeyboardWithMaximize()
 {
     using namespace KWayland::Client;
 
-    QScopedPointer<Surface> surface(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
     QVERIFY(!surface.isNull());
 
     QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
@@ -975,7 +974,7 @@ void MoveResizeWindowTest::testResizeForVirtualKeyboardWithFullScreen()
 {
     using namespace KWayland::Client;
 
-    QScopedPointer<Surface> surface(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
     QVERIFY(!surface.isNull());
 
     QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
@@ -1030,7 +1029,7 @@ void MoveResizeWindowTest::testDestroyMoveClient()
 
     // Create the test client.
     using namespace KWayland::Client;
-    QScopedPointer<Surface> surface(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
     QVERIFY(!surface.isNull());
     QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
     QVERIFY(!shellSurface.isNull());
@@ -1067,7 +1066,7 @@ void MoveResizeWindowTest::testDestroyResizeClient()
 
     // Create the test client.
     using namespace KWayland::Client;
-    QScopedPointer<Surface> surface(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
     QVERIFY(!surface.isNull());
     QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
     QVERIFY(!shellSurface.isNull());
@@ -1097,57 +1096,6 @@ void MoveResizeWindowTest::testDestroyResizeClient()
     QCOMPARE(workspace()->moveResizeClient(), nullptr);
 }
 
-void MoveResizeWindowTest::testSetFullScreenWhenMoving()
-{
-    // Ensure we disable moving event when setFullScreen is triggered
-    using namespace KWayland::Client;
-
-    QScopedPointer<Surface> surface(Test::createSurface());
-    QVERIFY(!surface.isNull());
-
-    QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
-    QVERIFY(!shellSurface.isNull());
-
-    // let's render
-    auto client = Test::renderAndWaitForShown(surface.data(), QSize(500, 800), Qt::blue);
-    QVERIFY(client);
-
-    workspace()->slotWindowMove();
-    QCOMPARE(client->isInteractiveMove(), true);
-    client->setFullScreen(true);
-    QCOMPARE(client->isInteractiveMove(), false);
-    QCOMPARE(workspace()->moveResizeClient(), nullptr);
-    // Let's pretend that the client crashed.
-    shellSurface.reset();
-    surface.reset();
-    QVERIFY(Test::waitForWindowDestroyed(client));
-}
-
-void MoveResizeWindowTest::testSetMaximizeWhenMoving()
-{
-    // Ensure we disable moving event when changeMaximize is triggered
-    using namespace KWayland::Client;
-
-    QScopedPointer<Surface> surface(Test::createSurface());
-    QVERIFY(!surface.isNull());
-
-    QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
-    QVERIFY(!shellSurface.isNull());
-
-    // let's render
-    auto client = Test::renderAndWaitForShown(surface.data(), QSize(500, 800), Qt::blue);
-    QVERIFY(client);
-
-    workspace()->slotWindowMove();
-    QCOMPARE(client->isInteractiveMove(), true);
-    client->setMaximize(true, true);
-    QCOMPARE(client->isInteractiveMove(), false);
-    QCOMPARE(workspace()->moveResizeClient(), nullptr);
-    // Let's pretend that the client crashed.
-    shellSurface.reset();
-    surface.reset();
-    QVERIFY(Test::waitForWindowDestroyed(client));
-}
 }
 
 WAYLANDTEST_MAIN(KWin::MoveResizeWindowTest)

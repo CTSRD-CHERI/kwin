@@ -20,13 +20,15 @@ class KSelectionOwner;
 
 namespace KWin
 {
+class AbstractOutput;
 class ApplicationWaylandAbstract;
 class XwaylandSocket;
 
 namespace Xwl
 {
+class XrandrEventFilter;
 
-class Xwayland : public XwaylandInterface
+class KWIN_EXPORT Xwayland : public XwaylandInterface
 {
     Q_OBJECT
 
@@ -38,6 +40,27 @@ public:
      * Returns the associated Xwayland process or @c null if the Xwayland server is inactive.
      */
     QProcess *process() const override;
+
+    /**
+     * Set file descriptors that xwayland should use for listening
+     * This is to be used in conjuction with kwin_wayland_wrapper which creates a socket externally
+     * That external process is responsible for setting up the DISPLAY env with a valid value.
+     * Ownership of the file descriptor is not transferrred.
+     */
+    void setListenFDs(const QVector<int> &listenFds);
+
+    /**
+     * Sets the display name used by XWayland (i.e ':0')
+     * This is to be used in conjuction with kwin_wayland_wrapper to provide the name of the socket
+     * created externally
+     */
+    void setDisplayName(const QString &displayName);
+
+    /**
+     * Sets the xauthority file to be used by XWayland
+     * This is to be used in conjuction with kwin_wayland_wrapper
+     */
+    void setXauthority(const QString &xauthority);
 
 public Q_SLOTS:
     /**
@@ -91,9 +114,12 @@ private Q_SLOTS:
     void handleSelectionClaimedOwnership();
 
 private:
+    friend class XrandrEventFilter;
+
     void installSocketNotifier();
     void uninstallSocketNotifier();
     void maybeDestroyReadyNotifier();
+    void updatePrimary(AbstractOutput *primaryOutput);
 
     bool startInternal();
     void stopInternal();
@@ -103,6 +129,7 @@ private:
     void destroyX11Connection();
 
     DragEventReply dragMoveFilter(Toplevel *target, const QPoint &pos) override;
+    KWaylandServer::AbstractDropHandler *xwlDropHandler() override;
 
     int m_xcbConnectionFd = -1;
     QProcess *m_xwaylandProcess = nullptr;
@@ -111,9 +138,15 @@ private:
     QTimer *m_resetCrashCountTimer = nullptr;
     ApplicationWaylandAbstract *m_app;
     QScopedPointer<KSelectionOwner> m_selectionOwner;
-    QTemporaryFile m_authorityFile;
+    // this is only used when kwin is run without kwin_wayland_wrapper
     QScopedPointer<XwaylandSocket> m_socket;
+
+    QVector<int> m_listenFds;
+    QString m_displayName;
+    QString m_xAuthority;
+
     int m_crashCount = 0;
+    XrandrEventFilter *m_xrandrEventsFilter = nullptr;
 
     Q_DISABLE_COPY(Xwayland)
 };

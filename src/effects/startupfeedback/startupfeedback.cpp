@@ -13,10 +13,11 @@
 #include <QDBusConnectionInterface>
 #include <QDBusServiceWatcher>
 #include <QFile>
-#include <QSize>
-#include <QStyle>
-#include <QStandardPaths>
 #include <QPainter>
+#include <QSize>
+#include <QStandardPaths>
+#include <QStyle>
+#include <QTimer>
 // KDE
 #include <KConfigGroup>
 #include <KSharedConfig>
@@ -27,6 +28,14 @@
 
 // based on StartupId in KRunner by Lubos Lunak
 // SPDX-FileCopyrightText: 2001 Lubos Lunak <l.lunak@kde.org>
+
+Q_LOGGING_CATEGORY(KWIN_STARTUPFEEDBACK, "kwin_effect_startupfeedback", QtWarningMsg)
+
+static void ensureResources()
+{
+    // Must initialize resources manually because the effect is a static lib.
+    Q_INIT_RESOURCE(startupfeedback);
+}
 
 namespace KWin
 {
@@ -102,21 +111,16 @@ StartupFeedbackEffect::StartupFeedbackEffect()
     });
     reconfigure(ReconfigureAll);
 
-    if (auto *sessionInterface = QDBusConnection::sessionBus().interface()) {
-        m_splashVisible = sessionInterface->isServiceRegistered(QStringLiteral("org.kde.KSplash"));
-        auto serviceWatcher =
-            new QDBusServiceWatcher(QStringLiteral("org.kde.KSplash"), QDBusConnection::sessionBus(), QDBusServiceWatcher::WatchForOwnerChange, this);
-        connect(serviceWatcher, &QDBusServiceWatcher::serviceRegistered, this, [this] {
-            m_splashVisible = true;
-            stop();
-        });
-        connect(serviceWatcher, &QDBusServiceWatcher::serviceUnregistered, this, [this] {
-            m_splashVisible = false;
-            gotRemoveStartup({}); // Start the next feedback
-        });
-    } else {
-        m_splashVisible = false; // DBus not available, can't communicate with org.kde.KSplash
-    }
+    m_splashVisible = QDBusConnection::sessionBus().interface()->isServiceRegistered(QStringLiteral("org.kde.KSplash"));
+    auto serviceWatcher = new QDBusServiceWatcher(QStringLiteral("org.kde.KSplash"), QDBusConnection::sessionBus(), QDBusServiceWatcher::WatchForOwnerChange, this);
+    connect(serviceWatcher, &QDBusServiceWatcher::serviceRegistered, this, [this] {
+        m_splashVisible = true;
+        stop();
+    });
+    connect(serviceWatcher, &QDBusServiceWatcher::serviceUnregistered, this, [this] {
+        m_splashVisible = false;
+        gotRemoveStartup({}); // Start the next feedback
+    });
 }
 
 StartupFeedbackEffect::~StartupFeedbackEffect()
@@ -138,7 +142,8 @@ void StartupFeedbackEffect::reconfigure(Effect::ReconfigureFlags flags)
     const bool busyCursor = c.readEntry("BusyCursor", true);
 
     c = m_configWatcher->config()->group("BusyCursorSettings");
-    m_startupInfo->setTimeout(c.readEntry("Timeout", s_startupDefaultTimeout));
+    m_timeout = std::chrono::seconds(c.readEntry("Timeout", s_startupDefaultTimeout));
+    m_startupInfo->setTimeout(m_timeout.count());
     const bool busyBlinking = c.readEntry("Blinking", false);
     const bool busyBouncing = c.readEntry("Bouncing", true);
     if (!busyCursor)
@@ -148,18 +153,19 @@ void StartupFeedbackEffect::reconfigure(Effect::ReconfigureFlags flags)
     else if (busyBlinking) {
         m_type = BlinkingFeedback;
         if (effects->compositingType() == OpenGLCompositing) {
-            m_blinkingShader.reset(ShaderManager::instance()->generateShaderFromResources(ShaderTrait::MapTexture, QString(), QStringLiteral("blinking-startup-fragment.glsl")));
+            ensureResources();
+            m_blinkingShader.reset(ShaderManager::instance()->generateShaderFromFile(ShaderTrait::MapTexture, QString(), QStringLiteral(":/effects/startupfeedback/shaders/blinking-startup.frag")));
             if (m_blinkingShader->isValid()) {
-                qCDebug(KWINEFFECTS) << "Blinking Shader is valid";
+                qCDebug(KWIN_STARTUPFEEDBACK) << "Blinking Shader is valid";
             } else {
-                qCDebug(KWINEFFECTS) << "Blinking Shader is not valid";
+                qCDebug(KWIN_STARTUPFEEDBACK) << "Blinking Shader is not valid";
             }
         }
     } else
         m_type = PassiveFeedback;
     if (m_active) {
         stop();
-        start(m_startups[ m_currentStartup ]);
+        start(m_startups[m_currentStartup]);
     }
 }
 
@@ -171,6 +177,9 @@ void StartupFeedbackEffect::prePaintScreen(ScreenPrePaintData& data, std::chrono
     }
     m_lastPresentTime = presentTime;
 
+    if (m_active && effects->isCursorHidden()) {
+        stop();
+    }
     if (m_active) {
         // need the unclipped version
         switch(m_type) {
@@ -220,7 +229,7 @@ void StartupFeedbackEffect::paintScreen(int mask, const QRegion &region, ScreenP
         QMatrix4x4 mvp = data.projectionMatrix();
         mvp.translate(m_currentGeometry.x(), m_currentGeometry.y());
         ShaderManager::instance()->getBoundShader()->setUniform(GLShader::ModelViewProjectionMatrix, mvp);
-        texture->render(m_currentGeometry, m_currentGeometry);
+        texture->render(m_currentGeometry);
         ShaderManager::instance()->popShader();
         texture->unbind();
         glDisable(GL_BLEND);
@@ -256,9 +265,19 @@ void StartupFeedbackEffect::slotMouseChanged(const QPoint& pos, const QPoint& ol
 
 void StartupFeedbackEffect::gotNewStartup(const QString &id, const QIcon &icon)
 {
+    Startup &startup = m_startups[id];
+    startup.icon = icon;
+
+    startup.expiredTimer.reset(new QTimer());
+    // Stop the animation if the startup doesn't finish within reasonable interval.
+    connect(startup.expiredTimer.data(), &QTimer::timeout, this, [this, id]() {
+        gotRemoveStartup(id);
+    });
+    startup.expiredTimer->setSingleShot(true);
+    startup.expiredTimer->start(m_timeout);
+
     m_currentStartup = id;
-    m_startups[ id ] = icon;
-    start(icon);
+    start(startup);
 }
 
 void StartupFeedbackEffect::gotRemoveStartup(const QString &id)
@@ -276,16 +295,17 @@ void StartupFeedbackEffect::gotRemoveStartup(const QString &id)
 void StartupFeedbackEffect::gotStartupChange(const QString &id, const QIcon &icon)
 {
     if (m_currentStartup == id) {
-        if (!icon.isNull() && icon.name() != m_startups[m_currentStartup].name()) {
-            m_startups[ id ] = icon;
-            start(icon);
+        Startup &currentStartup = m_startups[m_currentStartup];
+        if (!icon.isNull() && icon.name() != currentStartup.icon.name()) {
+            currentStartup.icon = icon;
+            start(currentStartup);
         }
     }
 }
 
-void StartupFeedbackEffect::start(const QIcon &icon)
+void StartupFeedbackEffect::start(const Startup &startup)
 {
-    if (m_type == NoFeedback || m_splashVisible)
+    if (m_type == NoFeedback || m_splashVisible || effects->isCursorHidden())
         return;
     if (!m_active)
         effects->startMousePolling();
@@ -302,7 +322,7 @@ void StartupFeedbackEffect::start(const QIcon &icon)
     // get ratio for bouncing cursor so we don't need to manually calculate the sizes for each icon size
     if (m_type == BouncingFeedback)
         m_bounceSizesRatio = iconSize / 16.0;
-    const QPixmap iconPixmap = icon.pixmap(iconSize);
+    const QPixmap iconPixmap = startup.icon.pixmap(iconSize);
     prepareTextures(iconPixmap);
     m_dirtyRect = m_currentGeometry = feedbackRect();
     effects->addRepaint(m_dirtyRect);
@@ -340,11 +360,15 @@ void StartupFeedbackEffect::prepareTextures(const QPixmap& pix)
     case BouncingFeedback:
         for (int i = 0; i < 5; ++i) {
             m_bouncingTextures[i].reset(new GLTexture(scalePixmap(pix, BOUNCE_SIZES[i])));
+            m_bouncingTextures[i]->setFilter(GL_LINEAR);
+            m_bouncingTextures[i]->setWrapMode(GL_CLAMP_TO_EDGE);
         }
         break;
     case BlinkingFeedback:
     case PassiveFeedback:
         m_texture.reset(new GLTexture(pix));
+        m_texture->setFilter(GL_LINEAR);
+        m_texture->setWrapMode(GL_CLAMP_TO_EDGE);
         break;
     default:
         // for safety

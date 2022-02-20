@@ -14,10 +14,9 @@
 #include "effectloader.h"
 #include "cursor.h"
 #include "platform.h"
-#include "scene.h"
+#include "renderbackend.h"
 #include "wayland_server.h"
 #include "workspace.h"
-#include "effect_builtins.h"
 
 #include <KConfigGroup>
 
@@ -60,8 +59,7 @@ void SlidingPopupsTest::initTestCase()
     // disable all effects - we don't want to have it interact with the rendering
     auto config = KSharedConfig::openConfig(QString(), KConfig::SimpleConfig);
     KConfigGroup plugins(config, QStringLiteral("Plugins"));
-    ScriptedEffectLoader loader;
-    const auto builtinNames = BuiltInEffects::availableEffectNames() << loader.listOfKnownEffects();
+    const auto builtinNames = EffectLoader().listOfKnownEffects();
     for (QString name : builtinNames) {
         plugins.writeEntry(name + QStringLiteral("Enabled"), false);
     }
@@ -79,9 +77,7 @@ void SlidingPopupsTest::initTestCase()
     QVERIFY(applicationStartedSpy.wait());
     QVERIFY(Compositor::self());
 
-    auto scene = KWin::Compositor::self()->scene();
-    QVERIFY(scene);
-    QCOMPARE(scene->compositingType(), KWin::OpenGLCompositing);
+    QCOMPARE(Compositor::self()->backend()->compositingType(), KWin::OpenGLCompositing);
 }
 
 void SlidingPopupsTest::init()
@@ -318,7 +314,7 @@ void SlidingPopupsTest::testWithOtherEffectWayland()
     QVERIFY(slideManager);
 
     // create Wayland window
-    QScopedPointer<Surface> surface(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
     QVERIFY(surface);
     QScopedPointer<Slide> slide(slideManager->createSlide(surface.data()));
     slide->setLocation(Slide::Location::Left);

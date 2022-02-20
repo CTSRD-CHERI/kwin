@@ -8,8 +8,6 @@
 
 #include "surfaceitem.h"
 
-#if HAVE_WAYLAND
-
 namespace KWaylandServer
 {
 class ClientBuffer;
@@ -29,7 +27,7 @@ class KWIN_EXPORT SurfaceItemWayland : public SurfaceItem
 
 public:
     explicit SurfaceItemWayland(KWaylandServer::SurfaceInterface *surface,
-                                Scene::Window *window, Item *parent = nullptr);
+                                Toplevel *window, Item *parent = nullptr);
 
     QRegion shape() const override;
     QRegion opaque() const override;
@@ -44,6 +42,7 @@ private Q_SLOTS:
     void handleChildSubSurfaceRemoved(KWaylandServer::SubSurfaceInterface *child);
     void handleChildSubSurfacesChanged();
     void handleSubSurfacePositionChanged();
+    void handleSubSurfaceMappedChanged();
 
 protected:
     SurfacePixmap *createPixmap() override;
@@ -86,12 +85,9 @@ class KWIN_EXPORT SurfaceItemXwayland : public SurfaceItemWayland
     Q_OBJECT
 
 public:
-    explicit SurfaceItemXwayland(Scene::Window *window, Item *parent = nullptr);
+    explicit SurfaceItemXwayland(Toplevel *window, Item *parent = nullptr);
 
     QRegion shape() const override;
 };
 
-
 } // namespace KWin
-
-#endif

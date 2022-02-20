@@ -13,9 +13,9 @@
 #include "effects.h"
 #include "effectloader.h"
 #include "platform.h"
+#include "renderbackend.h"
 #include "wayland_server.h"
 #include "workspace.h"
-#include "effect_builtins.h"
 
 #include <KConfigGroup>
 
@@ -53,8 +53,7 @@ void WobblyWindowsShadeTest::initTestCase()
     // disable all effects - we don't want to have it interact with the rendering
     auto config = KSharedConfig::openConfig(QString(), KConfig::SimpleConfig);
     KConfigGroup plugins(config, QStringLiteral("Plugins"));
-    ScriptedEffectLoader loader;
-    const auto builtinNames = BuiltInEffects::availableEffectNames() << loader.listOfKnownEffects();
+    const auto builtinNames = EffectLoader().listOfKnownEffects();
     for (QString name : builtinNames) {
         plugins.writeEntry(name + QStringLiteral("Enabled"), false);
     }
@@ -68,9 +67,7 @@ void WobblyWindowsShadeTest::initTestCase()
     QVERIFY(applicationStartedSpy.wait());
     QVERIFY(Compositor::self());
 
-    auto scene = KWin::Compositor::self()->scene();
-    QVERIFY(scene);
-    QCOMPARE(scene->compositingType(), KWin::OpenGLCompositing);
+    QCOMPARE(Compositor::self()->backend()->compositingType(), KWin::OpenGLCompositing);
 }
 
 void WobblyWindowsShadeTest::init()
@@ -99,8 +96,8 @@ void WobblyWindowsShadeTest::testShadeMove()
 {
     // this test simulates the condition from BUG 390953
     EffectsHandlerImpl *e = static_cast<EffectsHandlerImpl*>(effects);
-    QVERIFY(e->loadEffect(BuiltInEffects::nameForEffect(BuiltInEffect::WobblyWindows)));
-    QVERIFY(e->isEffectLoaded(BuiltInEffects::nameForEffect(BuiltInEffect::WobblyWindows)));
+    QVERIFY(e->loadEffect(QStringLiteral("wobblywindows")));
+    QVERIFY(e->isEffectLoaded(QStringLiteral("wobblywindows")));
 
 
     QScopedPointer<xcb_connection_t, XcbConnectionDeleter> c(xcb_connect(nullptr, nullptr));

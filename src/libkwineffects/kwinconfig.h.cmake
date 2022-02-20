@@ -22,8 +22,4 @@
 
 #cmakedefine01 HAVE_DL_LIBRARY
 
-#cmakedefine01 KScreenLocker_FOUND
-
-#cmakedefine01 HAVE_WAYLAND
-
 #endif

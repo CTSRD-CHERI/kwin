@@ -20,6 +20,14 @@
 
 #include <QMatrix4x4>
 
+Q_LOGGING_CATEGORY(KWIN_INVERT, "kwin_effect_invert", QtWarningMsg)
+
+static void ensureResources()
+{
+    // Must initialize resources manually because the effect is a static lib.
+    Q_INIT_RESOURCE(invert);
+}
+
 namespace KWin
 {
 
@@ -60,11 +68,12 @@ bool InvertEffect::supported()
 
 bool InvertEffect::loadData()
 {
+    ensureResources();
     m_inited = true;
 
-    m_shader = ShaderManager::instance()->generateShaderFromResources(ShaderTrait::MapTexture, QString(), QStringLiteral("invert.frag"));
+    m_shader = ShaderManager::instance()->generateShaderFromFile(ShaderTrait::MapTexture, QString(), QStringLiteral(":/effects/invert/shaders/invert.frag"));
     if (!m_shader->isValid()) {
-        qCCritical(KWINEFFECTS) << "The shader failed to load!";
+        qCCritical(KWIN_INVERT) << "The shader failed to load!";
         return false;
     }
 

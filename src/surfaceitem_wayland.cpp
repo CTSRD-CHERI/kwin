@@ -16,7 +16,7 @@ namespace KWin
 {
 
 SurfaceItemWayland::SurfaceItemWayland(KWaylandServer::SurfaceInterface *surface,
-                                       Scene::Window *window, Item *parent)
+                                       Toplevel *window, Item *parent)
     : SurfaceItem(window, parent)
     , m_surface(surface)
 {
@@ -39,8 +39,13 @@ SurfaceItemWayland::SurfaceItemWayland(KWaylandServer::SurfaceInterface *surface
 
     KWaylandServer::SubSurfaceInterface *subsurface = surface->subSurface();
     if (subsurface) {
+        connect(surface, &KWaylandServer::SurfaceInterface::mapped,
+                this, &SurfaceItemWayland::handleSubSurfaceMappedChanged);
+        connect(surface, &KWaylandServer::SurfaceInterface::unmapped,
+                this, &SurfaceItemWayland::handleSubSurfaceMappedChanged);
         connect(subsurface, &KWaylandServer::SubSurfaceInterface::positionChanged,
                 this, &SurfaceItemWayland::handleSubSurfacePositionChanged);
+        setVisible(surface->isMapped());
         setPosition(subsurface->position());
     }
 
@@ -123,13 +128,18 @@ void SurfaceItemWayland::handleSubSurfacePositionChanged()
     setPosition(m_surface->subSurface()->position());
 }
 
+void SurfaceItemWayland::handleSubSurfaceMappedChanged()
+{
+    setVisible(m_surface->isMapped());
+}
+
 SurfacePixmap *SurfaceItemWayland::createPixmap()
 {
     return new SurfacePixmapWayland(this);
 }
 
 SurfacePixmapWayland::SurfacePixmapWayland(SurfaceItemWayland *item, QObject *parent)
-    : SurfacePixmap(Compositor::self()->scene()->createPlatformSurfaceTextureWayland(this), parent)
+    : SurfacePixmap(Compositor::self()->scene()->createSurfaceTextureWayland(this), parent)
     , m_item(item)
 {
 }
@@ -187,18 +197,16 @@ void SurfacePixmapWayland::setBuffer(KWaylandServer::ClientBuffer *buffer)
     }
 }
 
-SurfaceItemXwayland::SurfaceItemXwayland(Scene::Window *window, Item *parent)
-    : SurfaceItemWayland(window->window()->surface(), window, parent)
+SurfaceItemXwayland::SurfaceItemXwayland(Toplevel *window, Item *parent)
+    : SurfaceItemWayland(window->surface(), window, parent)
 {
-    const Toplevel *toplevel = window->window();
-    connect(toplevel, &Toplevel::geometryShapeChanged, this, &SurfaceItemXwayland::discardQuads);
+    connect(window, &Toplevel::geometryShapeChanged, this, &SurfaceItemXwayland::discardQuads);
 }
 
 QRegion SurfaceItemXwayland::shape() const
 {
-    const Toplevel *toplevel = window()->window();
-    const QRect clipRect = rect() & toplevel->clientGeometry().translated(-toplevel->bufferGeometry().topLeft());
-    const QRegion shape = toplevel->shapeRegion();
+    const QRect clipRect = rect() & window()->clientGeometry().translated(-window()->bufferGeometry().topLeft());
+    const QRegion shape = window()->shapeRegion();
 
     return shape & clipRect;
 }

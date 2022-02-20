@@ -11,8 +11,9 @@
 #include "slidingpopups.h"
 #include "slidingpopupsconfig.h"
 
-#include <QApplication>
+#include <QGuiApplication>
 #include <QFontMetrics>
+#include <QTimer>
 #include <QWindow>
 
 #include <KWaylandServer/surface_interface.h>
@@ -25,15 +26,30 @@ Q_DECLARE_METATYPE(KWindowEffects::SlideFromLocation)
 namespace KWin
 {
 
+KWaylandServer::SlideManagerInterface *SlidingPopupsEffect::s_slideManager = nullptr;
+QTimer *SlidingPopupsEffect::s_slideManagerRemoveTimer = nullptr;
+
 SlidingPopupsEffect::SlidingPopupsEffect()
 {
     initConfig<SlidingPopupsConfig>();
+
     KWaylandServer::Display *display = effects->waylandDisplay();
     if (display) {
-        m_slideManager.reset(new KWaylandServer::SlideManagerInterface(display));
+        if (!s_slideManagerRemoveTimer) {
+            s_slideManagerRemoveTimer = new QTimer(QCoreApplication::instance());
+            s_slideManagerRemoveTimer->setSingleShot(true);
+            s_slideManagerRemoveTimer->callOnTimeout([]() {
+                s_slideManager->remove();
+                s_slideManager = nullptr;
+            });
+        }
+        s_slideManagerRemoveTimer->stop();
+        if (!s_slideManager) {
+            s_slideManager = new KWaylandServer::SlideManagerInterface(display, s_slideManagerRemoveTimer);
+        }
     }
 
-    m_slideLength = QFontMetrics(qApp->font()).height() * 8;
+    m_slideLength = QFontMetrics(QGuiApplication::font()).height() * 8;
 
     m_atom = effects->announceSupportProperty("_KDE_SLIDE", this);
     connect(effects, &EffectsHandler::windowAdded, this, &SlidingPopupsEffect::slotWindowAdded);
@@ -53,10 +69,19 @@ SlidingPopupsEffect::SlidingPopupsEffect()
             this, &SlidingPopupsEffect::stopAnimations);
 
     reconfigure(ReconfigureAll);
+
+    const EffectWindowList windows = effects->stackingOrder();
+    for (EffectWindow *window : windows) {
+        setupSlideData(window);
+    }
 }
 
 SlidingPopupsEffect::~SlidingPopupsEffect()
 {
+    // When compositing is restarted, avoid removing the manager immediately.
+    if (s_slideManager) {
+        s_slideManagerRemoveTimer->start(1000);
+    }
 }
 
 bool SlidingPopupsEffect::supported()
@@ -178,13 +203,13 @@ void SlidingPopupsEffect::postPaintWindow(EffectWindow *w)
             }
             m_animations.erase(animationIt);
         }
-        w->addRepaintFull();
+        effects->addRepaint(w->expandedGeometry());
     }
 
     effects->postPaintWindow(w);
 }
 
-void SlidingPopupsEffect::slotWindowAdded(EffectWindow *w)
+void SlidingPopupsEffect::setupSlideData(EffectWindow *w)
 {
     //X11
     if (m_atom != XCB_ATOM_NONE) {
@@ -203,7 +228,11 @@ void SlidingPopupsEffect::slotWindowAdded(EffectWindow *w)
         internal->installEventFilter(this);
         setupInternalWindowSlide(w);
     }
+}
 
+void SlidingPopupsEffect::slotWindowAdded(EffectWindow *w)
+{
+    setupSlideData(w);
     slideIn(w);
 }
 

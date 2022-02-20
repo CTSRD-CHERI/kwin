@@ -11,7 +11,6 @@
 #include "cursor.h"
 #include "input.h"
 #include "platform.h"
-#include "screens.h"
 #include "tabbox/tabbox.h"
 #include "wayland_server.h"
 #include "workspace.h"
@@ -61,7 +60,7 @@ void TabBoxTest::initTestCase()
 void TabBoxTest::init()
 {
     QVERIFY(Test::setupWaylandConnection());
-    screens()->setCurrent(0);
+    workspace()->setActiveOutput(QPoint(640, 512));
     KWin::Cursors::self()->mouse()->setPos(QPoint(640, 512));
 }
 
@@ -76,17 +75,17 @@ void TabBoxTest::testCapsLock()
     // bug 368590
 
     // first create three windows
-    QScopedPointer<Surface> surface1(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface1(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface1(Test::createXdgToplevelSurface(surface1.data()));
     auto c1 = Test::renderAndWaitForShown(surface1.data(), QSize(100, 50), Qt::blue);
     QVERIFY(c1);
     QVERIFY(c1->isActive());
-    QScopedPointer<Surface> surface2(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface2(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface2(Test::createXdgToplevelSurface(surface2.data()));
     auto c2 = Test::renderAndWaitForShown(surface2.data(), QSize(100, 50), Qt::red);
     QVERIFY(c2);
     QVERIFY(c2->isActive());
-    QScopedPointer<Surface> surface3(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface3(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface3(Test::createXdgToplevelSurface(surface3.data()));
     auto c3 = Test::renderAndWaitForShown(surface3.data(), QSize(100, 50), Qt::red);
     QVERIFY(c3);
@@ -139,17 +138,17 @@ void TabBoxTest::testMoveForward()
     // this test verifies that Alt+tab works correctly moving forward
 
     // first create three windows
-    QScopedPointer<Surface> surface1(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface1(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface1(Test::createXdgToplevelSurface(surface1.data()));
     auto c1 = Test::renderAndWaitForShown(surface1.data(), QSize(100, 50), Qt::blue);
     QVERIFY(c1);
     QVERIFY(c1->isActive());
-    QScopedPointer<Surface> surface2(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface2(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface2(Test::createXdgToplevelSurface(surface2.data()));
     auto c2 = Test::renderAndWaitForShown(surface2.data(), QSize(100, 50), Qt::red);
     QVERIFY(c2);
     QVERIFY(c2->isActive());
-    QScopedPointer<Surface> surface3(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface3(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface3(Test::createXdgToplevelSurface(surface3.data()));
     auto c3 = Test::renderAndWaitForShown(surface3.data(), QSize(100, 50), Qt::red);
     QVERIFY(c3);
@@ -190,17 +189,17 @@ void TabBoxTest::testMoveBackward()
     // this test verifies that Alt+Shift+tab works correctly moving backward
 
     // first create three windows
-    QScopedPointer<Surface> surface1(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface1(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface1(Test::createXdgToplevelSurface(surface1.data()));
     auto c1 = Test::renderAndWaitForShown(surface1.data(), QSize(100, 50), Qt::blue);
     QVERIFY(c1);
     QVERIFY(c1->isActive());
-    QScopedPointer<Surface> surface2(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface2(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface2(Test::createXdgToplevelSurface(surface2.data()));
     auto c2 = Test::renderAndWaitForShown(surface2.data(), QSize(100, 50), Qt::red);
     QVERIFY(c2);
     QVERIFY(c2->isActive());
-    QScopedPointer<Surface> surface3(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface3(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface3(Test::createXdgToplevelSurface(surface3.data()));
     auto c3 = Test::renderAndWaitForShown(surface3.data(), QSize(100, 50), Qt::red);
     QVERIFY(c3);

@@ -10,9 +10,7 @@
 #include <QQuickItem>
 #include <QUuid>
 
-#if QT_CONFIG(opengl)
 #include <epoxy/gl.h>
-#endif
 
 namespace KWin
 {
@@ -71,24 +69,20 @@ protected:
     void releaseResources() override;
 
     virtual QImage fallbackImage() const = 0;
+    virtual QRectF paintedRect() const = 0;
     virtual void invalidateOffscreenTexture() = 0;
-#if QT_CONFIG(opengl)
     virtual void updateOffscreenTexture() = 0;
-#endif
     void destroyOffscreenTexture();
 
     mutable ThumbnailTextureProvider *m_provider = nullptr;
-#if QT_CONFIG(opengl)
     QSharedPointer<GLTexture> m_offscreenTexture;
     QScopedPointer<GLRenderTarget> m_offscreenTarget;
     GLsync m_acquireFence = 0;
-#else
-    static constexpr void* m_offscreenTexture = nullptr;
-#endif
     qreal m_devicePixelRatio = 1;
 
 private:
-    void handleCompositingToggled();
+    void updateFrameRenderingConnection();
+    QMetaObject::Connection m_frameRenderingConnection;
 
     QSize m_sourceSize;
 };
@@ -114,10 +108,10 @@ Q_SIGNALS:
 
 protected:
     QImage fallbackImage() const override;
+    QRectF paintedRect() const override;
     void invalidateOffscreenTexture() override;
-#if QT_CONFIG(opengl)
     void updateOffscreenTexture() override;
-#endif
+    void updateImplicitSize();
 
 private:
     QUuid m_wId;
@@ -141,10 +135,9 @@ Q_SIGNALS:
 
 protected:
     QImage fallbackImage() const override;
+    QRectF paintedRect() const override;
     void invalidateOffscreenTexture() override;
-#if QT_CONFIG(opengl)
     void updateOffscreenTexture() override;
-#endif
 
 private:
     int m_desktop = 1;

@@ -9,14 +9,13 @@
 #include "abstract_egl_backend.h"
 #include "egl_dmabuf.h"
 #include "composite.h"
-#include "egl_context_attribute_builder.h"
 #include "options.h"
 #include "platform.h"
+#include "utils/egl_context_attribute_builder.h"
 #include "wayland_server.h"
 #include "abstract_wayland_output.h"
 #include <KWaylandServer/display.h>
 // kwin libs
-#include <logging.h>
 #include <kwinglplatform.h>
 #include <kwinglutils.h>
 // Qt
@@ -37,35 +36,29 @@ static bool isOpenGLES_helper()
     return QOpenGLContext::openGLModuleType() == QOpenGLContext::LibGLES;
 }
 
-static EGLContext ensureGlobalShareContext()
+AbstractEglBackend::AbstractEglBackend(dev_t deviceId)
+    : m_deviceId(deviceId)
 {
-    const EGLDisplay eglDisplay = kwinApp()->platform()->sceneEglDisplay();
-    const EGLConfig eglConfig = kwinApp()->platform()->sceneEglConfig();
+    connect(Compositor::self(), &Compositor::aboutToDestroy, this, &AbstractEglBackend::teardown);
+}
 
+AbstractEglBackend::~AbstractEglBackend()
+{
+    delete m_dmaBuf;
+}
+
+EGLContext AbstractEglBackend::ensureGlobalShareContext()
+{
     if (kwinApp()->platform()->sceneEglGlobalShareContext() != EGL_NO_CONTEXT) {
         return kwinApp()->platform()->sceneEglGlobalShareContext();
     }
 
-    std::vector<int> attribs;
-    if (isOpenGLES_helper()) {
-        EglOpenGLESContextAttributeBuilder builder;
-        builder.setVersion(2);
-        attribs = builder.build();
-    } else {
-        EglContextAttributeBuilder builder;
-        attribs = builder.build();
-    }
-
-    s_globalShareContext = eglCreateContext(eglDisplay, eglConfig, EGL_NO_CONTEXT, attribs.data());
-    if (s_globalShareContext == EGL_NO_CONTEXT) {
-        qCWarning(KWIN_OPENGL, "Failed to create global share context: 0x%x", eglGetError());
-    }
-
+    s_globalShareContext = createContextInternal(EGL_NO_CONTEXT);
     kwinApp()->platform()->setSceneEglGlobalShareContext(s_globalShareContext);
     return s_globalShareContext;
 }
 
-static void destroyGlobalShareContext()
+void AbstractEglBackend::destroyGlobalShareContext()
 {
     const EGLDisplay eglDisplay = kwinApp()->platform()->sceneEglDisplay();
     if (eglDisplay == EGL_NO_DISPLAY || s_globalShareContext == EGL_NO_CONTEXT) {
@@ -74,21 +67,6 @@ static void destroyGlobalShareContext()
     eglDestroyContext(eglDisplay, s_globalShareContext);
     s_globalShareContext = EGL_NO_CONTEXT;
     kwinApp()->platform()->setSceneEglGlobalShareContext(EGL_NO_CONTEXT);
-}
-
-AbstractEglBackend *AbstractEglBackend::s_primaryBackend = nullptr;
-
-AbstractEglBackend::AbstractEglBackend()
-{
-    if (s_primaryBackend == nullptr) {
-        setPrimaryBackend(this);
-    }
-    connect(Compositor::self(), &Compositor::aboutToDestroy, this, &AbstractEglBackend::teardown);
-}
-
-AbstractEglBackend::~AbstractEglBackend()
-{
-    delete m_dmaBuf;
 }
 
 void AbstractEglBackend::teardown()
@@ -102,14 +80,10 @@ void AbstractEglBackend::teardown()
 void AbstractEglBackend::cleanup()
 {
     cleanupSurfaces();
-    if (isPrimary()) {
-        cleanupGL();
-        doneCurrent();
-        eglDestroyContext(m_display, m_context);
-        eglReleaseThread();
-        kwinApp()->platform()->setSceneEglContext(EGL_NO_CONTEXT);
-        kwinApp()->platform()->setSceneEglConfig(nullptr);
-    }
+    cleanupGL();
+    doneCurrent();
+    eglDestroyContext(m_display, m_context);
+    eglReleaseThread();
 }
 
 void AbstractEglBackend::cleanupSurfaces()
@@ -144,7 +118,18 @@ bool AbstractEglBackend::initEglAPI()
     qCDebug(KWIN_OPENGL) << "EGL version: " << major << "." << minor;
     const QByteArray eglExtensions = eglQueryString(m_display, EGL_EXTENSIONS);
     setExtensions(eglExtensions.split(' '));
-    setSupportsSurfacelessContext(hasExtension(QByteArrayLiteral("EGL_KHR_surfaceless_context")));
+
+    const QByteArray requiredExtensions[] = {
+        QByteArrayLiteral("EGL_KHR_no_config_context"),
+        QByteArrayLiteral("EGL_KHR_surfaceless_context"),
+    };
+    for (const QByteArray &extensionName : requiredExtensions) {
+        if (!hasExtension(extensionName)) {
+            qCWarning(KWIN_OPENGL) << extensionName << "extension is unsupported";
+            return false;
+        }
+    }
+
     setSupportsNativeFence(hasExtension(QByteArrayLiteral("EGL_ANDROID_native_fence_sync")));
     return true;
 }
@@ -256,13 +241,31 @@ bool AbstractEglBackend::createContext()
     if (globalShareContext == EGL_NO_CONTEXT) {
         return false;
     }
+    m_context = createContextInternal(globalShareContext);
+    if (m_context == EGL_NO_CONTEXT) {
+        return false;
+    }
+    return true;
+}
 
+EGLContext AbstractEglBackend::createContextInternal(EGLContext sharedContext)
+{
     const bool haveRobustness = hasExtension(QByteArrayLiteral("EGL_EXT_create_context_robustness"));
     const bool haveCreateContext = hasExtension(QByteArrayLiteral("EGL_KHR_create_context"));
     const bool haveContextPriority = hasExtension(QByteArrayLiteral("EGL_IMG_context_priority"));
+    const bool haveResetOnVideoMemoryPurge = hasExtension(QByteArrayLiteral("EGL_NV_robustness_video_memory_purge"));
 
     std::vector<std::unique_ptr<AbstractOpenGLContextAttributeBuilder>> candidates;
     if (isOpenGLES()) {
+        if (haveCreateContext && haveRobustness && haveContextPriority && haveResetOnVideoMemoryPurge) {
+            auto glesRobustPriority = std::make_unique<EglOpenGLESContextAttributeBuilder>();
+            glesRobustPriority->setResetOnVideoMemoryPurge(true);
+            glesRobustPriority->setVersion(2);
+            glesRobustPriority->setRobust(true);
+            glesRobustPriority->setHighPriority(true);
+            candidates.push_back(std::move(glesRobustPriority));
+        }
+
         if (haveCreateContext && haveRobustness && haveContextPriority) {
             auto glesRobustPriority = std::make_unique<EglOpenGLESContextAttributeBuilder>();
             glesRobustPriority->setVersion(2);
@@ -286,7 +289,15 @@ bool AbstractEglBackend::createContext()
         gles->setVersion(2);
         candidates.push_back(std::move(gles));
     } else {
-        if (options->glCoreProfile() && haveCreateContext) {
+        if (haveCreateContext) {
+            if (haveRobustness && haveContextPriority && haveResetOnVideoMemoryPurge) {
+                auto robustCorePriority = std::make_unique<EglContextAttributeBuilder>();
+                robustCorePriority->setResetOnVideoMemoryPurge(true);
+                robustCorePriority->setVersion(3, 1);
+                robustCorePriority->setRobust(true);
+                robustCorePriority->setHighPriority(true);
+                candidates.push_back(std::move(robustCorePriority));
+            }
             if (haveRobustness && haveContextPriority) {
                 auto robustCorePriority = std::make_unique<EglContextAttributeBuilder>();
                 robustCorePriority->setVersion(3, 1);
@@ -327,7 +338,7 @@ bool AbstractEglBackend::createContext()
     EGLContext ctx = EGL_NO_CONTEXT;
     for (auto it = candidates.begin(); it != candidates.end(); it++) {
         const auto attribs = (*it)->build();
-        ctx = eglCreateContext(m_display, config(), globalShareContext, attribs.data());
+        ctx = eglCreateContext(m_display, config(), sharedContext, attribs.data());
         if (ctx != EGL_NO_CONTEXT) {
             qCDebug(KWIN_OPENGL) << "Created EGL context with attributes:" << (*it).get();
             break;
@@ -336,28 +347,18 @@ bool AbstractEglBackend::createContext()
 
     if (ctx == EGL_NO_CONTEXT) {
         qCCritical(KWIN_OPENGL) << "Create Context failed";
-        return false;
     }
-    m_context = ctx;
-    if (isPrimary()) {
-        kwinApp()->platform()->setSceneEglContext(m_context);
-    }
-    return true;
+    return ctx;
 }
 
 void AbstractEglBackend::setEglDisplay(const EGLDisplay &display) {
     m_display = display;
-    if (isPrimary()) {
-        kwinApp()->platform()->setSceneEglDisplay(display);
-    }
+    kwinApp()->platform()->setSceneEglDisplay(display);
 }
 
 void AbstractEglBackend::setConfig(const EGLConfig &config)
 {
     m_config = config;
-    if (isPrimary()) {
-        kwinApp()->platform()->setSceneEglConfig(config);
-    }
 }
 
 void AbstractEglBackend::setSurface(const EGLSurface &surface)
@@ -368,12 +369,24 @@ void AbstractEglBackend::setSurface(const EGLSurface &surface)
 QSharedPointer<GLTexture> AbstractEglBackend::textureForOutput(AbstractOutput *requestedOutput) const
 {
     QSharedPointer<GLTexture> texture(new GLTexture(GL_RGBA8, requestedOutput->pixelSize()));
-    GLRenderTarget renderTarget(*texture);
-
-    const QRect geo = requestedOutput->geometry();
-    QRect invGeo(geo.left(), geo.bottom(), geo.width(), -geo.height());
-    renderTarget.blitFromFramebuffer(invGeo);
+    GLRenderTarget renderTarget(texture.data());
+    renderTarget.blitFromFramebuffer(QRect(0, texture->height(), texture->width(), -texture->height()));
     return texture;
+}
+
+dev_t AbstractEglBackend::deviceId() const
+{
+    return m_deviceId;
+}
+
+bool AbstractEglBackend::prefer10bpc() const
+{
+    return false;
+}
+
+EglDmabuf *AbstractEglBackend::dmabuf() const
+{
+    return m_dmaBuf;
 }
 
 }

@@ -6,11 +6,7 @@
 
 #pragma once
 
-#include <QOpenGLContext>
-#include <QVector>
-#if QT_CONFIG(opengl)
 #include "kwinglutils.h"
-#endif
 
 #include <xcb/xcb.h>
 #include <xcb/sync.h>
@@ -40,9 +36,7 @@ public:
 
 private:
     State m_state;
-#if QT_CONFIG(opengl)
     GLsync m_sync;
-#endif
     xcb_sync_fence_t m_fence;
     xcb_get_input_focus_cookie_t m_reset_cookie;
 };

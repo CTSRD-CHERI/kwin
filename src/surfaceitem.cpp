@@ -5,13 +5,27 @@
 */
 
 #include "surfaceitem.h"
+#include "deleted.h"
 
 namespace KWin
 {
 
-SurfaceItem::SurfaceItem(Scene::Window *window, Item *parent)
-    : Item(window, parent)
+SurfaceItem::SurfaceItem(Toplevel *window, Item *parent)
+    : Item(parent)
+    , m_window(window)
 {
+    connect(window, &Toplevel::windowClosed, this, &SurfaceItem::handleWindowClosed);
+}
+
+Toplevel *SurfaceItem::window() const
+{
+    return m_window;
+}
+
+void SurfaceItem::handleWindowClosed(Toplevel *original, Deleted *deleted)
+{
+    Q_UNUSED(original)
+    m_window = deleted;
 }
 
 QMatrix4x4 SurfaceItem::surfaceToBufferMatrix() const
@@ -39,8 +53,7 @@ void SurfaceItem::addDamage(const QRegion &region)
     m_damage += region;
     scheduleRepaint(region);
 
-    Toplevel *toplevel = window()->window();
-    Q_EMIT toplevel->damaged(toplevel, region);
+    Q_EMIT m_window->damaged(m_window, region);
 }
 
 void SurfaceItem::resetDamage()
@@ -97,7 +110,7 @@ void SurfaceItem::updatePixmap()
     } else {
         m_pixmap->create();
         if (m_pixmap->isValid()) {
-            m_previousPixmap.reset();
+            unreferencePreviousPixmap();
             discardQuads();
         }
     }
@@ -109,7 +122,7 @@ void SurfaceItem::discardPixmap()
         if (m_pixmap->isValid()) {
             m_previousPixmap.reset(m_pixmap.take());
             m_previousPixmap->markAsDiscarded();
-            m_referencePixmapCounter++;
+            referencePreviousPixmap();
         } else {
             m_pixmap.reset();
         }
@@ -148,13 +161,13 @@ WindowQuadList SurfaceItem::buildQuads() const
     return quads;
 }
 
-PlatformSurfaceTexture::~PlatformSurfaceTexture()
+SurfaceTexture::~SurfaceTexture()
 {
 }
 
-SurfacePixmap::SurfacePixmap(PlatformSurfaceTexture *platformTexture, QObject *parent)
+SurfacePixmap::SurfacePixmap(SurfaceTexture *texture, QObject *parent)
     : QObject(parent)
-    , m_platformTexture(platformTexture)
+    , m_texture(texture)
 {
 }
 
@@ -162,9 +175,9 @@ void SurfacePixmap::update()
 {
 }
 
-PlatformSurfaceTexture *SurfacePixmap::platformTexture() const
+SurfaceTexture *SurfacePixmap::texture() const
 {
-    return m_platformTexture.data();
+    return m_texture.data();
 }
 
 bool SurfacePixmap::hasAlphaChannel() const

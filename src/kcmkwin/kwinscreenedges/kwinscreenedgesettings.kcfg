@@ -66,9 +66,14 @@
             <default>ElectricNone</default>
         </entry>
     </group>
+    <group name="Effect-Overview">
+        <entry name="BorderActivateOverview" key="BorderActivate" type="IntList">
+            <default>ElectricNone</default>
+        </entry>
+    </group>
     <group name="TabBox">
         <entry name="BorderActivateTabBox" key="BorderActivate" type="IntList">
-            <default>ElectricLeft</default>
+            <default>ElectricNone</default>
         </entry>
         <entry key="BorderAlternativeActivate" type="IntList">
             <default>ElectricNone</default>

@@ -10,9 +10,9 @@
 #include "kwin_wayland_test.h"
 
 #include "abstract_client.h"
+#include "abstract_output.h"
 #include "cursor.h"
 #include "platform.h"
-#include "screens.h"
 #include "wayland_server.h"
 #include "workspace.h"
 
@@ -56,9 +56,10 @@ void ActivationTest::initTestCase()
 
     kwinApp()->start();
     QVERIFY(applicationStartedSpy.wait());
-    QCOMPARE(screens()->count(), 2);
-    QCOMPARE(screens()->geometry(0), QRect(0, 0, 1280, 1024));
-    QCOMPARE(screens()->geometry(1), QRect(1280, 0, 1280, 1024));
+    const auto outputs = kwinApp()->platform()->enabledOutputs();
+    QCOMPARE(outputs.count(), 2);
+    QCOMPARE(outputs[0]->geometry(), QRect(0, 0, 1280, 1024));
+    QCOMPARE(outputs[1]->geometry(), QRect(1280, 0, 1280, 1024));
     Test::initWaylandWorkspace();
 }
 
@@ -66,7 +67,7 @@ void ActivationTest::init()
 {
     QVERIFY(Test::setupWaylandConnection());
 
-    screens()->setCurrent(0);
+    workspace()->setActiveOutput(QPoint(640, 512));
     Cursors::self()->mouse()->setPos(QPoint(640, 512));
 }
 
@@ -87,13 +88,13 @@ void ActivationTest::testSwitchToWindowToLeft()
     stackScreensHorizontally();
 
     // Create several clients on the left screen.
-    QScopedPointer<Surface> surface1(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface1(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface1(Test::createXdgToplevelSurface(surface1.data()));
     AbstractClient *client1 = Test::renderAndWaitForShown(surface1.data(), QSize(100, 50), Qt::blue);
     QVERIFY(client1);
     QVERIFY(client1->isActive());
 
-    QScopedPointer<Surface> surface2(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface2(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface2(Test::createXdgToplevelSurface(surface2.data()));
     AbstractClient *client2 = Test::renderAndWaitForShown(surface2.data(), QSize(100, 50), Qt::blue);
     QVERIFY(client2);
@@ -103,13 +104,13 @@ void ActivationTest::testSwitchToWindowToLeft()
     client2->move(QPoint(500, 200));
 
     // Create several clients on the right screen.
-    QScopedPointer<Surface> surface3(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface3(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface3(Test::createXdgToplevelSurface(surface3.data()));
     AbstractClient *client3 = Test::renderAndWaitForShown(surface3.data(), QSize(100, 50), Qt::blue);
     QVERIFY(client3);
     QVERIFY(client3->isActive());
 
-    QScopedPointer<Surface> surface4(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface4(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface4(Test::createXdgToplevelSurface(surface4.data()));
     AbstractClient *client4 = Test::renderAndWaitForShown(surface4.data(), QSize(100, 50), Qt::blue);
     QVERIFY(client4);
@@ -155,13 +156,13 @@ void ActivationTest::testSwitchToWindowToRight()
     stackScreensHorizontally();
 
     // Create several clients on the left screen.
-    QScopedPointer<Surface> surface1(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface1(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface1(Test::createXdgToplevelSurface(surface1.data()));
     AbstractClient *client1 = Test::renderAndWaitForShown(surface1.data(), QSize(100, 50), Qt::blue);
     QVERIFY(client1);
     QVERIFY(client1->isActive());
 
-    QScopedPointer<Surface> surface2(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface2(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface2(Test::createXdgToplevelSurface(surface2.data()));
     AbstractClient *client2 = Test::renderAndWaitForShown(surface2.data(), QSize(100, 50), Qt::blue);
     QVERIFY(client2);
@@ -171,13 +172,13 @@ void ActivationTest::testSwitchToWindowToRight()
     client2->move(QPoint(500, 200));
 
     // Create several clients on the right screen.
-    QScopedPointer<Surface> surface3(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface3(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface3(Test::createXdgToplevelSurface(surface3.data()));
     AbstractClient *client3 = Test::renderAndWaitForShown(surface3.data(), QSize(100, 50), Qt::blue);
     QVERIFY(client3);
     QVERIFY(client3->isActive());
 
-    QScopedPointer<Surface> surface4(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface4(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface4(Test::createXdgToplevelSurface(surface4.data()));
     AbstractClient *client4 = Test::renderAndWaitForShown(surface4.data(), QSize(100, 50), Qt::blue);
     QVERIFY(client4);
@@ -223,13 +224,13 @@ void ActivationTest::testSwitchToWindowAbove()
     stackScreensVertically();
 
     // Create several clients on the top screen.
-    QScopedPointer<Surface> surface1(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface1(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface1(Test::createXdgToplevelSurface(surface1.data()));
     AbstractClient *client1 = Test::renderAndWaitForShown(surface1.data(), QSize(100, 50), Qt::blue);
     QVERIFY(client1);
     QVERIFY(client1->isActive());
 
-    QScopedPointer<Surface> surface2(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface2(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface2(Test::createXdgToplevelSurface(surface2.data()));
     AbstractClient *client2 = Test::renderAndWaitForShown(surface2.data(), QSize(100, 50), Qt::blue);
     QVERIFY(client2);
@@ -239,13 +240,13 @@ void ActivationTest::testSwitchToWindowAbove()
     client2->move(QPoint(200, 500));
 
     // Create several clients on the bottom screen.
-    QScopedPointer<Surface> surface3(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface3(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface3(Test::createXdgToplevelSurface(surface3.data()));
     AbstractClient *client3 = Test::renderAndWaitForShown(surface3.data(), QSize(100, 50), Qt::blue);
     QVERIFY(client3);
     QVERIFY(client3->isActive());
 
-    QScopedPointer<Surface> surface4(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface4(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface4(Test::createXdgToplevelSurface(surface4.data()));
     AbstractClient *client4 = Test::renderAndWaitForShown(surface4.data(), QSize(100, 50), Qt::blue);
     QVERIFY(client4);
@@ -291,13 +292,13 @@ void ActivationTest::testSwitchToWindowBelow()
     stackScreensVertically();
 
     // Create several clients on the top screen.
-    QScopedPointer<Surface> surface1(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface1(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface1(Test::createXdgToplevelSurface(surface1.data()));
     AbstractClient *client1 = Test::renderAndWaitForShown(surface1.data(), QSize(100, 50), Qt::blue);
     QVERIFY(client1);
     QVERIFY(client1->isActive());
 
-    QScopedPointer<Surface> surface2(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface2(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface2(Test::createXdgToplevelSurface(surface2.data()));
     AbstractClient *client2 = Test::renderAndWaitForShown(surface2.data(), QSize(100, 50), Qt::blue);
     QVERIFY(client2);
@@ -307,13 +308,13 @@ void ActivationTest::testSwitchToWindowBelow()
     client2->move(QPoint(200, 500));
 
     // Create several clients on the bottom screen.
-    QScopedPointer<Surface> surface3(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface3(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface3(Test::createXdgToplevelSurface(surface3.data()));
     AbstractClient *client3 = Test::renderAndWaitForShown(surface3.data(), QSize(100, 50), Qt::blue);
     QVERIFY(client3);
     QVERIFY(client3->isActive());
 
-    QScopedPointer<Surface> surface4(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface4(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface4(Test::createXdgToplevelSurface(surface4.data()));
     AbstractClient *client4 = Test::renderAndWaitForShown(surface4.data(), QSize(100, 50), Qt::blue);
     QVERIFY(client4);
@@ -360,7 +361,7 @@ void ActivationTest::testSwitchToWindowMaximized()
     stackScreensHorizontally();
 
     // Create several maximized clients on the left screen.
-    QScopedPointer<Surface> surface1(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface1(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface1(Test::createXdgToplevelSurface(surface1.data()));
     QSignalSpy toplevelConfigureRequestedSpy1(shellSurface1.data(), &Test::XdgToplevel::configureRequested);
     QSignalSpy surfaceConfigureRequestedSpy1(shellSurface1->xdgSurface(), &Test::XdgSurface::configureRequested);
@@ -376,7 +377,7 @@ void ActivationTest::testSwitchToWindowMaximized()
     Test::render(surface1.data(), toplevelConfigureRequestedSpy1.last().at(0).toSize(), Qt::red);
     QVERIFY(frameGeometryChangedSpy1.wait());
 
-    QScopedPointer<Surface> surface2(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface2(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface2(Test::createXdgToplevelSurface(surface2.data()));
     QSignalSpy toplevelConfigureRequestedSpy2(shellSurface2.data(), &Test::XdgToplevel::configureRequested);
     QSignalSpy surfaceConfigureRequestedSpy2(shellSurface2->xdgSurface(), &Test::XdgSurface::configureRequested);
@@ -398,13 +399,13 @@ void ActivationTest::testSwitchToWindowMaximized()
     QCOMPARE(client2->maximizeMode(), MaximizeFull);
 
     // Create several clients on the right screen.
-    QScopedPointer<Surface> surface3(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface3(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface3(Test::createXdgToplevelSurface(surface3.data()));
     AbstractClient *client3 = Test::renderAndWaitForShown(surface3.data(), QSize(100, 50), Qt::blue);
     QVERIFY(client3);
     QVERIFY(client3->isActive());
 
-    QScopedPointer<Surface> surface4(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface4(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface4(Test::createXdgToplevelSurface(surface4.data()));
     AbstractClient *client4 = Test::renderAndWaitForShown(surface4.data(), QSize(100, 50), Qt::blue);
     QVERIFY(client4);
@@ -447,7 +448,7 @@ void ActivationTest::testSwitchToWindowFullScreen()
     stackScreensVertically();
 
     // Create several maximized clients on the top screen.
-    QScopedPointer<Surface> surface1(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface1(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface1(Test::createXdgToplevelSurface(surface1.data()));
     QSignalSpy toplevelConfigureRequestedSpy1(shellSurface1.data(), &Test::XdgToplevel::configureRequested);
     QSignalSpy surfaceConfigureRequestedSpy1(shellSurface1->xdgSurface(), &Test::XdgSurface::configureRequested);
@@ -463,7 +464,7 @@ void ActivationTest::testSwitchToWindowFullScreen()
     Test::render(surface1.data(), toplevelConfigureRequestedSpy1.last().at(0).toSize(), Qt::red);
     QVERIFY(frameGeometryChangedSpy1.wait());
 
-    QScopedPointer<Surface> surface2(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface2(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface2(Test::createXdgToplevelSurface(surface2.data()));
     QSignalSpy toplevelConfigureRequestedSpy2(shellSurface2.data(), &Test::XdgToplevel::configureRequested);
     QSignalSpy surfaceConfigureRequestedSpy2(shellSurface2->xdgSurface(), &Test::XdgSurface::configureRequested);
@@ -485,13 +486,13 @@ void ActivationTest::testSwitchToWindowFullScreen()
     QVERIFY(client2->isFullScreen());
 
     // Create several clients on the bottom screen.
-    QScopedPointer<Surface> surface3(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface3(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface3(Test::createXdgToplevelSurface(surface3.data()));
     AbstractClient *client3 = Test::renderAndWaitForShown(surface3.data(), QSize(100, 50), Qt::blue);
     QVERIFY(client3);
     QVERIFY(client3->isActive());
 
-    QScopedPointer<Surface> surface4(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface4(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface4(Test::createXdgToplevelSurface(surface4.data()));
     AbstractClient *client4 = Test::renderAndWaitForShown(surface4.data(), QSize(100, 50), Qt::blue);
     QVERIFY(client4);

@@ -11,7 +11,7 @@
 
 #include "options.h"
 #include "config-kwin.h"
-#include "utils.h"
+#include "utils/common.h"
 #include "platform.h"
 
 #ifndef KCMRULES
@@ -42,6 +42,7 @@ Options::Options(QObject *parent)
     , m_shadeHover(false)
     , m_shadeHoverInterval(0)
     , m_separateScreenFocus(false)
+    , m_activeMouseScreen(false)
     , m_placement(Placement::NoPlacement)
     , m_borderSnapZone(0)
     , m_windowSnapZone(0)
@@ -61,7 +62,6 @@ Options::Options(QObject *parent)
     , m_glSmoothScale(Options::defaultGlSmoothScale())
     , m_glStrictBinding(Options::defaultGlStrictBinding())
     , m_glStrictBindingFollowsDriver(Options::defaultGlStrictBindingFollowsDriver())
-    , m_glCoreProfile(Options::defaultGLCoreProfile())
     , m_glPreferBufferSwap(Options::defaultGlPreferBufferSwap())
     , m_glPlatformInterface(Options::defaultGlPlatformInterface())
     , m_windowsBlockCompositing(true)
@@ -87,7 +87,6 @@ Options::Options(QObject *parent)
     , electric_border_tiling(false)
     , electric_border_corner_ratio(0.0)
     , borderless_maximized_windows(false)
-    , show_geometry_tip(false)
     , condensed_title(false)
 {
     m_settings->setDefaults();
@@ -224,6 +223,15 @@ void Options::setSeparateScreenFocus(bool separateScreenFocus)
     }
     m_separateScreenFocus = separateScreenFocus;
     Q_EMIT separateScreenFocusChanged(m_separateScreenFocus);
+}
+
+void Options::setActiveMouseScreen(bool activeMouseScreen)
+{
+    if (m_activeMouseScreen == activeMouseScreen) {
+        return;
+    }
+    m_activeMouseScreen = activeMouseScreen;
+    Q_EMIT activeMouseScreenChanged();
 }
 
 void Options::setPlacement(int placement)
@@ -454,15 +462,6 @@ void Options::setKeyCmdAllModKey(uint keyCmdAllModKey)
     Q_EMIT keyCmdAllModKeyChanged();
 }
 
-void Options::setShowGeometryTip(bool showGeometryTip)
-{
-    if (show_geometry_tip == showGeometryTip) {
-        return;
-    }
-    show_geometry_tip = showGeometryTip;
-    Q_EMIT showGeometryTipChanged();
-}
-
 void Options::setCondensedTitle(bool condensedTitle)
 {
     if (condensed_title == condensedTitle) {
@@ -580,15 +579,6 @@ void Options::setGlStrictBindingFollowsDriver(bool glStrictBindingFollowsDriver)
     Q_EMIT glStrictBindingFollowsDriverChanged();
 }
 
-void Options::setGLCoreProfile(bool value)
-{
-    if (m_glCoreProfile == value) {
-        return;
-    }
-    m_glCoreProfile = value;
-    Q_EMIT glCoreProfileChanged();
-}
-
 void Options::setWindowsBlockCompositing(bool value)
 {
     if (m_windowsBlockCompositing == value) {
@@ -610,7 +600,6 @@ void Options::setMoveMinimizedWindowsToEndOfTabBoxFocusChain(bool value)
 void Options::setGlPreferBufferSwap(char glPreferBufferSwap)
 {
     if (glPreferBufferSwap == 'a') {
-#if QT_CONFIG(opengl)
         // buffer copying is very fast with the nvidia blob
         // but due to restrictions in DRI2 *incredibly* slow for all MESA drivers
         // see https://www.x.org/releases/X11R7.7/doc/dri2proto/dri2proto.txt, item 2.5
@@ -618,9 +607,6 @@ void Options::setGlPreferBufferSwap(char glPreferBufferSwap)
             glPreferBufferSwap = CopyFrontBuffer;
         else if (GLPlatform::instance()->driver() != Driver_Unknown) // undetected, finally resolved when context is initialized
             glPreferBufferSwap = ExtendDamage;
-#else
-            glPreferBufferSwap = ExtendDamage;
-#endif
     }
     if (m_glPreferBufferSwap == (GlSwapStrategy)glPreferBufferSwap) {
         return;
@@ -660,10 +646,6 @@ void Options::setRenderTimeEstimator(RenderTimeEstimator estimator)
 void Options::setGlPlatformInterface(OpenGLPlatformInterface interface)
 {
     // check environment variable
-#if !QT_CONFIG(opengl)
-    qCDebug(KWIN_CORE) << "Forcing non-OpenGL native interface as Qt was built without OpenGL support.";
-    interface = NoOpenGLPlatformInterface;
-#else
     const QByteArray envOpenGLInterface(qgetenv("KWIN_OPENGL_INTERFACE"));
     if (!envOpenGLInterface.isEmpty()) {
         if (qstrcmp(envOpenGLInterface, "egl") == 0) {
@@ -690,7 +672,6 @@ void Options::setGlPlatformInterface(OpenGLPlatformInterface interface)
         qCDebug(KWIN_CORE) << "Forcing EGL native interface as OpenGL ES requested through KWIN_COMPOSE environment variable.";
         interface = EglPlatformInterface;
     }
-#endif
 
     if (m_glPlatformInterface == interface) {
         return;
@@ -775,11 +756,11 @@ void Options::loadConfig()
 
 void Options::syncFromKcfgc()
 {
-    setShowGeometryTip(m_settings->geometryTip());
     setCondensedTitle(m_settings->condensedTitle());
     setFocusPolicy(m_settings->focusPolicy());
     setNextFocusPrefersMouse(m_settings->nextFocusPrefersMouse());
     setSeparateScreenFocus(m_settings->separateScreenFocus());
+    setActiveMouseScreen(m_settings->activeMouseScreen());
     setRollOverDesktops(m_settings->rollOverDesktops());
     setFocusStealingPreventionLevel(m_settings->focusStealingPreventionLevel());
     setXwaylandCrashPolicy(m_settings->xwaylandCrashPolicy());
@@ -881,7 +862,6 @@ void Options::reloadCompositingSettings(bool force)
     if (!isGlStrictBindingFollowsDriver()) {
         setGlStrictBinding(config.readEntry("GLStrictBinding", Options::defaultGlStrictBinding()));
     }
-    setGLCoreProfile(config.readEntry("GLCore", Options::defaultGLCoreProfile()));
 
     char c = 0;
     const QString s = config.readEntry("GLPreferBufferSwap", QString(Options::defaultGlPreferBufferSwap()));
@@ -993,11 +973,6 @@ Options::MouseWheelCommand Options::mouseWheelCommand(const QString &name)
     if (lowerName == QStringLiteral("change opacity")) return MouseWheelChangeOpacity;
     if (lowerName == QStringLiteral("nothing")) return MouseWheelNothing;
     return MouseWheelNothing;
-}
-
-bool Options::showGeometryTip() const
-{
-    return show_geometry_tip;
 }
 
 bool Options::condensedTitle() const

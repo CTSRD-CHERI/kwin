@@ -14,11 +14,9 @@
 #include "effectloader.h"
 #include "effects.h"
 #include "platform.h"
-#include "scene.h"
+#include "renderbackend.h"
 #include "wayland_server.h"
 #include "workspace.h"
-
-#include "effect_builtins.h"
 
 #include <KWayland/Client/plasmashell.h>
 #include <KWayland/Client/plasmawindowmanagement.h>
@@ -53,8 +51,7 @@ void MinimizeAnimationTest::initTestCase()
 
     auto config = KSharedConfig::openConfig(QString(), KConfig::SimpleConfig);
     KConfigGroup plugins(config, QStringLiteral("Plugins"));
-    ScriptedEffectLoader loader;
-    const auto builtinNames = BuiltInEffects::availableEffectNames() << loader.listOfKnownEffects();
+    const auto builtinNames = EffectLoader().listOfKnownEffects();
     for (const QString &name : builtinNames) {
         plugins.writeEntry(name + QStringLiteral("Enabled"), false);
     }
@@ -68,9 +65,7 @@ void MinimizeAnimationTest::initTestCase()
     QVERIFY(applicationStartedSpy.wait());
     Test::initWaylandWorkspace();
 
-    auto scene = Compositor::self()->scene();
-    QVERIFY(scene);
-    QCOMPARE(scene->compositingType(), OpenGLCompositing);
+    QCOMPARE(Compositor::self()->backend()->compositingType(), KWin::OpenGLCompositing);
 }
 
 void MinimizeAnimationTest::init()
@@ -111,7 +106,7 @@ void MinimizeAnimationTest::testMinimizeUnminimize()
 
     // Create a panel at the top of the screen.
     const QRect panelRect = QRect(0, 0, 1280, 36);
-    QScopedPointer<Surface> panelSurface(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> panelSurface(Test::createSurface());
     QVERIFY(!panelSurface.isNull());
     QScopedPointer<Test::XdgToplevel> panelShellSurface(Test::createXdgToplevelSurface(panelSurface.data()));
     QVERIFY(!panelShellSurface.isNull());
@@ -128,7 +123,7 @@ void MinimizeAnimationTest::testMinimizeUnminimize()
     QCOMPARE(plasmaWindowCreatedSpy.count(), 1);
 
     // Create the test client.
-    QScopedPointer<Surface> surface(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
     QVERIFY(!surface.isNull());
     QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
     QVERIFY(!shellSurface.isNull());

@@ -6,12 +6,18 @@
 
 #pragma once
 
-#include "scene.h"
+#include "kwinglobals.h"
+#include "kwineffects.h"
+
+#include <QMatrix4x4>
+#include <QObject>
 
 #include <optional>
 
 namespace KWin
 {
+
+class AbstractOutput;
 
 /**
  * The Item class is the base class for items in the scene.
@@ -21,7 +27,7 @@ class KWIN_EXPORT Item : public QObject
     Q_OBJECT
 
 public:
-    explicit Item(Scene::Window *window, Item *parent = nullptr);
+    explicit Item(Item *parent = nullptr);
     ~Item() override;
 
     QPoint position() const;
@@ -51,8 +57,10 @@ public:
     QList<Item *> childItems() const;
     QList<Item *> sortedChildItems() const;
 
-    Scene::Window *window() const;
     QPoint rootPosition() const;
+
+    QMatrix4x4 transform() const;
+    void setTransform(const QMatrix4x4 &transform);
 
     /**
      * Maps the given @a region from the item's coordinate system to the scene's coordinate
@@ -79,8 +87,8 @@ public:
 
     void scheduleRepaint(const QRegion &region);
     void scheduleFrame();
-    QRegion repaints(int screen) const;
-    void resetRepaints(int screen);
+    QRegion repaints(AbstractOutput *output) const;
+    void resetRepaints(AbstractOutput *output);
 
     WindowQuadList quads() const;
     virtual void preprocess();
@@ -110,22 +118,22 @@ private:
     void removeChild(Item *item);
     void updateBoundingRect();
     void scheduleRepaintInternal(const QRegion &region);
-    void reallocRepaints();
     void markSortedChildItemsDirty();
 
     bool computeEffectiveVisibility() const;
     void updateEffectiveVisibility();
+    void removeRepaints(AbstractOutput *output);
 
-    Scene::Window *m_window;
     QPointer<Item> m_parentItem;
     QList<Item *> m_childItems;
+    QMatrix4x4 m_transform;
     QRect m_boundingRect;
     QPoint m_position;
     QSize m_size = QSize(0, 0);
     int m_z = 0;
     bool m_visible = true;
     bool m_effectiveVisible = true;
-    QVector<QRegion> m_repaints;
+    QMap<AbstractOutput *, QRegion> m_repaints;
     mutable std::optional<WindowQuadList> m_quads;
     mutable std::optional<QList<Item *>> m_sortedChildItems;
 };

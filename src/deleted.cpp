@@ -14,6 +14,7 @@
 #include "group.h"
 #include "netinfo.h"
 #include "shadow.h"
+#include "virtualdesktops.h"
 
 #include <QDebug>
 
@@ -47,6 +48,7 @@ Deleted::~Deleted()
         workspace()->removeDeleted(this);
     }
     deleteEffectWindow();
+    deleteShadow();
 }
 
 Deleted* Deleted::create(Toplevel* c)
@@ -69,12 +71,10 @@ void Deleted::copyToDeleted(Toplevel* c)
     Q_ASSERT(dynamic_cast< Deleted* >(c) == nullptr);
     Toplevel::copyToDeleted(c);
     m_frameMargins = c->frameMargins();
-    m_bufferScale = c->bufferScale();
     desk = c->desktop();
     m_desktops = c->desktops();
     activityList = c->activities();
     contentsRect = QRect(c->clientPos(), c->clientSize());
-    transparent_rect = c->transparentRect();
     m_layer = c->layer();
     m_frame = c->frameId();
     m_type = c->windowType();
@@ -93,7 +93,7 @@ void Deleted::copyToDeleted(Toplevel* c)
         m_minimized = client->isMinimized();
         m_modal = client->isModal();
         m_mainClients = client->mainClients();
-        Q_FOREACH (AbstractClient *c, m_mainClients) {
+        for (AbstractClient *c : qAsConst(m_mainClients)) {
             connect(c, &AbstractClient::windowClosed, this, &Deleted::mainClientClosed);
         }
         m_fullscreen = client->isFullScreen();
@@ -129,11 +129,6 @@ QMargins Deleted::frameMargins() const
     return m_frameMargins;
 }
 
-qreal Deleted::bufferScale() const
-{
-    return m_bufferScale;
-}
-
 int Deleted::desktop() const
 {
     return desk;
@@ -160,11 +155,6 @@ void Deleted::layoutDecorationRects(QRect& left, QRect& top, QRect& right, QRect
     top = decoration_top;
     right = decoration_right;
     bottom = decoration_bottom;
-}
-
-QRect Deleted::transparentRect() const
-{
-    return transparent_rect;
 }
 
 bool Deleted::isDeleted() const

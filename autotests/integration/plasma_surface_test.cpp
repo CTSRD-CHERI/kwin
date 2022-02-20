@@ -8,9 +8,11 @@
 */
 #include "kwin_wayland_test.h"
 #include "abstract_client.h"
+#include "abstract_output.h"
 #include "platform.h"
 #include "cursor.h"
 #include "screens.h"
+#include "virtualdesktops.h"
 #include "wayland_server.h"
 #include "workspace.h"
 #include <KWayland/Client/connection_thread.h>
@@ -97,7 +99,7 @@ void PlasmaSurfaceTest::testRoleOnAllDesktops_data()
 void PlasmaSurfaceTest::testRoleOnAllDesktops()
 {
     // this test verifies that a XdgShellClient is set on all desktops when the role changes
-    QScopedPointer<Surface> surface(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
     QVERIFY(!surface.isNull());
     QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
     QVERIFY(!shellSurface.isNull());
@@ -123,7 +125,7 @@ void PlasmaSurfaceTest::testRoleOnAllDesktops()
 
     // let's create a second window where we init a little bit different
     // first creating the PlasmaSurface then the Shell Surface
-    QScopedPointer<Surface> surface2(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface2(Test::createSurface());
     QVERIFY(!surface2.isNull());
     QScopedPointer<PlasmaShellSurface> plasmaSurface2(m_plasmaShell->createSurface(surface2.data()));
     QVERIFY(!plasmaSurface2.isNull());
@@ -155,7 +157,7 @@ void PlasmaSurfaceTest::testAcceptsFocus_data()
 void PlasmaSurfaceTest::testAcceptsFocus()
 {
     // this test verifies that some surface roles don't get focus
-    QScopedPointer<Surface> surface(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
     QVERIFY(!surface.isNull());
     QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
     QVERIFY(!shellSurface.isNull());
@@ -174,7 +176,7 @@ void PlasmaSurfaceTest::testAcceptsFocus()
 
 void PlasmaSurfaceTest::testOSDPlacement()
 {
-    QScopedPointer<Surface> surface(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
     QVERIFY(!surface.isNull());
     QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
     QVERIFY(!shellSurface.isNull());
@@ -200,9 +202,10 @@ void PlasmaSurfaceTest::testOSDPlacement()
                               Q_ARG(QVector<QRect>, geometries));
     QVERIFY(screensChangedSpy.wait());
     QCOMPARE(screensChangedSpy.count(), 2);
-    QCOMPARE(screens()->count(), 2);
-    QCOMPARE(screens()->geometry(0), geometries.at(0));
-    QCOMPARE(screens()->geometry(1), geometries.at(1));
+    const auto outputs = kwinApp()->platform()->enabledOutputs();
+    QCOMPARE(outputs.count(), 2);
+    QCOMPARE(outputs[0]->geometry(), geometries[0]);
+    QCOMPARE(outputs[1]->geometry(), geometries[1]);
 
     QCOMPARE(c->frameGeometry(), QRect(1280 / 2 - 100 / 2, 2 * 1024 / 3 - 50 / 2, 100, 50));
 
@@ -216,7 +219,7 @@ void PlasmaSurfaceTest::testOSDPlacement()
 
 void PlasmaSurfaceTest::testOSDPlacementManualPosition()
 {
-    QScopedPointer<Surface> surface(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
     QVERIFY(!surface.isNull());
     QScopedPointer<PlasmaShellSurface> plasmaSurface(m_plasmaShell->createSurface(surface.data()));
     QVERIFY(!plasmaSurface.isNull());
@@ -253,7 +256,7 @@ void PlasmaSurfaceTest::testPanelTypeHasStrut_data()
 
 void PlasmaSurfaceTest::testPanelTypeHasStrut()
 {
-    QScopedPointer<Surface> surface(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
     QVERIFY(!surface.isNull());
     QScopedPointer<QObject> shellSurface(Test::createXdgToplevelSurface(surface.data()));
     QVERIFY(!shellSurface.isNull());
@@ -267,12 +270,16 @@ void PlasmaSurfaceTest::testPanelTypeHasStrut()
     // now render and map the window
     auto c = Test::renderAndWaitForShown(surface.data(), QSize(100, 50), Qt::blue);
 
+    // the panel is on the first output and the current desktop
+    AbstractOutput *output = kwinApp()->platform()->enabledOutputs().constFirst();
+    VirtualDesktop *desktop = VirtualDesktopManager::self()->currentDesktop();
+
     QVERIFY(c);
     QCOMPARE(c->windowType(), NET::Dock);
     QVERIFY(c->isDock());
     QCOMPARE(c->frameGeometry(), QRect(0, 0, 100, 50));
     QTEST(c->hasStrut(), "expectedStrut");
-    QTEST(workspace()->clientArea(MaximizeArea, 0, 0), "expectedMaxArea");
+    QTEST(workspace()->clientArea(MaximizeArea, output, desktop), "expectedMaxArea");
     QTEST(c->layer(), "expectedLayer");
 }
 
@@ -300,7 +307,7 @@ void PlasmaSurfaceTest::testPanelWindowsCanCover()
 {
     // this test verifies the behavior of a panel with windows can cover
     // triggering the screen edge should raise the panel.
-    QScopedPointer<Surface> surface(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
     QVERIFY(!surface.isNull());
     QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
     QVERIFY(!shellSurface.isNull());
@@ -314,16 +321,20 @@ void PlasmaSurfaceTest::testPanelWindowsCanCover()
     // now render and map the window
     auto panel = Test::renderAndWaitForShown(surface.data(), panelGeometry.size(), Qt::blue);
 
+    // the panel is on the first output and the current desktop
+    AbstractOutput *output = kwinApp()->platform()->enabledOutputs().constFirst();
+    VirtualDesktop *desktop = VirtualDesktopManager::self()->currentDesktop();
+
     QVERIFY(panel);
     QCOMPARE(panel->windowType(), NET::Dock);
     QVERIFY(panel->isDock());
     QCOMPARE(panel->frameGeometry(), panelGeometry);
     QCOMPARE(panel->hasStrut(), false);
-    QCOMPARE(workspace()->clientArea(MaximizeArea, 0, 0), QRect(0, 0, 1280, 1024));
+    QCOMPARE(workspace()->clientArea(MaximizeArea, output, desktop), QRect(0, 0, 1280, 1024));
     QCOMPARE(panel->layer(), KWin::NormalLayer);
 
     // create a Window
-    QScopedPointer<Surface> surface2(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface2(Test::createSurface());
     QVERIFY(!surface2.isNull());
     QScopedPointer<Test::XdgToplevel> shellSurface2(Test::createXdgToplevelSurface(surface2.data()));
     QVERIFY(!shellSurface2.isNull());
@@ -367,7 +378,7 @@ void PlasmaSurfaceTest::testPanelActivate_data()
 
 void PlasmaSurfaceTest::testPanelActivate()
 {
-    QScopedPointer<Surface> surface(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
     QVERIFY(!surface.isNull());
     QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
     QVERIFY(!shellSurface.isNull());

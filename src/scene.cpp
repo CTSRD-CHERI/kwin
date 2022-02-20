@@ -61,6 +61,7 @@
 #include "unmanaged.h"
 #include "waylandclient.h"
 #include "windowitem.h"
+#include "workspace.h"
 #include "x11client.h"
 
 #include <QQuickWindow>
@@ -70,10 +71,10 @@
 #include "deleted.h"
 #include "effects.h"
 #include "renderloop.h"
-#include "screens.h"
 #include "shadow.h"
 #include "wayland_server.h"
 #include "composite.h"
+#include <QtMath>
 
 namespace KWin
 {
@@ -85,11 +86,6 @@ namespace KWin
 Scene::Scene(QObject *parent)
     : QObject(parent)
 {
-    if (kwinApp()->platform()->isPerScreenRenderingEnabled()) {
-        connect(kwinApp()->platform(), &Platform::outputEnabled, this, &Scene::reallocRepaints);
-        connect(kwinApp()->platform(), &Platform::outputDisabled, this, &Scene::reallocRepaints);
-    }
-    reallocRepaints();
 }
 
 Scene::~Scene()
@@ -97,76 +93,212 @@ Scene::~Scene()
     Q_ASSERT(m_windows.isEmpty());
 }
 
+void Scene::initialize()
+{
+    connect(kwinApp()->platform(), &Platform::outputDisabled, this, &Scene::removeRepaints);
+
+    connect(workspace(), &Workspace::deletedRemoved, this, &Scene::removeToplevel);
+
+    connect(workspace(), &Workspace::currentActivityChanged, this, &Scene::addRepaintFull);
+    connect(workspace(), &Workspace::currentDesktopChanged, this, &Scene::addRepaintFull);
+    connect(workspace(), &Workspace::stackingOrderChanged, this, &Scene::addRepaintFull);
+
+    setGeometry(workspace()->geometry());
+    connect(workspace(), &Workspace::geometryChanged, this, [this]() {
+        setGeometry(workspace()->geometry());
+    });
+
+    connect(Cursors::self(), &Cursors::currentCursorChanged, this, &Scene::addCursorRepaints);
+    connect(Cursors::self(), &Cursors::positionChanged, this, &Scene::addCursorRepaints);
+}
+
+void Scene::addCursorRepaints()
+{
+    const auto outputs = kwinApp()->platform()->enabledOutputs();
+    QRegion repaintRegion = Cursors::self()->currentCursor()->geometry();
+    repaintRegion |= m_lastCursorGeometry;
+    for (const auto &output : outputs) {
+        auto intersection = repaintRegion.intersected(output->geometry());
+        if (!intersection.isEmpty() && output->usesSoftwareCursor()) {
+            addRepaint(intersection);
+        }
+    }
+    m_lastCursorGeometry = Cursors::self()->currentCursor()->geometry();
+}
+
+void Scene::addRepaintFull()
+{
+    addRepaint(geometry());
+}
+
+void Scene::addRepaint(int x, int y, int width, int height)
+{
+    addRepaint(QRegion(x, y, width, height));
+}
+
+void Scene::addRepaint(const QRect &rect)
+{
+    addRepaint(QRegion(rect));
+}
+
 void Scene::addRepaint(const QRegion &region)
 {
+    const QVector<AbstractOutput *> outputs = kwinApp()->platform()->enabledOutputs();
     if (kwinApp()->platform()->isPerScreenRenderingEnabled()) {
-        const QVector<AbstractOutput *> outputs = kwinApp()->platform()->enabledOutputs();
-        if (m_repaints.count() != outputs.count()) {
-            return; // Repaints haven't been reallocated yet, do nothing.
-        }
-        for (int screenId = 0; screenId < m_repaints.count(); ++screenId) {
-            AbstractOutput *output = outputs[screenId];
+        for (const auto &output : outputs) {
             const QRegion dirtyRegion = region & output->geometry();
             if (!dirtyRegion.isEmpty()) {
-                m_repaints[screenId] += dirtyRegion;
+                m_repaints[output] += dirtyRegion;
                 output->renderLoop()->scheduleRepaint();
             }
         }
     } else {
-        m_repaints[0] += region;
-        kwinApp()->platform()->renderLoop()->scheduleRepaint();
+        m_repaints[outputs.constFirst()] += region;
+        outputs.constFirst()->renderLoop()->scheduleRepaint();
     }
 }
 
-QRegion Scene::repaints(int screenId) const
+QRect Scene::geometry() const
 {
-    const int index = screenId == -1 ? 0 : screenId;
-    return m_repaints[index];
+    return m_geometry;
 }
 
-void Scene::resetRepaints(int screenId)
+void Scene::setGeometry(const QRect &rect)
 {
-    const int index = screenId == -1 ? 0 : screenId;
-    m_repaints[index] = QRegion();
-}
-
-void Scene::reallocRepaints()
-{
-    if (kwinApp()->platform()->isPerScreenRenderingEnabled()) {
-        m_repaints.resize(kwinApp()->platform()->enabledOutputs().count());
-    } else {
-        m_repaints.resize(1);
+    if (m_geometry != rect) {
+        m_geometry = rect;
+        addRepaintFull();
     }
+}
 
-    m_repaints.fill(infiniteRegion());
+QRegion Scene::repaints(AbstractOutput *output) const
+{
+    return m_repaints.value(output, infiniteRegion());
+}
+
+void Scene::resetRepaints(AbstractOutput *output)
+{
+    m_repaints.insert(output, QRegion());
+}
+
+void Scene::removeRepaints(AbstractOutput *output)
+{
+    m_repaints.remove(output);
+}
+
+
+static QMatrix4x4 createProjectionMatrix(const QRect &rect)
+{
+    // Create a perspective projection with a 60° field-of-view,
+    // and an aspect ratio of 1.0.
+    QMatrix4x4 ret;
+    ret.setToIdentity();
+    const float fovY   =   std::tan(qDegreesToRadians(60.0f) / 2);
+    const float aspect =    1.0f;
+    const float zNear  =    0.1f;
+    const float zFar   =  100.0f;
+
+    const float yMax   =  zNear * fovY;
+    const float yMin   = -yMax;
+    const float xMin   =  yMin * aspect;
+    const float xMax   =  yMax * aspect;
+
+    ret.frustum(xMin, xMax, yMin, yMax, zNear, zFar);
+
+    const float scaleFactor = 1.1 * fovY / yMax;
+    ret.translate(xMin * scaleFactor, yMax * scaleFactor, -1.1);
+    ret.scale( (xMax - xMin) * scaleFactor / rect.width(),
+                             -(yMax - yMin) * scaleFactor / rect.height(),
+                              0.001);
+    ret.translate(-rect.x(), -rect.y());
+    return ret;
+}
+
+QMatrix4x4 Scene::renderTargetProjectionMatrix() const
+{
+    return m_renderTargetProjectionMatrix;
+}
+
+QRect Scene::renderTargetRect() const
+{
+    return m_renderTargetRect;
+}
+
+void Scene::setRenderTargetRect(const QRect &rect)
+{
+    m_renderTargetRect = rect;
+    m_renderTargetProjectionMatrix = createProjectionMatrix(rect);
+}
+
+qreal Scene::renderTargetScale() const
+{
+    return m_renderTargetScale;
+}
+
+void Scene::setRenderTargetScale(qreal scale)
+{
+    m_renderTargetScale = scale;
+}
+
+QRegion Scene::mapToRenderTarget(const QRegion &region) const
+{
+    QRegion result;
+    for (const QRect &rect : region) {
+        result += QRect((rect.x() - m_renderTargetRect.x()) * m_renderTargetScale,
+                        (rect.y() - m_renderTargetRect.y()) * m_renderTargetScale,
+                        rect.width() * m_renderTargetScale,
+                        rect.height() * m_renderTargetScale);
+    }
+    return result;
+}
+
+void Scene::paintScreen(AbstractOutput *output, const QList<Toplevel *> &toplevels)
+{
+    createStackingOrder(toplevels);
+    painted_screen = output;
+
+    QRegion update, valid;
+    paintScreen(output->geometry(), QRect(), &update, &valid);
+    clearStackingOrder();
 }
 
 // returns mask and possibly modified region
 void Scene::paintScreen(const QRegion &damage, const QRegion &repaint,
-                        QRegion *updateRegion, QRegion *validRegion, RenderLoop *renderLoop,
-                        const QMatrix4x4 &projection)
+                        QRegion *updateRegion, QRegion *validRegion)
 {
-    const QSize &screenSize = screens()->size();
-    const QRegion displayRegion(0, 0, screenSize.width(), screenSize.height());
-
+    const RenderLoop *renderLoop = painted_screen->renderLoop();
     const std::chrono::milliseconds presentTime =
             std::chrono::duration_cast<std::chrono::milliseconds>(renderLoop->nextPresentationTimestamp());
 
     if (Q_UNLIKELY(presentTime < m_expectedPresentTimestamp)) {
-        qCDebug(KWIN_CORE, "Provided presentation timestamp is invalid: %ld (current: %ld)",
-            (long)presentTime.count(), (long)m_expectedPresentTimestamp.count());
+        qCDebug(KWIN_CORE,
+                "Provided presentation timestamp is invalid: %lld (current: %lld)",
+                static_cast<long long>(presentTime.count()),
+                static_cast<long long>(m_expectedPresentTimestamp.count()));
     } else {
         m_expectedPresentTimestamp = presentTime;
     }
 
     // preparation step
-    static_cast<EffectsHandlerImpl*>(effects)->startPaint();
+    auto effectsImpl = static_cast<EffectsHandlerImpl *>(effects);
+    effectsImpl->startPaint();
 
+    if (kwinApp()->platform()->isPerScreenRenderingEnabled()) {
+        setRenderTargetRect(painted_screen->geometry());
+        setRenderTargetScale(painted_screen->scale());
+    } else {
+        setRenderTargetRect(geometry());
+        setRenderTargetScale(1);
+    }
+
+    const QRegion displayRegion(renderTargetRect());
     QRegion region = damage;
 
+    auto screen = EffectScreenImpl::get(painted_screen);
     ScreenPrePaintData pdata;
     pdata.mask = (damage == displayRegion) ? 0 : PAINT_SCREEN_REGION;
     pdata.paint = region;
+    pdata.screen = screen;
 
     effects->prePaintScreen(pdata, m_expectedPresentTimestamp);
     region = pdata.paint;
@@ -188,12 +320,12 @@ void Scene::paintScreen(const QRegion &damage, const QRegion &repaint,
     painted_region = region;
     repaint_region = repaint;
 
-    ScreenPaintData data(projection, effects->findScreen(painted_screen));
+    ScreenPaintData data(m_renderTargetProjectionMatrix, screen);
     effects->paintScreen(mask, region, data);
 
     Q_EMIT frameRendered();
 
-    Q_FOREACH (Window *w, stacking_order) {
+    for (Window *w : qAsConst(stacking_order)) {
         effects->postPaintWindow(effectWindow(w));
     }
 
@@ -219,13 +351,13 @@ void Scene::finalPaintScreen(int mask, const QRegion &region, ScreenPaintData& d
         paintSimpleScreen(mask, region);
 }
 
-static void resetRepaintsHelper(Item *item, int screen)
+static void resetRepaintsHelper(Item *item, AbstractOutput *output)
 {
-    item->resetRepaints(screen);
+    item->resetRepaints(output);
 
     const auto childItems = item->childItems();
     for (Item *childItem : childItems) {
-        resetRepaintsHelper(childItem, screen);
+        resetRepaintsHelper(childItem, output);
     }
 }
 
@@ -235,7 +367,7 @@ void Scene::paintGenericScreen(int orig_mask, const ScreenPaintData &)
 {
     QVector<Phase2Data> phase2;
     phase2.reserve(stacking_order.size());
-    Q_FOREACH (Window * w, stacking_order) { // bottom to top
+    for (Window * w : qAsConst(stacking_order)) { // bottom to top
         // Reset the repaint_region.
         // This has to be done here because many effects schedule a repaint for
         // the next frame within Effects::prePaintWindow.
@@ -254,7 +386,7 @@ void Scene::paintGenericScreen(int orig_mask, const ScreenPaintData &)
         phase2.append({w, infiniteRegion(), data.clip, data.mask,});
     }
 
-    damaged_region = QRegion(QRect {{}, screens()->size()});
+    damaged_region = renderTargetRect();
     if (m_paintScreenCount == 1) {
         aboutToStartPainting(painted_screen, damaged_region);
 
@@ -266,19 +398,19 @@ void Scene::paintGenericScreen(int orig_mask, const ScreenPaintData &)
     if (!(orig_mask & PAINT_SCREEN_BACKGROUND_FIRST)) {
         paintBackground(infiniteRegion());
     }
-    Q_FOREACH (const Phase2Data & d, phase2) {
+    for (const Phase2Data &d : qAsConst(phase2)) {
         paintWindow(d.window, d.mask, d.region);
     }
 }
 
-static void accumulateRepaints(Item *item, int screen, QRegion *repaints)
+static void accumulateRepaints(Item *item, AbstractOutput *output, QRegion *repaints)
 {
-    *repaints += item->repaints(screen);
-    item->resetRepaints(screen);
+    *repaints += item->repaints(output);
+    item->resetRepaints(output);
 
     const auto childItems = item->childItems();
     for (Item *childItem : childItems) {
-        accumulateRepaints(childItem, screen, repaints);
+        accumulateRepaints(childItem, output, repaints);
     }
 }
 
@@ -352,8 +484,7 @@ void Scene::paintSimpleScreen(int orig_mask, const QRegion &region)
     const QRegion repaintClip = repaint_region - dirtyArea;
     dirtyArea |= repaint_region;
 
-    const QSize &screenSize = screens()->size();
-    const QRegion displayRegion(0, 0, screenSize.width(), screenSize.height());
+    const QRegion displayRegion(renderTargetRect());
     bool fullRepaint(dirtyArea == displayRegion); // spare some expensive region operations
     if (!fullRepaint) {
         extendPaintRegion(dirtyArea, opaqueFullscreen);
@@ -441,7 +572,6 @@ void Scene::addToplevel(Toplevel *c)
     connect(c, &Toplevel::windowClosed, this, &Scene::windowClosed);
 
     c->effectWindow()->setSceneWindow(w);
-    c->updateShadow();
 }
 
 void Scene::removeToplevel(Toplevel *toplevel)
@@ -461,16 +591,13 @@ void Scene::windowClosed(Toplevel *toplevel, Deleted *deleted)
     Q_ASSERT(m_windows.contains(toplevel));
     Window *window = m_windows.take(toplevel);
     window->updateToplevel(deleted);
-    if (window->shadowItem()) {
-        window->shadowItem()->shadow()->setToplevel(deleted);
-    }
     m_windows[deleted] = window;
 }
 
 void Scene::createStackingOrder(const QList<Toplevel *> &toplevels)
 {
     // TODO: cache the stacking_order in case it has not changed
-    Q_FOREACH (Toplevel *c, toplevels) {
+    for (Toplevel *c : toplevels) {
         Q_ASSERT(m_windows.contains(c));
         stacking_order.append(m_windows[ c ]);
     }
@@ -484,13 +611,9 @@ void Scene::clearStackingOrder()
 void Scene::paintWindow(Window* w, int mask, const QRegion &_region)
 {
     // no painting outside visible screen (and no transformations)
-    const QRegion region = _region & QRect({0, 0}, screens()->size());
+    const QRegion region = _region & renderTargetRect();
     if (region.isEmpty())  // completely clipped
         return;
-    if (w->window()->isDeleted() && w->window()->skipsCloseAnimation()) {
-        // should not get painted
-        return;
-    }
 
     WindowPaintData data(w->window()->effectWindow(), screenProjectionMatrix());
     effects->paintWindow(effectWindow(w), mask, region, data);
@@ -501,9 +624,9 @@ void Scene::paintDesktop(int desktop, int mask, const QRegion &region, ScreenPai
     static_cast<EffectsHandlerImpl*>(effects)->paintDesktop(desktop, mask, region, data);
 }
 
-void Scene::aboutToStartPainting(int screenId, const QRegion &damage)
+void Scene::aboutToStartPainting(AbstractOutput *output, const QRegion &damage)
 {
-    Q_UNUSED(screenId)
+    Q_UNUSED(output)
     Q_UNUSED(damage)
 }
 
@@ -516,11 +639,9 @@ void Scene::finalPaintWindow(EffectWindowImpl* w, int mask, const QRegion &regio
 // will be eventually called from drawWindow()
 void Scene::finalDrawWindow(EffectWindowImpl* w, int mask, const QRegion &region, WindowPaintData& data)
 {
-#if HAVE_WAYLAND
     if (waylandServer() && waylandServer()->isScreenLocked() && !w->window()->isLockScreen() && !w->window()->isInputMethod()) {
         return;
     }
-#endif
     w->sceneWindow()->performPaint(mask, region, data);
 }
 
@@ -539,11 +660,6 @@ void Scene::doneOpenGLContextCurrent()
 {
 }
 
-bool Scene::supportsSurfacelessContext() const
-{
-    return false;
-}
-
 bool Scene::supportsNativeFence() const
 {
     return false;
@@ -559,9 +675,9 @@ QPainter *Scene::scenePainter() const
     return nullptr;
 }
 
-QImage *Scene::qpainterRenderBuffer(int screenId) const
+QImage *Scene::qpainterRenderBuffer(AbstractOutput *output) const
 {
-    Q_UNUSED(screenId)
+    Q_UNUSED(output)
     return nullptr;
 }
 
@@ -570,19 +686,19 @@ QVector<QByteArray> Scene::openGLPlatformInterfaceExtensions() const
     return QVector<QByteArray>{};
 }
 
-PlatformSurfaceTexture *Scene::createPlatformSurfaceTextureInternal(SurfacePixmapInternal *pixmap)
+SurfaceTexture *Scene::createSurfaceTextureInternal(SurfacePixmapInternal *pixmap)
 {
     Q_UNUSED(pixmap)
     return nullptr;
 }
 
-PlatformSurfaceTexture *Scene::createPlatformSurfaceTextureX11(SurfacePixmapX11 *pixmap)
+SurfaceTexture *Scene::createSurfaceTextureX11(SurfacePixmapX11 *pixmap)
 {
     Q_UNUSED(pixmap)
     return nullptr;
 }
 
-PlatformSurfaceTexture *Scene::createPlatformSurfaceTextureWayland(SurfacePixmapWayland *pixmap)
+SurfaceTexture *Scene::createSurfaceTextureWayland(SurfacePixmapWayland *pixmap)
 {
     Q_UNUSED(pixmap)
     return nullptr;
@@ -597,15 +713,12 @@ Scene::Window::Window(Toplevel *client, QObject *parent)
     , toplevel(client)
     , disable_painting(0)
 {
-#if HAVE_WAYLAND
     if (qobject_cast<WaylandClient *>(client)) {
-        m_windowItem.reset(new WindowItemWayland(this));
-    } else
-#endif
-    if (qobject_cast<X11Client *>(client) || qobject_cast<Unmanaged *>(client)) {
-        m_windowItem.reset(new WindowItemX11(this));
-    } else if (qobject_cast<InternalClient *>(client)) {
-        m_windowItem.reset(new WindowItemInternal(this));
+        m_windowItem.reset(new WindowItemWayland(toplevel));
+    } else if (qobject_cast<X11Client *>(client) || qobject_cast<Unmanaged *>(client)) {
+        m_windowItem.reset(new WindowItemX11(toplevel));
+    } else if (auto internalClient = qobject_cast<InternalClient *>(client)) {
+        m_windowItem.reset(new WindowItemInternal(internalClient));
     } else {
         Q_UNREACHABLE();
     }
@@ -659,7 +772,8 @@ void Scene::Window::unreferencePreviousPixmap_helper(SurfaceItem *item)
 
 QRegion Scene::Window::decorationShape() const
 {
-    return QRegion(toplevel->rect()) - toplevel->transparentRect();
+    const QRect decorationInnerRect = toplevel->rect() - toplevel->frameMargins();
+    return QRegion(toplevel->rect()) - decorationInnerRect;
 }
 
 bool Scene::Window::isVisible() const
@@ -671,7 +785,7 @@ bool Scene::Window::isVisible() const
     if (!toplevel->isOnCurrentActivity())
         return false;
     if (AbstractClient *c = dynamic_cast<AbstractClient*>(toplevel))
-        return c->isShown(true);
+        return c->isShown();
     return true; // Unmanaged is always visible
 }
 
@@ -748,15 +862,6 @@ Scene::EffectFrame::EffectFrame(EffectFrameImpl* frame)
 }
 
 Scene::EffectFrame::~EffectFrame()
-{
-}
-
-SceneFactory::SceneFactory(QObject *parent)
-    : QObject(parent)
-{
-}
-
-SceneFactory::~SceneFactory()
 {
 }
 

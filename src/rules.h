@@ -17,7 +17,7 @@
 
 #include "placement.h"
 #include "options.h"
-#include "utils.h"
+#include "utils/common.h"
 
 class QDebug;
 class KConfig;
@@ -27,8 +27,10 @@ namespace KWin
 {
 
 class AbstractClient;
+class AbstractOutput;
 class Rules;
 class RuleSettings;
+class VirtualDesktop;
 
 #ifndef KCMRULES // only for kwin core
 
@@ -51,8 +53,8 @@ public:
     int checkOpacityActive(int s) const;
     int checkOpacityInactive(int s) const;
     bool checkIgnoreGeometry(bool ignore, bool init = false) const;
-    int checkDesktop(int desktop, bool init = false) const;
-    int checkScreen(int screen, bool init = false) const;
+    QVector<VirtualDesktop *> checkDesktops(QVector<VirtualDesktop *> desktops, bool init = false) const;
+    AbstractOutput *checkOutput(AbstractOutput *output, bool init = false) const;
     QStringList checkActivity(QStringList activity, bool init = false) const;
     NET::WindowType checkType(NET::WindowType type) const;
     MaximizeMode checkMaximize(MaximizeMode mode, bool init = false) const;
@@ -93,7 +95,7 @@ public:
     explicit Rules(const RuleSettings*);
     Rules(const QString&, bool temporary);
     enum Type {
-        Position = 1<<0, Size = 1<<1, Desktop = 1<<2,
+        Position = 1<<0, Size = 1<<1, Desktops = 1<<2,
         MaximizeVert = 1<<3, MaximizeHoriz = 1<<4, Minimize = 1<<5,
         Shade = 1<<6, SkipTaskbar = 1<<7, SkipPager = 1<<8,
         SkipSwitcher = 1<<9, Above = 1<<10, Below = 1<<11, Fullscreen = 1<<12,
@@ -145,7 +147,7 @@ public:
     bool applyOpacityActive(int& s) const;
     bool applyOpacityInactive(int& s) const;
     bool applyIgnoreGeometry(bool& ignore, bool init) const;
-    bool applyDesktop(int& desktop, bool init) const;
+    bool applyDesktops(QVector<VirtualDesktop *> &desktops, bool init) const;
     bool applyScreen(int& desktop, bool init) const;
     bool applyActivity(QStringList& activity, bool init) const;
     bool applyType(NET::WindowType& type) const;
@@ -180,6 +182,9 @@ private:
     bool matchRole(const QByteArray& match_role) const;
     bool matchTitle(const QString& match_title) const;
     bool matchClientMachine(const QByteArray& match_machine, bool local) const;
+#ifdef KCMRULES
+private:
+#endif
     void readFromSettings(const RuleSettings *settings);
     static ForceRule convertForceRule(int v);
     static QString getDecoColor(const QString &themeName);
@@ -217,8 +222,8 @@ private:
     ForceRule opacityinactiverule;
     bool ignoregeometry;
     SetRule ignoregeometryrule;
-    int desktop;
-    SetRule desktoprule;
+    QStringList desktops;
+    SetRule desktopsrule;
     int screen;
     SetRule screenrule;
     QStringList activity;

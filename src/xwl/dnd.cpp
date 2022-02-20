@@ -3,7 +3,8 @@
     This file is part of the KDE project.
 
     SPDX-FileCopyrightText: 2019 Roman Gilg <subdiff@gmail.com>
-
+    SPDX-FileCopyrightText: 2021 David Edmundson <davidedmundson@kde.org>
+    SPDX-FileCopyrightText: 2021 David Redondo <kde@david-redondo.de>
     SPDX-License-Identifier: GPL-2.0-or-later
 */
 #include "dnd.h"
@@ -18,9 +19,7 @@
 #include "wayland_server.h"
 #include "workspace.h"
 #include "xwayland.h"
-
-#include <KWayland/Client/compositor.h>
-#include <KWayland/Client/surface.h>
+#include "xwldrophandler.h"
 
 #include <KWaylandServer/compositor_interface.h>
 #include <KWaylandServer/seat_interface.h>
@@ -42,8 +41,14 @@ uint32_t Dnd::version()
     return s_version;
 }
 
+XwlDropHandler *Dnd::dropHandler() const
+{
+    return m_dropHandler;
+}
+
 Dnd::Dnd(xcb_atom_t atom, QObject *parent)
     : Selection(atom, parent)
+    , m_dropHandler(new XwlDropHandler)
 {
     xcb_connection_t *xcbConn = kwinApp()->x11Connection();
 
@@ -72,44 +77,6 @@ Dnd::Dnd(xcb_atom_t atom, QObject *parent)
 
     connect(waylandServer()->seat(), &KWaylandServer::SeatInterface::dragStarted, this, &Dnd::startDrag);
     connect(waylandServer()->seat(), &KWaylandServer::SeatInterface::dragEnded, this, &Dnd::endDrag);
-
-    const auto *comp = waylandServer()->compositor();
-    m_surface = waylandServer()->internalCompositor()->createSurface(this);
-    m_surface->setInputRegion(nullptr);
-    m_surface->commit(KWayland::Client::Surface::CommitFlag::None);
-    auto *dc = new QMetaObject::Connection();
-    *dc = connect(comp, &KWaylandServer::CompositorInterface::surfaceCreated, this,
-                 [this, dc](KWaylandServer::SurfaceInterface *si) {
-                    // TODO: how to make sure that it is the iface of m_surface?
-                    if (m_surfaceIface || si->client() != waylandServer()->internalConnection()) {
-                        return;
-                    }
-                    QObject::disconnect(*dc);
-                    delete dc;
-                    m_surfaceIface = si;
-                    connect(workspace(), &Workspace::clientActivated, this,
-                        [this](AbstractClient *ac) {
-                            if (!ac || !ac->inherits("KWin::X11Client")) {
-                                return;
-                            }
-                            auto *surface = ac->surface();
-                            if (surface) {
-                                surface->setDataProxy(m_surfaceIface);
-                            } else {
-                                auto *dc = new QMetaObject::Connection();
-                                *dc = connect(ac, &AbstractClient::surfaceChanged, this, [this, ac, dc] {
-                                        if (auto *surface = ac->surface()) {
-                                            surface->setDataProxy(m_surfaceIface);
-                                            QObject::disconnect(*dc);
-                                            delete dc;
-                                        }
-                                      }
-                                );
-                            }
-                    });
-                }
-    );
-    waylandServer()->dispatch();
 }
 
 void Dnd::doHandleXfixesNotify(xcb_xfixes_selection_notify_event_t *event)
@@ -145,7 +112,6 @@ void Dnd::doHandleXfixesNotify(xcb_xfixes_selection_notify_event_t *event)
     if (!source) {
         return;
     }
-    DataBridge::self()->dataDeviceIface()->updateProxy(originSurface);
     m_currentDrag = new XToWlDrag(source);
 }
 
@@ -153,7 +119,6 @@ void Dnd::x11OffersChanged(const QStringList &added, const QStringList &removed)
 {
     Q_UNUSED(added);
     Q_UNUSED(removed);
-    // TODO: handled internally
 }
 
 bool Dnd::handleClientMessage(xcb_client_message_event_t *event)
@@ -171,17 +136,14 @@ bool Dnd::handleClientMessage(xcb_client_message_event_t *event)
 
 DragEventReply Dnd::dragMoveFilter(Toplevel *target, const QPoint &pos)
 {
-    // This filter only is used when a drag is in process.
     Q_ASSERT(m_currentDrag);
     return m_currentDrag->moveFilter(target, pos);
 }
 
 void Dnd::startDrag()
 {
-    auto *ddi = waylandServer()->seat()->dragSource();
-    if (ddi == DataBridge::self()->dataDeviceIface()) {
-        // X to Wl drag, started by us, is in progress.
-        Q_ASSERT(m_currentDrag);
+    auto dragSource = waylandServer()->seat()->dragSource();
+    if (qobject_cast<XwlDataSource*>(dragSource)) {
         return;
     }
 
@@ -191,7 +153,7 @@ void Dnd::startDrag()
     // New Wl to X drag, init drag and Wl source.
     m_currentDrag = new WlToXDrag();
     auto source = new WlSource(this);
-    source->setDataSourceIface(ddi->dragSource());
+    source->setDataSourceIface(dragSource);
     setWlSource(source);
     ownSelection(true);
 }
@@ -200,8 +162,9 @@ void Dnd::endDrag()
 {
     Q_ASSERT(m_currentDrag);
 
-    if (m_currentDrag->end()) {
+    if (qobject_cast<WlToXDrag*>(m_currentDrag)) {
         delete m_currentDrag;
+        setWlSource(nullptr);
     } else {
         connect(m_currentDrag, &Drag::finish, this, &Dnd::clearOldDrag);
         m_oldDrags << m_currentDrag;
@@ -213,6 +176,37 @@ void Dnd::clearOldDrag(Drag *drag)
 {
     m_oldDrags.removeOne(drag);
     delete drag;
+}
+
+using DnDAction = KWaylandServer::DataDeviceManagerInterface::DnDAction;
+using DnDActions = KWaylandServer::DataDeviceManagerInterface::DnDActions;
+
+DnDAction Dnd::atomToClientAction(xcb_atom_t atom)
+{
+    if (atom == atoms->xdnd_action_copy) {
+        return DnDAction::Copy;
+    } else if (atom == atoms->xdnd_action_move) {
+        return DnDAction::Move;
+    } else if (atom == atoms->xdnd_action_ask) {
+        // we currently do not support it - need some test client first
+        return DnDAction::None;
+//        return DnDAction::Ask;
+    }
+    return DnDAction::None;
+}
+
+xcb_atom_t Dnd::clientActionToAtom(DnDAction action)
+{
+    if (action == DnDAction::Copy) {
+        return atoms->xdnd_action_copy;
+    } else if (action == DnDAction::Move) {
+        return atoms->xdnd_action_move;
+    } else if (action == DnDAction::Ask) {
+        // we currently do not support it - need some test client first
+        return XCB_ATOM_NONE;
+//        return atoms->xdnd_action_ask;
+    }
+    return XCB_ATOM_NONE;
 }
 
 } // namespace Xwl

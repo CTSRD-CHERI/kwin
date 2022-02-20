@@ -18,7 +18,6 @@
 namespace KWin
 {
 class KWinTabBoxConfigForm;
-enum class BuiltInEffect;
 namespace TabBox
 {
 class KWinTabboxData;
@@ -43,7 +42,6 @@ private Q_SLOTS:
     void updateUnmanagedState();
     void updateDefaultIndicator();
     void configureEffectClicked();
-    void slotGHNS();
 
 private:
     void updateUiFromConfig(KWinTabBoxConfigForm *form, const TabBox::TabBoxSettings *config);

@@ -31,21 +31,35 @@ ecm_add_qtwayland_client_protocol(KWinIntegrationTestFramework_SOURCES
     PROTOCOL ${WaylandProtocols_DATADIR}/unstable/idle-inhibit/idle-inhibit-unstable-v1.xml
     BASENAME idle-inhibit-unstable-v1
 )
-add_library(KWinIntegrationTestFramework STATIC ${KWinIntegrationTestFramework_SOURCES})
-target_link_libraries(KWinIntegrationTestFramework
-    Qt::Test
-    kwin
-    Wayland::Client
-
-    # Own libraries
-    KWinXwaylandServerModule
-
-    # Static plugins
-    KWinQpaPlugin
-    KF5GlobalAccelKWinPlugin
-    KF5WindowSystemKWinPlugin
-    KF5IdleTimeKWinPlugin
+ecm_add_qtwayland_client_protocol(KWinIntegrationTestFramework_SOURCES
+    PROTOCOL ${PLASMA_WAYLAND_PROTOCOLS_DIR}/kde-output-device-v2.xml
+    BASENAME kde-output-device-v2
 )
+ecm_add_qtwayland_client_protocol(KWinIntegrationTestFramework_SOURCES
+    PROTOCOL ${PLASMA_WAYLAND_PROTOCOLS_DIR}/kde-output-management-v2.xml
+    BASENAME kde-output-management-v2
+)
+
+add_library(KWinIntegrationTestFramework SHARED ${KWinIntegrationTestFramework_SOURCES})
+target_link_libraries(KWinIntegrationTestFramework
+    PUBLIC
+        Qt::Test
+        KF5::WaylandClient
+        Wayland::Client
+        kwin
+
+    PRIVATE
+        # Own libraries
+        KWinXwaylandServerModule
+
+        # Static plugins
+        KWinQpaPlugin
+        KF5GlobalAccelKWinPlugin
+        KF5WindowSystemKWinPlugin
+        KF5IdleTimeKWinPlugin
+)
+kcoreaddons_target_static_plugins(KWinIntegrationTestFramework "kwin/effects/plugins" LINK_OPTION "PRIVATE")
+set_target_properties(KWinIntegrationTestFramework PROPERTIES CXX_VISIBILITY_PRESET default)
 
 function(integrationTest)
     set(optionArgs WAYLAND_ONLY)
@@ -53,12 +67,12 @@ function(integrationTest)
     set(multiValueArgs SRCS LIBS)
     cmake_parse_arguments(ARGS "${optionArgs}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
     add_executable(${ARGS_NAME} ${ARGS_SRCS})
-    target_link_libraries(${ARGS_NAME} KWinIntegrationTestFramework kwin Qt::Test ${ARGS_LIBS})
+    target_link_libraries(${ARGS_NAME} KWinIntegrationTestFramework Qt::Test ${ARGS_LIBS})
     add_test(NAME kwin-${ARGS_NAME} COMMAND dbus-run-session ${CMAKE_BINARY_DIR}/bin/${ARGS_NAME})
     if (${ARGS_WAYLAND_ONLY})
         add_executable(${ARGS_NAME}_waylandonly ${ARGS_SRCS} )
         set_target_properties(${ARGS_NAME}_waylandonly PROPERTIES COMPILE_DEFINITIONS "NO_XWAYLAND")
-        target_link_libraries(${ARGS_NAME}_waylandonly KWinIntegrationTestFramework kwin Qt::Test ${ARGS_LIBS})
+        target_link_libraries(${ARGS_NAME}_waylandonly KWinIntegrationTestFramework Qt::Test ${ARGS_LIBS})
         add_test(NAME kwin-${ARGS_NAME}-waylandonly COMMAND dbus-run-session ${CMAKE_BINARY_DIR}/bin/${ARGS_NAME}_waylandonly)
     endif()
 endfunction()
@@ -105,7 +119,8 @@ integrationTest(WAYLAND_ONLY NAME testPlacement SRCS placement_test.cpp)
 integrationTest(WAYLAND_ONLY NAME testActivation SRCS activation_test.cpp)
 integrationTest(WAYLAND_ONLY NAME testInputMethod SRCS inputmethod_test.cpp)
 integrationTest(WAYLAND_ONLY NAME testScreens SRCS screens_test.cpp)
-integrationTest(WAYLAND_ONLY NAME testOutputManagement SRCS outputmanagement_test.cpp)
+integrationTest(WAYLAND_ONLY NAME testScreenEdges SRCS screenedges_test.cpp)
+integrationTest(WAYLAND_ONLY NAME testOutputChanges SRCS outputchanges_test.cpp)
 
 qt_add_dbus_interfaces(DBUS_SRCS ${CMAKE_BINARY_DIR}/src/org.kde.kwin.VirtualKeyboard.xml)
 integrationTest(WAYLAND_ONLY NAME testVirtualKeyboardDBus SRCS test_virtualkeyboard_dbus.cpp ${DBUS_SRCS})

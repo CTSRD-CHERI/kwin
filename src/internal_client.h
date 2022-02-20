@@ -24,12 +24,10 @@ public:
 
     bool eventFilter(QObject *watched, QEvent *event) override;
 
-    qreal bufferScale() const override;
     QString captionNormal() const override;
     QString captionSuffix() const override;
     QSize minSize() const override;
     QSize maxSize() const override;
-    QRect transparentRect() const override;
     NET::WindowType windowType(bool direct = false, int supported_types = 0) const override;
     void killWindow() override;
     bool isClient() const override;
@@ -47,21 +45,25 @@ public:
     bool isInternal() const override;
     bool isLockScreen() const override;
     bool isOutline() const override;
-    bool isShown(bool shaded_is_shown) const override;
+    bool isShown() const override;
     bool isHiddenInternal() const override;
-    void hideClient(bool hide) override;
+    void hideClient() override;
+    void showClient() override;
     void resizeWithChecks(const QSize &size) override;
     AbstractClient *findModal(bool allow_itself = false) override;
     bool takeFocus() override;
     void setNoBorder(bool set) override;
-    void updateDecoration(bool check_workspace_pos, bool force = false) override;
+    void invalidateDecoration() override;
     void destroyClient() override;
     bool hasPopupGrab() const override;
     void popupDone() override;
     bool hitTest(const QPoint &point) const override;
+    void pointerEnterEvent(const QPoint &globalPos) override;
+    void pointerLeaveEvent() override;
 
     void present(const QSharedPointer<QOpenGLFramebufferObject> fbo);
     void present(const QImage &image, const QRegion &damage);
+    qreal bufferScale() const;
     QWindow *internalWindow() const;
 
 protected:
@@ -78,6 +80,9 @@ private:
     void markAsMapped();
     void syncGeometryToInternalWindow();
     void updateInternalWindowGeometry();
+    void updateDecoration(bool check_workspace_pos, bool force = false);
+    void createDecoration(const QRect &oldGeometry);
+    void destroyDecoration();
 
     QWindow *m_internalWindow = nullptr;
     QString m_captionNormal;

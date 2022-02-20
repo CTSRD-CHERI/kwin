@@ -11,9 +11,7 @@
 #include "touchpoints.h"
 
 #include <QAction>
-#if QT_CONFIG(opengl)
 #include <kwinglutils.h>
-#endif
 
 #include <KConfigGroup>
 #include <KGlobalAccel>
@@ -182,34 +180,24 @@ bool TouchPointsEffect::isActive() const
 
 void TouchPointsEffect::drawCircle(const QColor& color, float cx, float cy, float r)
 {
-    if (effects->isOpenGLCompositing()) {
-#if !QT_CONFIG(opengl)
-        Q_UNREACHABLE();
-#else
+    if (effects->isOpenGLCompositing())
         drawCircleGl(color, cx, cy, r);
-#endif
-    } else if (effects->compositingType() == QPainterCompositing) {
+    else if (effects->compositingType() == QPainterCompositing)
         drawCircleQPainter(color, cx, cy, r);
-    }
 }
 
 void TouchPointsEffect::paintScreenSetup(int mask, QRegion region, ScreenPaintData& data)
 {
-#if QT_CONFIG(opengl)
     if (effects->isOpenGLCompositing())
         paintScreenSetupGl(mask, region, data);
-#endif
 }
 
 void TouchPointsEffect::paintScreenFinish(int mask, QRegion region, ScreenPaintData& data)
 {
-#if QT_CONFIG(opengl)
     if (effects->isOpenGLCompositing())
         paintScreenFinishGl(mask, region, data);
-#endif
 }
 
-#if QT_CONFIG(opengl)
 void TouchPointsEffect::drawCircleGl(const QColor& color, float cx, float cy, float r)
 {
     static const int num_segments = 80;
@@ -238,7 +226,6 @@ void TouchPointsEffect::drawCircleGl(const QColor& color, float cx, float cy, fl
     vbo->setData(verts.size() / 2, 2, verts.data(), nullptr);
     vbo->render(GL_LINE_LOOP);
 }
-#endif
 
 void TouchPointsEffect::drawCircleQPainter(const QColor &color, float cx, float cy, float r)
 {
@@ -249,7 +236,6 @@ void TouchPointsEffect::drawCircleQPainter(const QColor &color, float cx, float 
     painter->restore();
 }
 
-#if QT_CONFIG(opengl)
 void TouchPointsEffect::paintScreenSetupGl(int, QRegion, ScreenPaintData &data)
 {
     GLShader *shader = ShaderManager::instance()->pushShader(ShaderTrait::UniformColor);
@@ -266,7 +252,6 @@ void TouchPointsEffect::paintScreenFinishGl(int, QRegion, ScreenPaintData&)
 
     ShaderManager::instance()->popShader();
 }
-#endif
 
 } // namespace
 

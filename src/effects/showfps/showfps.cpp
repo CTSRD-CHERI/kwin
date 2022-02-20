@@ -14,9 +14,7 @@
 
 #include <kwinconfig.h>
 
-#if QT_CONFIG(opengl)
 #include <kwinglutils.h>
-#endif
 
 #include <KLocalizedString>
 
@@ -51,6 +49,10 @@ ShowFpsEffect::ShowFpsEffect()
     m_noBenchmark->setAlignment(Qt::AlignTop | Qt::AlignRight);
     m_noBenchmark->setText(i18n("This effect is not a benchmark"));
     reconfigure(ReconfigureAll);
+}
+
+ShowFpsEffect::~ShowFpsEffect()
+{
 }
 
 void ShowFpsEffect::reconfigure(ReconfigureFlags)
@@ -151,19 +153,14 @@ void ShowFpsEffect::paintScreen(int mask, const QRegion &region, ScreenPaintData
     if (fps > MAX_TIME)
         fps = MAX_TIME; // keep it the same height
     if (effects->isOpenGLCompositing()) {
-#if !QT_CONFIG(opengl)
-        Q_UNREACHABLE();
-#else
         paintGL(fps, data.projectionMatrix());
         glFinish(); // make sure all rendering is done
-#endif
     } else if (effects->compositingType() == QPainterCompositing) {
         paintQPainter(fps);
     }
     m_noBenchmark->render(infiniteRegion(), 1.0, alpha);
 }
 
-#if QT_CONFIG(opengl)
 void ShowFpsEffect::paintGL(int fps, const QMatrix4x4 &projectionMatrix)
 {
     int x = this->x;
@@ -232,7 +229,7 @@ void ShowFpsEffect::paintGL(int fps, const QMatrix4x4 &projectionMatrix)
         QMatrix4x4 mvp = projectionMatrix;
         mvp.translate(fpsTextRect.x(), fpsTextRect.y());
         binder.shader()->setUniform(GLShader::ModelViewProjectionMatrix, mvp);
-        fpsText->render(QRegion(fpsTextRect), fpsTextRect);
+        fpsText->render(fpsTextRect);
         fpsText->unbind();
         effects->addRepaint(fpsTextRect);
     }
@@ -240,7 +237,6 @@ void ShowFpsEffect::paintGL(int fps, const QMatrix4x4 &projectionMatrix)
     // Paint paint sizes
     glDisable(GL_BLEND);
 }
-#endif
 
 void ShowFpsEffect::paintQPainter(int fps)
 {
@@ -324,9 +320,6 @@ void ShowFpsEffect::paintDrawSizeGraph(int x, int y)
 void ShowFpsEffect::paintGraph(int x, int y, QList<int> values, QList<int> lines, bool colorize)
 {
     if (effects->isOpenGLCompositing()) {
-#if !QT_CONFIG(opengl)
-        Q_UNREACHABLE();
-#else
         QColor color(0, 0, 0);
         color.setAlphaF(alpha);
         GLVertexBuffer *vbo = GLVertexBuffer::streamingBuffer();
@@ -334,7 +327,7 @@ void ShowFpsEffect::paintGraph(int x, int y, QList<int> values, QList<int> lines
         vbo->setColor(color);
         QVector<float> verts;
         // First draw the lines
-        Q_FOREACH (int h, lines) {
+        for (int h : qAsConst(lines)) {
             verts << x << y - h;
             verts << x + values.count() << y - h;
         }
@@ -370,12 +363,11 @@ void ShowFpsEffect::paintGraph(int x, int y, QList<int> values, QList<int> lines
             vbo->setData(verts.size() / 2, 2, verts.constData(), nullptr);
             vbo->render(GL_LINES);
         }
-#endif
     } else if (effects->compositingType() == QPainterCompositing) {
         QPainter *painter = effects->scenePainter();
         painter->setPen(Qt::black);
         // First draw the lines
-        Q_FOREACH (int h, lines) {
+        for (int h : qAsConst(lines)) {
             painter->drawLine(x, y - h, x + values.count(), y - h);
         }
         QColor color(0, 0, 0);

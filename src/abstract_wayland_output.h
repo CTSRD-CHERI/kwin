@@ -10,21 +10,19 @@
 #define KWIN_ABSTRACT_WAYLAND_OUTPUT_H
 
 #include "abstract_output.h"
-#include "utils.h"
+#include "utils/common.h"
 #include "renderloop.h"
 #include <kwin_export.h>
 
 #include <QObject>
 #include <QTimer>
-
-namespace KWaylandServer
-{
-class OutputChangeSet;
-}
-#if HAVE_WAYLAND
+#include <QSize>
 
 namespace KWin
 {
+
+class WaylandOutputConfig;
+
 /**
  * Generic output representation in a Wayland session
  */
@@ -32,18 +30,6 @@ class KWIN_EXPORT AbstractWaylandOutput : public AbstractOutput
 {
     Q_OBJECT
 public:
-    enum class Transform {
-        Normal,
-        Rotated90,
-        Rotated180,
-        Rotated270,
-        Flipped,
-        Flipped90,
-        Flipped180,
-        Flipped270
-    };
-    Q_ENUM(Transform)
-
     enum class ModeFlag : uint {
         Current = 0x1,
         Preferred = 0x2,
@@ -57,6 +43,8 @@ public:
         int refreshRate;
         ModeFlags flags;
         int id;
+
+        inline bool operator==(const Mode &other) const;
     };
 
     enum class DpmsMode {
@@ -71,6 +59,7 @@ public:
         Dpms = 0x1,
         Overscan = 0x2,
         Vrr = 0x4,
+        RgbRange = 0x8,
     };
     Q_DECLARE_FLAGS(Capabilities, Capability)
 
@@ -83,6 +72,13 @@ public:
         Vertical_BGR,
     };
     Q_ENUM(SubPixel)
+
+    enum class RgbRange {
+        Automatic = 0,
+        Full = 1,
+        Limited = 2,
+    };
+    Q_ENUM(RgbRange)
 
     explicit AbstractWaylandOutput(QObject *parent = nullptr);
 
@@ -106,7 +102,7 @@ public:
      * - Rotated 270° and flipped along the horizontal axis is inv. portrait + inv. landscape +
      *   portrait
      */
-    Transform transform() const;
+    Transform transform() const override;
 
     int refreshRate() const override;
 
@@ -119,10 +115,10 @@ public:
     QString model() const override;
     QString serialNumber() const override;
 
-    void setGlobalPos(const QPoint &pos);
+    void moveTo(const QPoint &pos);
     void setScale(qreal scale);
 
-    void applyChanges(const KWaylandServer::OutputChangeSet *changeSet) override;
+    void applyChanges(const WaylandOutputConfig &config);
 
     bool isEnabled() const override;
     void setEnabled(bool enable) override;
@@ -132,11 +128,11 @@ public:
     Capabilities capabilities() const;
     QByteArray edid() const;
     QVector<Mode> modes() const;
+    void setModes(const QVector<Mode> &modes);
     DpmsMode dpmsMode() const;
     virtual void setDpmsMode(DpmsMode mode);
 
     uint32_t overscan() const;
-    virtual void setOverscan(uint32_t overscan);
 
     /**
      * Returns a matrix that can translate into the display's coordinates system
@@ -150,16 +146,20 @@ public:
 
     void setVrrPolicy(RenderLoop::VrrPolicy policy);
     RenderLoop::VrrPolicy vrrPolicy() const;
+    RgbRange rgbRange() const;
+
+    bool isPlaceholder() const;
 
 Q_SIGNALS:
-    void modeChanged();
+    void currentModeChanged();
+    void modesChanged();
     void outputChange(const QRegion &damagedRegion);
-    void scaleChanged();
     void transformChanged();
     void dpmsModeChanged();
     void capabilitiesChanged();
     void overscanChanged();
     void vrrPolicyChanged();
+    void rgbRangeChanged();
 
 protected:
     void initialize(const QString &model, const QString &manufacturer,
@@ -167,11 +167,6 @@ protected:
                     const QSize &physicalSize,
                     const QVector<Mode> &modes, const QByteArray &edid);
 
-    QPoint globalPos() const;
-
-    bool internal() const {
-        return m_internal;
-    }
     void setName(const QString &name) {
         m_name = name;
     }
@@ -181,9 +176,6 @@ protected:
 
     virtual void updateEnablement(bool enable) {
         Q_UNUSED(enable);
-    }
-    virtual void updateMode(int modeIndex) {
-        Q_UNUSED(modeIndex);
     }
     virtual void updateTransform(Transform transform) {
         Q_UNUSED(transform);
@@ -195,6 +187,8 @@ protected:
     void setCapabilityInternal(Capability capability, bool on = true);
     void setSubPixelInternal(SubPixel subPixel);
     void setOverscanInternal(uint32_t overscan);
+    void setPlaceholder(bool isPlaceholder);
+    void setRgbRangeInternal(RgbRange range);
 
     QSize orientateSize(const QSize &size) const;
 
@@ -219,13 +213,13 @@ private:
     int m_recorders = 0;
     bool m_isEnabled = true;
     bool m_internal = false;
+    bool m_isPlaceholder = false;
     uint32_t m_overscan = 0;
+    RgbRange m_rgbRange = RgbRange::Automatic;
 };
 
 }
 
 Q_DECLARE_OPERATORS_FOR_FLAGS(KWin::AbstractWaylandOutput::Capabilities)
-
-#endif
 
 #endif // KWIN_OUTPUT_H

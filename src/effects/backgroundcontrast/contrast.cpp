@@ -10,7 +10,9 @@
 #include "contrastshader.h"
 // KConfigSkeleton
 
+#include <QCoreApplication>
 #include <QMatrix4x4>
+#include <QTimer>
 #include <QWindow>
 
 #include <KWaylandServer/surface_interface.h>
@@ -21,28 +23,40 @@ namespace KWin
 
 static const QByteArray s_contrastAtomName = QByteArrayLiteral("_KDE_NET_WM_BACKGROUND_CONTRAST_REGION");
 
+KWaylandServer::ContrastManagerInterface *ContrastEffect::s_contrastManager = nullptr;
+QTimer *ContrastEffect::s_contrastManagerRemoveTimer = nullptr;
+
 ContrastEffect::ContrastEffect()
 {
     shader = ContrastShader::create();
-
-    reconfigure(ReconfigureAll);
+    shader->init();
 
     // ### Hackish way to announce support.
     //     Should be included in _NET_SUPPORTED instead.
     if (shader && shader->isValid()) {
-        net_wm_contrast_region = effects->announceSupportProperty(s_contrastAtomName, this);
-        KWaylandServer::Display *display = effects->waylandDisplay();
-        if (display) {
-            m_contrastManager.reset(new KWaylandServer::ContrastManagerInterface(display));
+        if (effects->xcbConnection()) {
+            net_wm_contrast_region = effects->announceSupportProperty(s_contrastAtomName, this);
         }
-    } else {
-        net_wm_contrast_region = 0;
+        if (effects->waylandDisplay()) {
+            if (!s_contrastManagerRemoveTimer) {
+                s_contrastManagerRemoveTimer = new QTimer(QCoreApplication::instance());
+                s_contrastManagerRemoveTimer->setSingleShot(true);
+                s_contrastManagerRemoveTimer->callOnTimeout([]() {
+                    s_contrastManager->remove();
+                    s_contrastManager = nullptr;
+                });
+            }
+            s_contrastManagerRemoveTimer->stop();
+            if (!s_contrastManager) {
+                s_contrastManager = new KWaylandServer::ContrastManagerInterface(effects->waylandDisplay(), s_contrastManagerRemoveTimer);
+            }
+        }
     }
 
     connect(effects, &EffectsHandler::windowAdded, this, &ContrastEffect::slotWindowAdded);
     connect(effects, &EffectsHandler::windowDeleted, this, &ContrastEffect::slotWindowDeleted);
     connect(effects, &EffectsHandler::propertyNotify, this, &ContrastEffect::slotPropertyNotify);
-    connect(effects, &EffectsHandler::screenGeometryChanged, this, &ContrastEffect::slotScreenGeometryChanged);
+    connect(effects, &EffectsHandler::virtualScreenGeometryChanged, this, &ContrastEffect::slotScreenGeometryChanged);
     connect(effects, &EffectsHandler::xcbConnectionChanged, this,
         [this] {
             if (shader && shader->isValid()) {
@@ -52,13 +66,18 @@ ContrastEffect::ContrastEffect()
     );
 
     // Fetch the contrast regions for all windows
-    for (EffectWindow *window: effects->stackingOrder()) {
-        updateContrastRegion(window);
+    const EffectWindowList windowList = effects->stackingOrder();
+    for (EffectWindow *window : windowList) {
+        slotWindowAdded(window);
     }
 }
 
 ContrastEffect::~ContrastEffect()
 {
+    // When compositing is restarted, avoid removing the manager immediately.
+    if (s_contrastManager) {
+        s_contrastManagerRemoveTimer->start(1000);
+    }
     delete shader;
 }
 
@@ -69,21 +88,10 @@ void ContrastEffect::slotScreenGeometryChanged()
         effects->reloadEffect(this);
         return;
     }
-    for (EffectWindow *window: effects->stackingOrder()) {
+
+    const EffectWindowList windowList = effects->stackingOrder();
+    for (EffectWindow *window : windowList) {
         updateContrastRegion(window);
-    }
-}
-
-void ContrastEffect::reconfigure(ReconfigureFlags flags)
-{
-    Q_UNUSED(flags)
-
-    if (shader)
-        shader->init();
-
-    if (!shader || !shader->isValid()) {
-        effects->removeSupportProperty(s_contrastAtomName, this);
-        m_contrastManager.reset();
     }
 }
 
@@ -340,61 +348,6 @@ void ContrastEffect::uploadGeometry(GLVertexBuffer *vbo, const QRegion &region)
     vbo->setAttribLayout(layout, 2, sizeof(QVector2D));
 }
 
-void ContrastEffect::prePaintScreen(ScreenPrePaintData &data, std::chrono::milliseconds presentTime)
-{
-    m_paintedArea = QRegion();
-    m_currentContrast = QRegion();
-
-    effects->prePaintScreen(data, presentTime);
-}
-
-void ContrastEffect::prePaintWindow(EffectWindow* w, WindowPrePaintData& data, std::chrono::milliseconds presentTime)
-{
-    // this effect relies on prePaintWindow being called in the bottom to top order
-
-    effects->prePaintWindow(w, data, presentTime);
-
-    if (!w->isPaintingEnabled()) {
-        return;
-    }
-    if (!shader || !shader->isValid()) {
-        return;
-    }
-
-    // we don't have to blur a region we don't see
-    m_currentContrast -= data.clip;
-    // if we have to paint a non-opaque part of this window that intersects with the
-    // currently blurred region (which is not cached) we have to redraw the whole region
-    if ((data.paint-data.clip).intersects(m_currentContrast)) {
-        data.paint |= m_currentContrast;
-    }
-
-    // in case this window has regions to be blurred
-    const QRect screen = effects->virtualScreenGeometry();
-    const QRegion contrastArea = contrastRegion(w).translated(w->pos()) & screen;
-
-    // we are not caching the window
-
-    // if this window or an window underneath the modified area is painted again we have to
-    // do everything
-    if (m_paintedArea.intersects(contrastArea) || data.paint.intersects(contrastArea)) {
-        data.paint |= contrastArea;
-
-        // we have to check again whether we do not damage a blurred area
-        // of a window we do not cache
-        if (contrastArea.intersects(m_currentContrast)) {
-            data.paint |= m_currentContrast;
-        }
-    }
-
-    m_currentContrast |= contrastArea;
-
-
-    // m_paintedArea keep track of all repainted areas
-    m_paintedArea -= data.clip;
-    m_paintedArea |= data.paint;
-}
-
 bool ContrastEffect::shouldContrast(const EffectWindow *w, int mask, const WindowPaintData &data) const
 {
     if (!shader || !shader->isValid())
@@ -420,8 +373,8 @@ bool ContrastEffect::shouldContrast(const EffectWindow *w, int mask, const Windo
 
 void ContrastEffect::drawWindow(EffectWindow *w, int mask, const QRegion &region, WindowPaintData &data)
 {
-    const QRect screen = GLRenderTarget::virtualScreenGeometry();
     if (shouldContrast(w, mask, data)) {
+        const QRect screen = effects->renderTargetRect();
         QRegion shape = region & contrastRegion(w).translated(w->pos()) & screen;
 
         // let's do the evil parts - someone wants to blur behind a transformed window
@@ -465,7 +418,7 @@ void ContrastEffect::doContrast(EffectWindow *w, const QRegion& shape, const QRe
     const QRegion actualShape = shape & screen;
     const QRect r = actualShape.boundingRect();
 
-    qreal scale = GLRenderTarget::virtualScreenScale();
+    const qreal scale = effects->renderTargetScale();
 
     // Upload geometry for the horizontal and vertical passes
     GLVertexBuffer *vbo = GLVertexBuffer::streamingBuffer();
@@ -480,7 +433,7 @@ void ContrastEffect::doContrast(EffectWindow *w, const QRegion& shape, const QRe
     scratch.setWrapMode(GL_CLAMP_TO_EDGE);
     scratch.bind();
 
-    const QRect sg = GLRenderTarget::virtualScreenGeometry();
+    const QRect sg = effects->renderTargetRect();
     glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, (r.x() - sg.x()) * scale, (sg.height() - (r.y() - sg.y() + r.height())) * scale,
                         scratch.width(), scratch.height());
 

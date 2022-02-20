@@ -59,19 +59,12 @@ public:
 
     QSharedPointer<GLTexture> textureForOutput(AbstractOutput *output) const override;
 
-    static void setPrimaryBackend(AbstractEglBackend *primaryBackend) {
-        s_primaryBackend = primaryBackend;
-    }
-    static AbstractEglBackend *primaryBackend() {
-        return s_primaryBackend;
-    }
-
-    bool isPrimary() const {
-        return this == s_primaryBackend;
-    }
+    dev_t deviceId() const;
+    virtual bool prefer10bpc() const;
+    EglDmabuf *dmabuf() const;
 
 protected:
-    AbstractEglBackend();
+    AbstractEglBackend(dev_t deviceId = 0);
     void setEglDisplay(const EGLDisplay &display);
     void setSurface(const EGLSurface &surface);
     void setConfig(const EGLConfig &config);
@@ -87,6 +80,10 @@ protected:
     bool createContext();
 
 private:
+    EGLContext ensureGlobalShareContext();
+    void destroyGlobalShareContext();
+    EGLContext createContextInternal(EGLContext sharedContext);
+
     void teardown();
 
     AbstractEglBackendFunctions m_functions;
@@ -97,6 +94,7 @@ private:
     // note: m_dmaBuf is nullptr if this is not the primary backend
     EglDmabuf *m_dmaBuf = nullptr;
     QList<QByteArray> m_clientExtensions;
+    const dev_t m_deviceId;
 
     static AbstractEglBackend * s_primaryBackend;
 };

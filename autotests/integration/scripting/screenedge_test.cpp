@@ -13,7 +13,6 @@
 #include "wayland_server.h"
 #include "workspace.h"
 #include "scripting/scripting.h"
-#include "effect_builtins.h"
 
 #define private public
 #include "screenedge.h"
@@ -58,8 +57,7 @@ void ScreenEdgeTest::initTestCase()
 
     // disable all effects to prevent them grabbing edges
     KConfigGroup plugins(config, QStringLiteral("Plugins"));
-    ScriptedEffectLoader loader;
-    const auto builtinNames = BuiltInEffects::availableEffectNames() << loader.listOfKnownEffects();
+    const auto builtinNames = EffectLoader().listOfKnownEffects();
     for (QString name : builtinNames) {
         plugins.writeEntry(name + QStringLiteral("Enabled"), false);
     }

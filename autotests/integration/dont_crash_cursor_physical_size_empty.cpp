@@ -13,7 +13,6 @@
 #include "cursor.h"
 #include "effects.h"
 #include "platform.h"
-#include "screens.h"
 #include "wayland_server.h"
 #include "workspace.h"
 
@@ -43,7 +42,7 @@ void DontCrashCursorPhysicalSizeEmpty::init()
 {
     QVERIFY(Test::setupWaylandConnection(Test::AdditionalWaylandInterface::Decoration));
 
-    screens()->setCurrent(0);
+    workspace()->setActiveOutput(QPoint(640, 512));
     KWin::Cursors::self()->mouse()->setPos(QPoint(640, 512));
 }
 
@@ -79,7 +78,7 @@ void DontCrashCursorPhysicalSizeEmpty::testMoveCursorOverDeco()
     // This test ensures that there is no endless recursion if the cursor theme cannot be created
     // a reason for creation failure could be physical size not existing
     // see BUG: 390314
-    QScopedPointer<Surface> surface(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
     Test::waylandServerSideDecoration()->create(surface.data(), surface.data());
     QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
 

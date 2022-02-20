@@ -13,7 +13,6 @@
 #include "deleted.h"
 #include "platform.h"
 #include "rules.h"
-#include "screens.h"
 #include "virtualdesktops.h"
 #include "wayland_server.h"
 #include "workspace.h"
@@ -101,7 +100,7 @@ void TestDbusInterface::testGetWindowInfoXdgShellClient()
     QSignalSpy clientAddedSpy(workspace(), &Workspace::clientAdded);
     QVERIFY(clientAddedSpy.isValid());
 
-    QScopedPointer<Surface> surface(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
     shellSurface->set_app_id(QStringLiteral("org.kde.foo"));
     shellSurface->set_title(QStringLiteral("Test window"));
@@ -126,7 +125,7 @@ void TestDbusInterface::testGetWindowInfoXdgShellClient()
     QCOMPARE(windowData.value(QStringLiteral("y")).toInt(), client->y());
     QCOMPARE(windowData.value(QStringLiteral("width")).toInt(), client->width());
     QCOMPARE(windowData.value(QStringLiteral("height")).toInt(), client->height());
-    QCOMPARE(windowData.value(QStringLiteral("x11DesktopNumber")).toInt(), 1);
+    QCOMPARE(windowData.value(QStringLiteral("desktops")).toStringList(), client->desktopIds());
     QCOMPARE(windowData.value(QStringLiteral("minimized")).toBool(), false);
     QCOMPARE(windowData.value(QStringLiteral("shaded")).toBool(), false);
     QCOMPARE(windowData.value(QStringLiteral("fullscreen")).toBool(), false);
@@ -137,7 +136,7 @@ void TestDbusInterface::testGetWindowInfoXdgShellClient()
     QCOMPARE(windowData.value(QStringLiteral("skipSwitcher")).toBool(), false);
     QCOMPARE(windowData.value(QStringLiteral("maximizeHorizontal")).toBool(), false);
     QCOMPARE(windowData.value(QStringLiteral("maximizeVertical")).toBool(), false);
-    QCOMPARE(windowData.value(QStringLiteral("noBorder")).toBool(), true);
+    QCOMPARE(windowData.value(QStringLiteral("noBorder")).toBool(), false);
     QCOMPARE(windowData.value(QStringLiteral("clientMachine")).toString(), QString());
     QCOMPARE(windowData.value(QStringLiteral("localhost")).toBool(), true);
     QCOMPARE(windowData.value(QStringLiteral("role")).toString(), QString());
@@ -191,7 +190,7 @@ void TestDbusInterface::testGetWindowInfoXdgShellClient()
     QCOMPARE(client->desktop(), 2);
     reply = getWindowInfo(client->internalId());
     reply.waitForFinished();
-    QCOMPARE(reply.value().value(QStringLiteral("x11DesktopNumber")).toInt(), 2);
+    QCOMPARE(reply.value().value(QStringLiteral("desktops")).toStringList(), client->desktopIds());
 
     client->move(QPoint(10, 20));
     reply = getWindowInfo(client->internalId());
@@ -269,7 +268,7 @@ void TestDbusInterface::testGetWindowInfoX11Client()
     QCOMPARE(windowData.value(QStringLiteral("y")).toInt(), client->y());
     QCOMPARE(windowData.value(QStringLiteral("width")).toInt(), client->width());
     QCOMPARE(windowData.value(QStringLiteral("height")).toInt(), client->height());
-    QCOMPARE(windowData.value(QStringLiteral("x11DesktopNumber")).toInt(), 1);
+    QCOMPARE(windowData.value(QStringLiteral("desktops")).toStringList(), client->desktopIds());
     QCOMPARE(windowData.value(QStringLiteral("minimized")).toBool(), false);
     QCOMPARE(windowData.value(QStringLiteral("shaded")).toBool(), false);
     QCOMPARE(windowData.value(QStringLiteral("fullscreen")).toBool(), false);

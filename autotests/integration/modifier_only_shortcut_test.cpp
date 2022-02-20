@@ -11,7 +11,6 @@
 #include "input.h"
 #include "keyboard_input.h"
 #include "platform.h"
-#include "screens.h"
 #include "wayland_server.h"
 #include "workspace.h"
 
@@ -95,7 +94,7 @@ void ModifierOnlyShortcutTest::initTestCase()
 
 void ModifierOnlyShortcutTest::init()
 {
-    screens()->setCurrent(0);
+    workspace()->setActiveOutput(QPoint(640, 512));
     KWin::Cursors::self()->mouse()->setPos(QPoint(640, 512));
 }
 

@@ -7,11 +7,14 @@
 
 #include "decorationitem.h"
 #include "abstract_client.h"
+#include "abstract_output.h"
 #include "composite.h"
 #include "decorations/decoratedclient.h"
 #include "deleted.h"
 #include "scene.h"
-#include "utils.h"
+#include "utils/common.h"
+
+#include <cmath>
 
 #include <KDecoration2/Decoration>
 #include <KDecoration2/DecoratedClient>
@@ -28,8 +31,6 @@ DecorationRenderer::DecorationRenderer(Decoration::DecoratedClientImpl *client)
     connect(client->decoration(), &KDecoration2::Decoration::damaged,
             this, &DecorationRenderer::addDamage);
 
-    connect(client->client(), &AbstractClient::screenScaleChanged,
-            this, &DecorationRenderer::invalidate);
     connect(client->decoration(), &KDecoration2::Decoration::bordersChanged,
             this, &DecorationRenderer::invalidate);
     connect(client->decoratedClient(), &KDecoration2::DecoratedClient::sizeChanged,
@@ -45,7 +46,9 @@ Decoration::DecoratedClientImpl *DecorationRenderer::client() const
 
 void DecorationRenderer::invalidate()
 {
-    addDamage(m_client->client()->rect());
+    if (m_client) {
+        addDamage(m_client->client()->rect());
+    }
     m_imageSizesDirty = true;
 }
 
@@ -65,10 +68,28 @@ void DecorationRenderer::resetDamage()
     m_damage = QRegion();
 }
 
+qreal DecorationRenderer::effectiveDevicePixelRatio() const
+{
+    // QPainter won't let paint with a device pixel ratio less than 1.
+    return std::max(qreal(1.0), devicePixelRatio());
+}
+
+qreal DecorationRenderer::devicePixelRatio() const
+{
+    return m_devicePixelRatio;
+}
+
+void DecorationRenderer::setDevicePixelRatio(qreal dpr)
+{
+    if (m_devicePixelRatio != dpr) {
+        m_devicePixelRatio = dpr;
+        invalidate();
+    }
+}
+
 QImage DecorationRenderer::renderToImage(const QRect &geo)
 {
     Q_ASSERT(m_client);
-    auto dpr = client()->client()->screenScale();
 
     // Guess the pixel format of the X pixmap into which the QImage will be copied.
     QImage::Format format;
@@ -87,12 +108,12 @@ QImage DecorationRenderer::renderToImage(const QRect &geo)
         break;
     };
 
-    QImage image(geo.width() * dpr, geo.height() * dpr, format);
-    image.setDevicePixelRatio(dpr);
+    QImage image(geo.width() * m_devicePixelRatio, geo.height() * m_devicePixelRatio, format);
+    image.setDevicePixelRatio(m_devicePixelRatio);
     image.fill(Qt::transparent);
     QPainter p(&image);
     p.setRenderHint(QPainter::Antialiasing);
-    p.setWindow(QRect(geo.topLeft(), geo.size() * qPainterEffectiveDevicePixelRatio(&p)));
+    p.setWindow(QRect(geo.topLeft(), geo.size() * effectiveDevicePixelRatio()));
     p.setClipRect(geo);
     renderToPainter(&p, geo);
     return image;
@@ -103,27 +124,27 @@ void DecorationRenderer::renderToPainter(QPainter *painter, const QRect &rect)
     client()->decoration()->paint(painter, rect);
 }
 
-DecorationItem::DecorationItem(KDecoration2::Decoration *decoration, Scene::Window *window, Item *parent)
-    : Item(window, parent)
+DecorationItem::DecorationItem(KDecoration2::Decoration *decoration, AbstractClient *window, Item *parent)
+    : Item(parent)
+    , m_window(window)
 {
-    AbstractClient *client = qobject_cast<AbstractClient *>(window->window());
-    m_renderer.reset(Compositor::self()->scene()->createDecorationRenderer(client->decoratedClient()));
+    m_renderer.reset(Compositor::self()->scene()->createDecorationRenderer(window->decoratedClient()));
 
-    connect(client, &Toplevel::frameGeometryChanged,
+    connect(window, &Toplevel::frameGeometryChanged,
             this, &DecorationItem::handleFrameGeometryChanged);
+    connect(window, &Toplevel::windowClosed,
+            this, &DecorationItem::handleWindowClosed);
+    connect(window, &Toplevel::screenChanged,
+            this, &DecorationItem::handleOutputChanged);
 
-    connect(client, &Toplevel::screenScaleChanged,
-            this, &DecorationItem::discardQuads);
     connect(decoration, &KDecoration2::Decoration::bordersChanged,
             this, &DecorationItem::discardQuads);
 
     connect(renderer(), &DecorationRenderer::damaged,
             this, &DecorationItem::scheduleRepaint);
 
-    // If the decoration is about to be destroyed, render the decoration for the last time.
-    connect(client, &Toplevel::markedAsZombie, this, &DecorationItem::preprocess);
-
-    setSize(client->size());
+    setSize(window->size());
+    handleOutputChanged();
 }
 
 void DecorationItem::preprocess()
@@ -135,9 +156,41 @@ void DecorationItem::preprocess()
     }
 }
 
+void DecorationItem::handleOutputChanged()
+{
+    if (m_output) {
+        disconnect(m_output, &AbstractOutput::scaleChanged, this, &DecorationItem::handleOutputScaleChanged);
+    }
+
+    m_output = m_window->output();
+
+    if (m_output) {
+        handleOutputScaleChanged();
+        connect(m_output, &AbstractOutput::scaleChanged, this, &DecorationItem::handleOutputScaleChanged);
+    }
+}
+
+void DecorationItem::handleOutputScaleChanged()
+{
+    const qreal dpr = m_output->scale();
+    if (m_renderer->devicePixelRatio() != dpr) {
+        m_renderer->setDevicePixelRatio(dpr);
+        discardQuads();
+    }
+}
+
 void DecorationItem::handleFrameGeometryChanged()
 {
-    setSize(window()->size());
+    setSize(m_window->size());
+}
+
+void DecorationItem::handleWindowClosed(Toplevel *original, Deleted *deleted)
+{
+    Q_UNUSED(original)
+    m_window = deleted;
+
+    // If the decoration is about to be destroyed, render the decoration for the last time.
+    preprocess();
 }
 
 DecorationRenderer *DecorationItem::renderer() const
@@ -145,83 +198,80 @@ DecorationRenderer *DecorationItem::renderer() const
     return m_renderer.data();
 }
 
+WindowQuad buildQuad(const QRect &partRect, const QPoint &textureOffset,
+                     const qreal devicePixelRatio, bool rotated)
+{
+    const QRect &r = partRect;
+    const int p = DecorationRenderer::TexturePad;
+
+    const int x0 = r.x();
+    const int y0 = r.y();
+    const int x1 = r.x() + r.width();
+    const int y1 = r.y() + r.height();
+
+    WindowQuad quad;
+    if (rotated) {
+        const int u0 = textureOffset.y() + p;
+        const int v0 = textureOffset.x() + p;
+        const int u1 = textureOffset.y() + p + (r.width() * devicePixelRatio);
+        const int v1 = textureOffset.x() + p + (r.height() * devicePixelRatio);
+
+        quad[0] = WindowVertex(x0, y0, v0, u1); // Top-left
+        quad[1] = WindowVertex(x1, y0, v0, u0); // Top-right
+        quad[2] = WindowVertex(x1, y1, v1, u0); // Bottom-right
+        quad[3] = WindowVertex(x0, y1, v1, u1); // Bottom-left
+    } else {
+        const int u0 = textureOffset.x() + p;
+        const int v0 = textureOffset.y() + p;
+        const int u1 = textureOffset.x() + p + (r.width() * devicePixelRatio);
+        const int v1 = textureOffset.y() + p + (r.height() * devicePixelRatio);
+
+        quad[0] = WindowVertex(x0, y0, u0, v0); // Top-left
+        quad[1] = WindowVertex(x1, y0, u1, v0); // Top-right
+        quad[2] = WindowVertex(x1, y1, u1, v1); // Bottom-right
+        quad[3] = WindowVertex(x0, y1, u0, v1); // Bottom-left
+    }
+    return quad;
+}
+
 WindowQuadList DecorationItem::buildQuads() const
 {
-    const Toplevel *toplevel = window()->window();
-    if (toplevel->frameMargins().isNull()) {
+    if (m_window->frameMargins().isNull()) {
         return WindowQuadList();
     }
 
-    QRect rects[4];
+    QRect left, top, right, bottom;
+    const qreal devicePixelRatio = m_renderer->effectiveDevicePixelRatio();
+    const int texturePad = DecorationRenderer::TexturePad;
 
-    if (const AbstractClient *client = qobject_cast<const AbstractClient *>(toplevel)) {
-        client->layoutDecorationRects(rects[0], rects[1], rects[2], rects[3]);
-    } else if (const Deleted *deleted = qobject_cast<const Deleted *>(toplevel)) {
-        deleted->layoutDecorationRects(rects[0], rects[1], rects[2], rects[3]);
+    if (const AbstractClient *client = qobject_cast<const AbstractClient *>(m_window)) {
+        client->layoutDecorationRects(left, top, right, bottom);
+    } else if (const Deleted *deleted = qobject_cast<const Deleted *>(m_window)) {
+        deleted->layoutDecorationRects(left, top, right, bottom);
     }
 
-    const qreal textureScale = toplevel->screenScale();
-    const int padding = 1;
+    const int topHeight = std::ceil(top.height() * devicePixelRatio);
+    const int bottomHeight = std::ceil(bottom.height() * devicePixelRatio);
+    const int leftWidth = std::ceil(left.width() * devicePixelRatio);
 
-    const QPoint topSpritePosition(padding, padding);
-    const QPoint bottomSpritePosition(padding, topSpritePosition.y() + rects[1].height() + 2 * padding);
-    const QPoint leftSpritePosition(bottomSpritePosition.y() + rects[3].height() + 2 * padding, padding);
-    const QPoint rightSpritePosition(leftSpritePosition.x() + rects[0].width() + 2 * padding, padding);
-
-    const QPoint offsets[4] = {
-        QPoint(-rects[0].x(), -rects[0].y()) + leftSpritePosition,
-        QPoint(-rects[1].x(), -rects[1].y()) + topSpritePosition,
-        QPoint(-rects[2].x(), -rects[2].y()) + rightSpritePosition,
-        QPoint(-rects[3].x(), -rects[3].y()) + bottomSpritePosition,
-    };
-
-    const Qt::Orientation orientations[4] = {
-        Qt::Vertical,   // Left
-        Qt::Horizontal, // Top
-        Qt::Vertical,   // Right
-        Qt::Horizontal, // Bottom
-    };
-
-    const QRegion shape = QRegion(toplevel->rect()) - toplevel->transparentRect();
+    const QPoint topPosition(0, 0);
+    const QPoint bottomPosition(0, topPosition.y() + topHeight + (2 * texturePad));
+    const QPoint leftPosition(0, bottomPosition.y() + bottomHeight + (2 * texturePad));
+    const QPoint rightPosition(0, leftPosition.y() + leftWidth + (2 * texturePad));
 
     WindowQuadList list;
-    list.reserve(shape.rectCount());
-
-    for (int i = 0; i < 4; i++) {
-        const QRegion intersectedRegion = (shape & rects[i]);
-        for (const QRect &r : intersectedRegion) {
-            if (!r.isValid()) {
-                continue;
-            }
-
-            const int x0 = r.x();
-            const int y0 = r.y();
-            const int x1 = r.x() + r.width();
-            const int y1 = r.y() + r.height();
-
-            const int u0 = (x0 + offsets[i].x()) * textureScale;
-            const int v0 = (y0 + offsets[i].y()) * textureScale;
-            const int u1 = (x1 + offsets[i].x()) * textureScale;
-            const int v1 = (y1 + offsets[i].y()) * textureScale;
-
-            WindowQuad quad;
-
-            if (orientations[i] == Qt::Vertical) {
-                quad[0] = WindowVertex(x0, y0, v0, u0); // Top-left
-                quad[1] = WindowVertex(x1, y0, v0, u1); // Top-right
-                quad[2] = WindowVertex(x1, y1, v1, u1); // Bottom-right
-                quad[3] = WindowVertex(x0, y1, v1, u0); // Bottom-left
-            } else {
-                quad[0] = WindowVertex(x0, y0, u0, v0); // Top-left
-                quad[1] = WindowVertex(x1, y0, u1, v0); // Top-right
-                quad[2] = WindowVertex(x1, y1, u1, v1); // Bottom-right
-                quad[3] = WindowVertex(x0, y1, u0, v1); // Bottom-left
-            }
-
-            list.append(quad);
-        }
+    if (left.isValid()) {
+        list.append(buildQuad(left, leftPosition, devicePixelRatio, true));
     }
-
+    if (top.isValid()) {
+        list.append(buildQuad(top, topPosition, devicePixelRatio, false));
+    }
+    if (right.isValid()) {
+        list.append(buildQuad(right, rightPosition, devicePixelRatio, true));
+    }
+    if (bottom.isValid()) {
+        list.append(buildQuad(bottom, bottomPosition, devicePixelRatio, false));
+    }
     return list;
 }
 

@@ -17,7 +17,6 @@
 #include <QStack>
 
 #include <KWaylandServer/blur_interface.h>
-#include <KWaylandServer/utils.h>
 
 namespace KWin
 {
@@ -59,6 +58,7 @@ public Q_SLOTS:
     void slotWindowDeleted(KWin::EffectWindow *w);
     void slotPropertyNotify(KWin::EffectWindow *w, long atom);
     void slotScreenGeometryChanged();
+    void setupDecorationConnections(EffectWindow *w);
 
 private:
     QRect expand(const QRect &rect) const;
@@ -68,6 +68,7 @@ private:
     void initBlurStrengthValues();
     void updateTexture();
     QRegion blurRegion(const EffectWindow *w) const;
+    QRegion decorationBlurRegion(const EffectWindow *w) const;
     bool shouldBlur(const EffectWindow *w, int mask, const WindowPaintData &data) const;
     void updateBlurRegion(EffectWindow *w) const;
     void doBlur(const QRegion &shape, const QRect &screen, const float opacity, const QMatrix4x4 &screenProjection, bool isDock, QRect windowRect);
@@ -75,21 +76,22 @@ private:
     void uploadGeometry(GLVertexBuffer *vbo, const QRegion &blurRegion, const QRegion &windowRegion);
     void generateNoiseTexture();
 
-    void upscaleRenderToScreen(GLVertexBuffer *vbo, int vboStart, int blurRectCount, QMatrix4x4 screenProjection, QPoint windowPosition);
+    void upscaleRenderToScreen(GLVertexBuffer *vbo, int vboStart, int blurRectCount, const QMatrix4x4 &screenProjection, QPoint windowPosition);
+    void applyNoise(GLVertexBuffer *vbo, int vboStart, int blurRectCount, const QMatrix4x4 &screenProjection, QPoint windowPosition);
     void downSampleTexture(GLVertexBuffer *vbo, int blurRectCount);
     void upSampleTexture(GLVertexBuffer *vbo, int blurRectCount);
-    void copyScreenSampleTexture(GLVertexBuffer *vbo, int blurRectCount, QRegion blurShape, QMatrix4x4 screenProjection);
+    void copyScreenSampleTexture(GLVertexBuffer *vbo, int blurRectCount, QRegion blurShape, const QMatrix4x4 &screenProjection);
 
 private:
     BlurShader *m_shader;
     QVector <GLRenderTarget*> m_renderTargets;
-    QVector <GLTexture> m_renderTextures;
+    QVector<GLTexture *> m_renderTextures;
     QStack <GLRenderTarget*> m_renderTargetStack;
 
     QScopedPointer<GLTexture> m_noiseTexture;
 
     bool m_renderTargetsValid;
-    long net_wm_blur_region;
+    long net_wm_blur_region = 0;
     QRegion m_paintedArea; // keeps track of all painted areas (from bottom to top)
     QRegion m_currentBlur; // keeps track of the currently blured area of the windows(from bottom to top)
 
@@ -115,7 +117,9 @@ private:
     QVector <BlurValuesStruct> blurStrengthValues;
 
     QMap <EffectWindow*, QMetaObject::Connection> windowBlurChangedConnections;
-    KWaylandServer::ScopedGlobalPointer<KWaylandServer::BlurManagerInterface> m_blurManager;
+
+    static KWaylandServer::BlurManagerInterface *s_blurManager;
+    static QTimer *s_blurManagerRemoveTimer;
 };
 
 inline

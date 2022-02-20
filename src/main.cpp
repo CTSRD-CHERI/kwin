@@ -18,14 +18,15 @@
 #include "composite.h"
 #include "cursor.h"
 #include "input.h"
+#include "inputmethod.h"
 #include "options.h"
 #include "pluginmanager.h"
 #include "screens.h"
 #include "screenlockerwatcher.h"
 #include "sm.h"
+#include "utils/xcbutils.h"
 #include "workspace.h"
 #include "x11eventfilter.h"
-#include "xcbutils.h"
 
 #include <kwineffects.h>
 
@@ -33,9 +34,7 @@
 #include <KAboutData>
 #include <KLocalizedString>
 #include <KPluginMetaData>
-#if HAVE_WAYLAND
 #include <KWaylandServer/surface_interface.h>
-#endif
 // Qt
 #include <qplatformdefs.h>
 #include <QCommandLineParser>
@@ -103,9 +102,7 @@ Application::Application(Application::OperationMode mode, int &argc, char **argv
 {
     qRegisterMetaType<Options::WindowOperation>("Options::WindowOperation");
     qRegisterMetaType<KWin::EffectWindow*>();
-#if HAVE_WAYLAND
     qRegisterMetaType<KWaylandServer::SurfaceInterface *>("KWaylandServer::SurfaceInterface *");
-#endif
     qRegisterMetaType<KSharedConfigPtr>();
     qRegisterMetaType<std::chrono::nanoseconds>();
 }
@@ -324,6 +321,11 @@ void Application::createColorManager()
 #endif
 }
 
+void Application::createInputMethod()
+{
+    InputMethod::create(this);
+}
+
 void Application::installNativeX11EventFilter()
 {
     installNativeEventFilter(m_eventFilter.data());
@@ -332,6 +334,11 @@ void Application::installNativeX11EventFilter()
 void Application::removeNativeX11EventFilter()
 {
     removeNativeEventFilter(m_eventFilter.data());
+}
+
+void Application::destroyInput()
+{
+    delete InputRedirection::self();
 }
 
 void Application::destroyWorkspace()
@@ -354,6 +361,11 @@ void Application::destroyColorManager()
 #ifdef KWIN_BUILD_CMS
     delete ColorManager::self();
 #endif
+}
+
+void Application::destroyInputMethod()
+{
+    delete InputMethod::self();
 }
 
 void Application::registerEventFilter(X11EventFilter *filter)
@@ -567,22 +579,6 @@ bool XcbEventFilter::nativeEventFilter(const QByteArray &eventType, void *messag
     return false;
 }
 
-static bool s_useLibinput = false;
-
-void Application::setUseLibinput(bool use)
-{
-#if !HAVE_LIBINPUT
-    if (use)
-        qFatal("Attempted to enabled libinput!");
-#endif
-    s_useLibinput = use;
-}
-
-bool Application::usesLibinput()
-{
-    return s_useLibinput;
-}
-
 QProcessEnvironment Application::processStartupEnvironment() const
 {
     return QProcessEnvironment::systemEnvironment();
@@ -591,21 +587,13 @@ QProcessEnvironment Application::processStartupEnvironment() const
 void Application::initPlatform(const KPluginMetaData &plugin)
 {
     Q_ASSERT(!m_platform);
-    m_platform = qobject_cast<Platform *>(plugin.instantiate());
+    QPluginLoader loader(plugin.fileName());
+    m_platform = qobject_cast<Platform *>(loader.instance());
     if (m_platform) {
         m_platform->setParent(this);
-        // check whether it needs libinput
-        const QJsonObject &metaData = plugin.rawData();
-        auto it = metaData.find(QStringLiteral("input"));
-        if (it != metaData.end()) {
-            if ((*it).isBool()) {
-                if (!(*it).toBool()) {
-                    qCDebug(KWIN_CORE) << "Platform does not support input, enforcing libinput support";
-                    setUseLibinput(true);
-                }
-            }
-        }
         Q_EMIT platformCreated();
+    } else {
+        qCWarning(KWIN_CORE) << "Could not create plugin" << plugin.name() << "error:" << loader.errorString();
     }
 }
 

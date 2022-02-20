@@ -100,11 +100,6 @@ void AbstractOutput::setEnabled(bool enable)
     Q_UNUSED(enable)
 }
 
-void AbstractOutput::applyChanges(const KWaylandServer::OutputChangeSet *changeSet)
-{
-    Q_UNUSED(changeSet)
-}
-
 bool AbstractOutput::isInternal() const
 {
     return false;
@@ -146,11 +141,6 @@ QString AbstractOutput::serialNumber() const
     return QString();
 }
 
-RenderLoop *AbstractOutput::renderLoop() const
-{
-    return nullptr;
-}
-
 void AbstractOutput::inhibitDirectScanout()
 {
     m_directScanoutCount++;
@@ -169,6 +159,11 @@ std::chrono::milliseconds AbstractOutput::dimAnimationTime()
 {
     // See kscreen.kcfg
     return std::chrono::milliseconds (KSharedConfig::openConfig()->group("Effect-Kscreen").readEntry("Duration", 250));
+}
+
+bool AbstractOutput::usesSoftwareCursor() const
+{
+    return true;
 }
 
 } // namespace KWin

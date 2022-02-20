@@ -11,6 +11,8 @@
 
 #include "selection.h"
 
+#include <memory>
+
 namespace KWaylandServer
 {
 class AbstractDataSource;
@@ -20,6 +22,7 @@ namespace KWin
 {
 namespace Xwl
 {
+class XwlDataSource;
 
 /**
  * Represents the X clipboard, which is on Wayland side just called
@@ -46,7 +49,7 @@ private:
     void checkWlSource();
 
     /**
-     * Returns of dsi is managed by our data bridge
+     * Returns if dsi is managed by our data bridge
      */
     bool ownsSelection(KWaylandServer::AbstractDataSource *dsi) const;
 
@@ -54,6 +57,7 @@ private:
 
     Q_DISABLE_COPY(Clipboard)
     bool m_waitingForTargets = false;
+    std::unique_ptr<XwlDataSource> m_selectionSource;
 };
 
 } // namespace Xwl

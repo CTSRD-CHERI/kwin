@@ -18,10 +18,6 @@
 
 namespace KWin
 {
-
-#if !QT_CONFIG(opengl)
-// class GLPlatform;
-#else
 // forward declare method
 void cleanupGL();
 
@@ -76,6 +72,11 @@ enum GLFeature {
      * - GL_CLAMP_TO_BORDER
      */
     LimitedNPOT,
+
+    /**
+     * Set if the extension GL_MESA_pack_invert is present
+     */
+    PackInvert,
 };
 
 enum Driver {
@@ -448,6 +449,7 @@ private:
     bool m_limitedGLSL: 1;
     bool m_textureNPOT: 1;
     bool m_limitedNPOT: 1;
+    bool m_packInvert: 1;
     bool m_virtualMachine: 1;
     bool m_preferBufferSubData: 1;
     OpenGLPlatformInterface m_platformInterface;
@@ -462,7 +464,6 @@ inline GLPlatform *GLPlatform::instance()
 
     return s_platform;
 }
-#endif
 
 } // namespace KWin
 

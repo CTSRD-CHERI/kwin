@@ -13,20 +13,18 @@
 #include "effects.h"
 #include "deleted.h"
 #include "surfaceitem_x11.h"
-#include "utils.h"
-#include "xcbutils.h"
+#include "utils/common.h"
 
-#include <QTimer>
 #include <QDebug>
+#include <QTimer>
+#include <QWidget>
 #include <QWindow>
 
 #include <xcb/shape.h>
 
-#if HAVE_WAYLAND
 #include <KWaylandServer/surface_interface.h>
 
 using namespace KWaylandServer;
-#endif
 
 namespace KWin
 {
@@ -62,7 +60,6 @@ Unmanaged::~Unmanaged()
 
 void Unmanaged::associate()
 {
-#if HAVE_WAYLAND
     if (surface()->isMapped()) {
         initialize();
     } else {
@@ -70,9 +67,6 @@ void Unmanaged::associate()
         // the associated surface item has processed the new surface state.
         connect(surface(), &SurfaceInterface::mapped, this, &Unmanaged::initialize, Qt::QueuedConnection);
     }
-#else
-    initialize();
-#endif
 }
 
 void Unmanaged::initialize()
@@ -107,10 +101,10 @@ bool Unmanaged::track(xcb_window_t w)
     m_bufferGeometry = geo.rect();
     m_frameGeometry = geo.rect();
     m_clientGeometry = geo.rect();
-    checkScreen();
+    checkOutput();
     m_visual = attr->visual;
     bit_depth = geo->depth;
-    info = new NETWinInfo(connection(), w, rootWindow(),
+    info = new NETWinInfo(kwinApp()->x11Connection(), w, kwinApp()->x11RootWindow(),
                           NET::WMWindowType | NET::WMPid,
                           NET::WM2Opacity |
                           NET::WM2WindowRole |
@@ -121,7 +115,7 @@ bool Unmanaged::track(xcb_window_t w)
     getWmClientLeader();
     getWmClientMachine();
     if (Xcb::Extensions::self()->isShapeAvailable())
-        xcb_shape_select_input(connection(), w, true);
+        xcb_shape_select_input(kwinApp()->x11Connection(), w, true);
     detectShape(w);
     getWmOpaqueRegion();
     getSkipCloseAnimation();
@@ -136,8 +130,6 @@ bool Unmanaged::track(xcb_window_t w)
 
 void Unmanaged::release(ReleaseReason releaseReason)
 {
-    addWorkspaceRepaint(visibleGeometry());
-    Q_EMIT markedAsZombie();
     Deleted* del = nullptr;
     if (releaseReason != ReleaseReason::KWinShutsDown) {
         del = Deleted::create(this);
@@ -146,7 +138,7 @@ void Unmanaged::release(ReleaseReason releaseReason)
     finishCompositing(releaseReason);
     if (!QWidget::find(window()) && releaseReason != ReleaseReason::Destroyed) { // don't affect our own windows
         if (Xcb::Extensions::self()->isShapeAvailable())
-            xcb_shape_select_input(connection(), window(), false);
+            xcb_shape_select_input(kwinApp()->x11Connection(), window(), false);
         Xcb::selectInput(window(), XCB_EVENT_MASK_NO_EVENT);
     }
     workspace()->removeUnmanaged(this);
@@ -185,11 +177,6 @@ QVector<VirtualDesktop *> Unmanaged::desktops() const
 QPoint Unmanaged::clientPos() const
 {
     return QPoint(0, 0);   // unmanaged windows don't have decorations
-}
-
-QRect Unmanaged::transparentRect() const
-{
-    return QRect(clientPos(), clientSize());
 }
 
 NET::WindowType Unmanaged::windowType(bool direct, int supportedTypes) const

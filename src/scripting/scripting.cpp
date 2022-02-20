@@ -12,15 +12,21 @@
 #include "scripting.h"
 // own
 #include "dbuscall.h"
+#include "desktopbackgrounditem.h"
 #include "scriptingutils.h"
 #include "workspace_wrapper.h"
 #include "screenedgeitem.h"
-#include "scripting_model.h"
 #include "scripting_logging.h"
 #include "thumbnailitem.h"
 
+#include "v2/clientmodel.h"
+#include "v3/clientmodel.h"
+#include "v3/virtualdesktopmodel.h"
+
+#include "input.h"
 #include "options.h"
 #include "screenedge.h"
+#include "virtualdesktops.h"
 #include "workspace.h"
 #include "x11client.h"
 // KDE
@@ -549,7 +555,7 @@ void KWin::DeclarativeScript::run()
 void KWin::DeclarativeScript::createComponent()
 {
     if (m_component->isError()) {
-        qCDebug(KWIN_SCRIPTING) << "Component failed to load: " << m_component->errors();
+        qCWarning(KWIN_SCRIPTING) << "Component failed to load: " << m_component->errors();
     } else {
         if (QObject *object = m_component->create(m_context)) {
             object->setParent(this);
@@ -633,20 +639,38 @@ void KWin::Scripting::init()
     qmlRegisterType<WindowThumbnailItem>("org.kde.kwin", 2, 0, "ThumbnailItem");
     qmlRegisterType<DBusCall>("org.kde.kwin", 2, 0, "DBusCall");
     qmlRegisterType<ScreenEdgeItem>("org.kde.kwin", 2, 0, "ScreenEdgeItem");
-    qmlRegisterType<KWin::ScriptingClientModel::ClientModel>();
-    qmlRegisterType<KWin::ScriptingClientModel::SimpleClientModel>("org.kde.kwin", 2, 0, "ClientModel");
-    qmlRegisterType<KWin::ScriptingClientModel::ClientModelByScreen>("org.kde.kwin", 2, 0, "ClientModelByScreen");
-    qmlRegisterType<KWin::ScriptingClientModel::ClientModelByScreenAndDesktop>("org.kde.kwin", 2, 0, "ClientModelByScreenAndDesktop");
-    qmlRegisterType<KWin::ScriptingClientModel::ClientModelByScreenAndActivity>("org.kde.kwin", 2, 1, "ClientModelByScreenAndActivity");
-    qmlRegisterType<KWin::ScriptingClientModel::ClientFilterModel>("org.kde.kwin", 2, 0, "ClientFilterModel");
+    qmlRegisterType<ScriptingModels::V2::ClientModel>();
+    qmlRegisterType<ScriptingModels::V2::SimpleClientModel>("org.kde.kwin", 2, 0, "ClientModel");
+    qmlRegisterType<ScriptingModels::V2::ClientModelByScreen>("org.kde.kwin", 2, 0, "ClientModelByScreen");
+    qmlRegisterType<ScriptingModels::V2::ClientModelByScreenAndDesktop>("org.kde.kwin", 2, 0, "ClientModelByScreenAndDesktop");
+    qmlRegisterType<ScriptingModels::V2::ClientModelByScreenAndActivity>("org.kde.kwin", 2, 1, "ClientModelByScreenAndActivity");
+    qmlRegisterType<ScriptingModels::V2::ClientFilterModel>("org.kde.kwin", 2, 0, "ClientFilterModel");
+
+    qmlRegisterType<DesktopBackgroundItem>("org.kde.kwin", 3, 0, "DesktopBackgroundItem");
+    qmlRegisterType<WindowThumbnailItem>("org.kde.kwin", 3, 0, "WindowThumbnailItem");
+    qmlRegisterType<DBusCall>("org.kde.kwin", 3, 0, "DBusCall");
+    qmlRegisterType<ScreenEdgeItem>("org.kde.kwin", 3, 0, "ScreenEdgeItem");
+    qmlRegisterType<ScriptingModels::V3::ClientModel>("org.kde.kwin", 3, 0, "ClientModel");
+    qmlRegisterType<ScriptingModels::V3::ClientFilterModel>("org.kde.kwin", 3, 0, "ClientFilterModel");
+    qmlRegisterType<ScriptingModels::V3::VirtualDesktopModel>("org.kde.kwin", 3, 0, "VirtualDesktopModel");
+
+    qmlRegisterSingletonType<DeclarativeScriptWorkspaceWrapper>("org.kde.kwin", 3, 0, "Workspace", [](QQmlEngine *qmlEngine, QJSEngine *jsEngine) {
+        Q_UNUSED(qmlEngine)
+        Q_UNUSED(jsEngine)
+        return new DeclarativeScriptWorkspaceWrapper();
+    });
+    qmlRegisterSingletonInstance("org.kde.kwin", 3, 0, "Options", options);
+
     qmlRegisterType<KWin::AbstractClient>();
+    qmlRegisterType<KWin::VirtualDesktop>();
     qmlRegisterType<KWin::X11Client>();
     qmlRegisterType<QAbstractItemModel>();
 
+    // TODO Plasma 6: Drop context properties.
     m_qmlEngine->rootContext()->setContextProperty(QStringLiteral("workspace"), m_workspaceWrapper);
     m_qmlEngine->rootContext()->setContextProperty(QStringLiteral("options"), options);
-
     m_declarativeScriptSharedContext->setContextProperty(QStringLiteral("workspace"), new DeclarativeScriptWorkspaceWrapper(this));
+
     // QQmlListProperty interfaces only work via properties, rebind them as functions here
     QQmlExpression expr(m_declarativeScriptSharedContext, nullptr, "workspace.clientList = function() { return workspace.clients }");
     expr.evaluate();
@@ -750,7 +774,7 @@ bool KWin::Scripting::isScriptLoaded(const QString &pluginName) const
 KWin::AbstractScript *KWin::Scripting::findScript(const QString &pluginName) const
 {
     QMutexLocker locker(m_scriptsLock.data());
-    Q_FOREACH (AbstractScript *script, scripts) {
+    for (AbstractScript *script : qAsConst(scripts)) {
         if (script->pluginName() == pluginName) {
             return script;
         }
@@ -761,7 +785,7 @@ KWin::AbstractScript *KWin::Scripting::findScript(const QString &pluginName) con
 bool KWin::Scripting::unloadScript(const QString &pluginName)
 {
     QMutexLocker locker(m_scriptsLock.data());
-    Q_FOREACH (AbstractScript *script, scripts) {
+    for (AbstractScript *script : qAsConst(scripts)) {
         if (script->pluginName() == pluginName) {
             script->deleteLater();
             return true;

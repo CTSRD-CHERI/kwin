@@ -10,18 +10,18 @@
 */
 #include "xdgshellclient.h"
 #include "abstract_wayland_output.h"
+#if KWIN_BUILD_ACTIVITIES
+#include "activities.h"
+#endif
 #include "decorations/decorationbridge.h"
 #include "deleted.h"
 #include "platform.h"
 #include "screenedge.h"
-#include "screens.h"
-#include "subsurfacemonitor.h"
+#include "touch_input.h"
+#include "utils/subsurfacemonitor.h"
+#include "virtualdesktops.h"
 #include "wayland_server.h"
 #include "workspace.h"
-#if KWIN_BUILD_ACTIVITIES
-#include "activities.h"
-#endif
-#include "touch_input.h"
 
 #include <KDecoration2/DecoratedClient>
 #include <KDecoration2/Decoration>
@@ -44,6 +44,7 @@ XdgSurfaceClient::XdgSurfaceClient(XdgSurfaceInterface *shellSurface)
     , m_shellSurface(shellSurface)
     , m_configureTimer(new QTimer(this))
 {
+    setupPlasmaShellIntegration();
     connect(shellSurface, &XdgSurfaceInterface::configureAcknowledged,
             this, &XdgSurfaceClient::handleConfigureAcknowledged);
     connect(shellSurface, &XdgSurfaceInterface::resetOccurred,
@@ -54,6 +55,8 @@ XdgSurfaceClient::XdgSurfaceClient(XdgSurfaceInterface *shellSurface)
     connect(shellSurface->surface(), &SurfaceInterface::mapped,
             this, &XdgSurfaceClient::setReadyForPainting);
 #endif
+    connect(shellSurface, &XdgSurfaceInterface::aboutToBeDestroyed,
+            this, &XdgSurfaceClient::destroyClient);
     connect(shellSurface->surface(), &SurfaceInterface::aboutToBeDestroyed,
             this, &XdgSurfaceClient::destroyClient);
 
@@ -86,18 +89,18 @@ XdgSurfaceClient::XdgSurfaceClient(XdgSurfaceInterface *shellSurface)
 
     m_configureTimer->setSingleShot(true);
     connect(m_configureTimer, &QTimer::timeout, this, &XdgSurfaceClient::sendConfigure);
-
-    // Unfortunately, AbstractClient::checkWorkspacePosition() operates on the geometry restore
-    // so we need to initialize it with some reasonable value; otherwise bad things will happen
-    // when we want to decorate the client or move the client to another screen. This is a hack.
-
-    connect(this, &XdgSurfaceClient::frameGeometryChanged,
-            this, &XdgSurfaceClient::updateGeometryRestoreHack);
 }
 
 XdgSurfaceClient::~XdgSurfaceClient()
 {
     qDeleteAll(m_configureEvents);
+}
+
+NET::WindowType XdgSurfaceClient::windowType(bool direct, int supported_types) const
+{
+    Q_UNUSED(direct)
+    Q_UNUSED(supported_types)
+    return m_windowType;
 }
 
 QRect XdgSurfaceClient::inputGeometry() const
@@ -127,20 +130,23 @@ void XdgSurfaceClient::scheduleConfigure()
 void XdgSurfaceClient::sendConfigure()
 {
     XdgSurfaceConfigure *configureEvent = sendRoleConfigure();
-    configureEvent->flags = m_configureFlags;
 
+    // The configure event inherits configure flags from the previous event.
+    if (!m_configureEvents.isEmpty()) {
+        const XdgSurfaceConfigure *previousEvent = m_configureEvents.constLast();
+        configureEvent->flags = previousEvent->flags;
+    }
+
+    configureEvent->gravity = m_nextGravity;
+    configureEvent->flags |= m_configureFlags;
     m_configureFlags = {};
+
     m_configureEvents.append(configureEvent);
 }
 
 void XdgSurfaceClient::handleConfigureAcknowledged(quint32 serial)
 {
-    while (!m_configureEvents.isEmpty()) {
-        if (serial < m_configureEvents.first()->serial) {
-            break;
-        }
-        m_lastAcknowledgedConfigure.reset(m_configureEvents.takeFirst());
-    }
+    m_lastAcknowledgedConfigureSerial = serial;
 }
 
 void XdgSurfaceClient::handleCommit()
@@ -149,6 +155,17 @@ void XdgSurfaceClient::handleCommit()
         return;
     }
 
+    if (m_lastAcknowledgedConfigureSerial.has_value()) {
+        const quint32 serial = m_lastAcknowledgedConfigureSerial.value();
+        while (!m_configureEvents.isEmpty()) {
+            if (serial < m_configureEvents.constFirst()->serial) {
+                break;
+            }
+            m_lastAcknowledgedConfigure.reset(m_configureEvents.takeFirst());
+        }
+    }
+
+    handleRolePrecommit();
     if (haveNextWindowGeometry()) {
         handleNextWindowGeometry();
         resetHaveNextWindowGeometry();
@@ -156,9 +173,14 @@ void XdgSurfaceClient::handleCommit()
 
     handleRoleCommit();
     m_lastAcknowledgedConfigure.reset();
+    m_lastAcknowledgedConfigureSerial.reset();
 
     setReadyForPainting();
     updateDepth();
+}
+
+void XdgSurfaceClient::handleRolePrecommit()
+{
 }
 
 void XdgSurfaceClient::handleRoleCommit()
@@ -184,6 +206,37 @@ void XdgSurfaceClient::maybeUpdateMoveResizeGeometry(const QRect &rect)
     setMoveResizeGeometry(rect);
 }
 
+static QRect gravitateGeometry(const QRect &rect, const QRect &bounds, Gravity gravity)
+{
+    QRect geometry = rect;
+
+    switch (gravity) {
+    case Gravity::TopLeft:
+        geometry.moveRight(bounds.right());
+        geometry.moveBottom(bounds.bottom());
+        break;
+    case Gravity::Top:
+    case Gravity::TopRight:
+        geometry.moveLeft(bounds.left());
+        geometry.moveBottom(bounds.bottom());
+        break;
+    case Gravity::Right:
+    case Gravity::BottomRight:
+    case Gravity::Bottom:
+    case Gravity::None:
+        geometry.moveLeft(bounds.left());
+        geometry.moveTop(bounds.top());
+        break;
+    case Gravity::BottomLeft:
+    case Gravity::Left:
+        geometry.moveRight(bounds.right());
+        geometry.moveTop(bounds.top());
+        break;
+    }
+
+    return geometry;
+}
+
 void XdgSurfaceClient::handleNextWindowGeometry()
 {
     const QRect boundingGeometry = surface()->boundingRect();
@@ -206,32 +259,19 @@ void XdgSurfaceClient::handleNextWindowGeometry()
     }
 
     QRect frameGeometry(pos(), clientSizeToFrameSize(m_windowGeometry.size()));
-
-    // We're not done yet. The xdg-shell spec allows clients to attach buffers smaller than
-    // we asked. Normally, this is not a big deal, but when the client is being interactively
-    // resized, it may cause the window contents to bounce. In order to counter this, we have
-    // to "gravitate" the new geometry according to the current move-resize pointer mode so
-    // the opposite window corner stays still.
-
-    if (isInteractiveMoveResize()) {
-        frameGeometry = adjustMoveResizeGeometry(frameGeometry);
-    } else {
-        if (const XdgSurfaceConfigure *configureEvent = lastAcknowledgedConfigure()) {
-            if (configureEvent->flags & XdgSurfaceConfigure::ConfigurePosition) {
-                frameGeometry.moveTopLeft(configureEvent->position);
-            }
+    if (const XdgSurfaceConfigure *configureEvent = lastAcknowledgedConfigure()) {
+        if (configureEvent->flags & XdgSurfaceConfigure::ConfigurePosition) {
+            frameGeometry = gravitateGeometry(frameGeometry, configureEvent->bounds, configureEvent->gravity);
         }
+    }
 
+    if (!isInteractiveMoveResize()) {
         // Both the compositor and the client can change the window geometry. If the client
         // sets a new window geometry, the compositor's move-resize geometry will be invalid.
         maybeUpdateMoveResizeGeometry(frameGeometry);
     }
 
     updateGeometry(frameGeometry);
-
-    if (isInteractiveResize()) {
-        performInteractiveMoveResize();
-    }
 }
 
 bool XdgSurfaceClient::haveNextWindowGeometry() const
@@ -247,37 +287,6 @@ void XdgSurfaceClient::setHaveNextWindowGeometry()
 void XdgSurfaceClient::resetHaveNextWindowGeometry()
 {
     m_haveNextWindowGeometry = false;
-}
-
-QRect XdgSurfaceClient::adjustMoveResizeGeometry(const QRect &rect) const
-{
-    QRect geometry = rect;
-
-    switch (interactiveMoveResizePointerMode()) {
-    case PositionTopLeft:
-        geometry.moveRight(moveResizeGeometry().right());
-        geometry.moveBottom(moveResizeGeometry().bottom());
-        break;
-    case PositionTop:
-    case PositionTopRight:
-        geometry.moveLeft(moveResizeGeometry().left());
-        geometry.moveBottom(moveResizeGeometry().bottom());
-        break;
-    case PositionRight:
-    case PositionBottomRight:
-    case PositionBottom:
-    case PositionCenter:
-        geometry.moveLeft(moveResizeGeometry().left());
-        geometry.moveTop(moveResizeGeometry().top());
-        break;
-    case PositionBottomLeft:
-    case PositionLeft:
-        geometry.moveRight(moveResizeGeometry().right());
-        geometry.moveTop(moveResizeGeometry().top());
-        break;
-    }
-
-    return geometry;
 }
 
 void XdgSurfaceClient::moveResizeInternal(const QRect &rect, MoveResizeMode mode)
@@ -305,23 +314,6 @@ void XdgSurfaceClient::moveResizeInternal(const QRect &rect, MoveResizeMode mode
     }
 }
 
-/**
- * \internal
- * \todo We have to check the current frame geometry in checkWorskpacePosition().
- *
- * Sets the geometry restore to the first valid frame geometry. This is a HACK!
- *
- * Unfortunately, AbstractClient::checkWorkspacePosition() operates on the geometry restore
- * rather than the current frame geometry, so we have to ensure that it's initialized with
- * some reasonable value even if the client is not maximized or quick tiled.
- */
-void XdgSurfaceClient::updateGeometryRestoreHack()
-{
-    if (geometryRestore().isEmpty() && !frameGeometry().isEmpty()) {
-        setGeometryRestore(frameGeometry());
-    }
-}
-
 QRect XdgSurfaceClient::frameRectToBufferRect(const QRect &rect) const
 {
     const int left = rect.left() + borderLeft() - m_windowGeometry.left();
@@ -342,29 +334,220 @@ void XdgSurfaceClient::destroyClient()
     Q_EMIT windowClosed(this, deleted);
     StackingUpdatesBlocker blocker(workspace());
     RuleBook::self()->discardUsed(this, true);
-    destroyDecoration();
+    setDecoration(nullptr);
     cleanGrouping();
     waylandServer()->removeClient(this);
     deleted->unrefWindow();
     delete this;
 }
 
+void XdgSurfaceClient::updateClientArea()
+{
+    if (hasStrut()) {
+        workspace()->updateClientArea();
+    }
+}
+
+void XdgSurfaceClient::updateShowOnScreenEdge()
+{
+    if (!ScreenEdges::self()) {
+        return;
+    }
+    if (!readyForPainting() || !m_plasmaShellSurface ||
+            m_plasmaShellSurface->role() != PlasmaShellSurfaceInterface::Role::Panel) {
+        ScreenEdges::self()->reserve(this, ElectricNone);
+        return;
+    }
+    const PlasmaShellSurfaceInterface::PanelBehavior panelBehavior = m_plasmaShellSurface->panelBehavior();
+    if ((panelBehavior == PlasmaShellSurfaceInterface::PanelBehavior::AutoHide && isHidden()) ||
+            panelBehavior == PlasmaShellSurfaceInterface::PanelBehavior::WindowsCanCover) {
+        // Screen edge API requires an edge, thus we need to figure out which edge the window borders.
+        const QRect clientGeometry = frameGeometry();
+        Qt::Edges edges;
+
+        const auto outputs = kwinApp()->platform()->enabledOutputs();
+        for (const AbstractOutput *output : outputs) {
+            const QRect screenGeometry = output->geometry();
+            if (screenGeometry.left() == clientGeometry.left()) {
+                edges |= Qt::LeftEdge;
+            }
+            if (screenGeometry.right() == clientGeometry.right()) {
+                edges |= Qt::RightEdge;
+            }
+            if (screenGeometry.top() == clientGeometry.top()) {
+                edges |= Qt::TopEdge;
+            }
+            if (screenGeometry.bottom() == clientGeometry.bottom()) {
+                edges |= Qt::BottomEdge;
+            }
+        }
+
+        // A panel might border multiple screen edges. E.g. a horizontal panel at the bottom will
+        // also border the left and right edge. Let's remove such cases.
+        if (edges & Qt::LeftEdge && edges & Qt::RightEdge) {
+            edges = edges & (~(Qt::LeftEdge | Qt::RightEdge));
+        }
+        if (edges & Qt::TopEdge && edges & Qt::BottomEdge) {
+            edges = edges & (~(Qt::TopEdge | Qt::BottomEdge));
+        }
+
+        // It's still possible that a panel borders two edges, e.g. bottom and left
+        // in that case the one which is sharing more with the edge wins.
+        auto check = [clientGeometry](Qt::Edges edges, Qt::Edge horizontal, Qt::Edge vertical) {
+            if (edges & horizontal && edges & vertical) {
+                if (clientGeometry.width() >= clientGeometry.height()) {
+                    return edges & ~horizontal;
+                } else {
+                    return edges & ~vertical;
+                }
+            }
+            return edges;
+        };
+        edges = check(edges, Qt::LeftEdge, Qt::TopEdge);
+        edges = check(edges, Qt::LeftEdge, Qt::BottomEdge);
+        edges = check(edges, Qt::RightEdge, Qt::TopEdge);
+        edges = check(edges, Qt::RightEdge, Qt::BottomEdge);
+
+        ElectricBorder border = ElectricNone;
+        if (edges & Qt::LeftEdge) {
+            border = ElectricLeft;
+        }
+        if (edges & Qt::RightEdge) {
+            border = ElectricRight;
+        }
+        if (edges & Qt::TopEdge) {
+            border = ElectricTop;
+        }
+        if (edges & Qt::BottomEdge) {
+            border = ElectricBottom;
+        }
+        ScreenEdges::self()->reserve(this, border);
+    } else {
+        ScreenEdges::self()->reserve(this, ElectricNone);
+    }
+}
+
+/**
+ * \todo This whole plasma shell surface thing doesn't seem right. It turns xdg-toplevel into
+ * something completely different! Perhaps plasmashell surfaces need to be implemented via a
+ * proprietary protocol that doesn't piggyback on existing shell surface protocols. It'll lead
+ * to cleaner code and will be technically correct, but I'm not sure whether this is do-able.
+ */
+void XdgSurfaceClient::installPlasmaShellSurface(PlasmaShellSurfaceInterface *shellSurface)
+{
+    m_plasmaShellSurface = shellSurface;
+
+    auto updatePosition = [this, shellSurface] { move(shellSurface->position()); };
+    auto updateRole = [this, shellSurface] {
+        NET::WindowType type = NET::Unknown;
+        switch (shellSurface->role()) {
+        case PlasmaShellSurfaceInterface::Role::Desktop:
+            type = NET::Desktop;
+            break;
+        case PlasmaShellSurfaceInterface::Role::Panel:
+            type = NET::Dock;
+            break;
+        case PlasmaShellSurfaceInterface::Role::OnScreenDisplay:
+            type = NET::OnScreenDisplay;
+            break;
+        case PlasmaShellSurfaceInterface::Role::Notification:
+            type = NET::Notification;
+            break;
+        case PlasmaShellSurfaceInterface::Role::ToolTip:
+            type = NET::Tooltip;
+            break;
+        case PlasmaShellSurfaceInterface::Role::CriticalNotification:
+            type = NET::CriticalNotification;
+            break;
+        case PlasmaShellSurfaceInterface::Role::Normal:
+        default:
+            type = NET::Normal;
+            break;
+        }
+        if (m_windowType == type) {
+            return;
+        }
+        m_windowType = type;
+        switch (m_windowType) {
+        case NET::Desktop:
+        case NET::Dock:
+        case NET::OnScreenDisplay:
+        case NET::Notification:
+        case NET::CriticalNotification:
+        case NET::Tooltip:
+            setOnAllDesktops(true);
+#if KWIN_BUILD_ACTIVITIES
+            setOnAllActivities(true);
+#endif
+            break;
+        default:
+            break;
+        }
+        workspace()->updateClientArea();
+    };
+    connect(shellSurface, &PlasmaShellSurfaceInterface::positionChanged, this, updatePosition);
+    connect(shellSurface, &PlasmaShellSurfaceInterface::roleChanged, this, updateRole);
+    connect(shellSurface, &PlasmaShellSurfaceInterface::panelBehaviorChanged, this, [this] {
+        updateShowOnScreenEdge();
+        workspace()->updateClientArea();
+    });
+    connect(shellSurface, &PlasmaShellSurfaceInterface::panelAutoHideHideRequested, this, [this] {
+        if (m_plasmaShellSurface->panelBehavior() == PlasmaShellSurfaceInterface::PanelBehavior::AutoHide) {
+            hideClient();
+            m_plasmaShellSurface->hideAutoHidingPanel();
+        }
+        updateShowOnScreenEdge();
+    });
+    connect(shellSurface, &PlasmaShellSurfaceInterface::panelAutoHideShowRequested, this, [this] {
+        showClient();
+        ScreenEdges::self()->reserve(this, ElectricNone);
+        m_plasmaShellSurface->showAutoHidingPanel();
+    });
+    connect(shellSurface, &PlasmaShellSurfaceInterface::panelTakesFocusChanged, this, [this] {
+        if (m_plasmaShellSurface->panelTakesFocus()) {
+            workspace()->activateClient(this);
+        }
+    });
+    if (shellSurface->isPositionSet()) {
+        updatePosition();
+    }
+    updateRole();
+    updateShowOnScreenEdge();
+    connect(this, &XdgSurfaceClient::frameGeometryChanged,
+            this, &XdgSurfaceClient::updateShowOnScreenEdge);
+    connect(this, &XdgSurfaceClient::windowShown,
+            this, &XdgSurfaceClient::updateShowOnScreenEdge);
+
+    setSkipTaskbar(shellSurface->skipTaskbar());
+    connect(shellSurface, &PlasmaShellSurfaceInterface::skipTaskbarChanged, this, [this] {
+        setSkipTaskbar(m_plasmaShellSurface->skipTaskbar());
+    });
+
+    setSkipSwitcher(shellSurface->skipSwitcher());
+    connect(shellSurface, &PlasmaShellSurfaceInterface::skipSwitcherChanged, this, [this] {
+        setSkipSwitcher(m_plasmaShellSurface->skipSwitcher());
+    });
+}
+
+void XdgSurfaceClient::setupPlasmaShellIntegration()
+{
+    connect(surface(), &SurfaceInterface::mapped,
+            this, &XdgSurfaceClient::updateShowOnScreenEdge);
+    connect(this, &XdgSurfaceClient::frameGeometryChanged,
+            this, &XdgSurfaceClient::updateClientArea);
+}
+
 XdgToplevelClient::XdgToplevelClient(XdgToplevelInterface *shellSurface)
     : XdgSurfaceClient(shellSurface->xdgSurface())
     , m_shellSurface(shellSurface)
 {
-    setupWindowManagementIntegration();
-    setupPlasmaShellIntegration();
-    setDesktop(VirtualDesktopManager::self()->current());
+    setDesktops({VirtualDesktopManager::self()->currentDesktop()});
 #if KWIN_BUILD_ACTIVITIES
     if (auto a = Activities::self()) {
         setOnActivities({a->current()});
     }
 #endif
-
-    if (waylandServer()->inputMethodConnection() == surface()->client()) {
-        m_windowType = NET::OnScreenDisplay;
-    }
+    move(workspace()->activeOutput()->geometry().center());
 
     connect(shellSurface, &XdgToplevelInterface::windowTitleChanged,
             this, &XdgToplevelClient::handleWindowTitleChanged);
@@ -390,7 +573,7 @@ XdgToplevelClient::XdgToplevelClient(XdgToplevelInterface *shellSurface)
             this, &XdgToplevelClient::handleTransientForChanged);
     connect(shellSurface, &XdgToplevelInterface::initializeRequested,
             this, &XdgToplevelClient::initialize);
-    connect(shellSurface, &XdgToplevelInterface::destroyed,
+    connect(shellSurface, &XdgToplevelInterface::aboutToBeDestroyed,
             this, &XdgToplevelClient::destroyClient);
     connect(shellSurface, &XdgToplevelInterface::maximumSizeChanged,
             this, &XdgToplevelClient::handleMaximumSizeChanged);
@@ -414,13 +597,6 @@ XdgToplevelClient::~XdgToplevelClient()
 XdgToplevelInterface *XdgToplevelClient::shellSurface() const
 {
     return m_shellSurface;
-}
-
-NET::WindowType XdgToplevelClient::windowType(bool direct, int supported_types) const
-{
-    Q_UNUSED(direct)
-    Q_UNUSED(supported_types)
-    return m_windowType;
 }
 
 MaximizeMode XdgToplevelClient::maximizeMode() const
@@ -547,102 +723,34 @@ bool XdgToplevelClient::userCanSetFullScreen() const
 
 bool XdgToplevelClient::userCanSetNoBorder() const
 {
-    if (m_serverDecoration) {
-        switch (m_serverDecoration->mode()) {
-        case ServerSideDecorationManagerInterface::Mode::Server:
-            return !isFullScreen() && !isShade();
-        case ServerSideDecorationManagerInterface::Mode::Client:
-        case ServerSideDecorationManagerInterface::Mode::None:
-            return false;
-        }
-    }
-    if (m_xdgDecoration) {
-        switch (m_xdgDecoration->preferredMode()) {
-        case XdgToplevelDecorationV1Interface::Mode::Server:
-        case XdgToplevelDecorationV1Interface::Mode::Undefined:
-            return Decoration::DecorationBridge::hasPlugin() && !isFullScreen() && !isShade();
-        case XdgToplevelDecorationV1Interface::Mode::Client:
-            return false;
-        }
-    }
-    return false;
+    return (m_serverDecoration || m_xdgDecoration) && !isFullScreen() && !isShade();
 }
 
 bool XdgToplevelClient::noBorder() const
 {
-    if (m_serverDecoration) {
-        switch (m_serverDecoration->mode()) {
-        case ServerSideDecorationManagerInterface::Mode::Server:
-            return m_userNoBorder || isRequestedFullScreen();
-        case ServerSideDecorationManagerInterface::Mode::Client:
-        case ServerSideDecorationManagerInterface::Mode::None:
-            return true;
-        }
-    }
-    if (m_xdgDecoration) {
-        switch (m_xdgDecoration->preferredMode()) {
-        case XdgToplevelDecorationV1Interface::Mode::Server:
-        case XdgToplevelDecorationV1Interface::Mode::Undefined:
-            return !Decoration::DecorationBridge::hasPlugin() || m_userNoBorder || isRequestedFullScreen();
-        case XdgToplevelDecorationV1Interface::Mode::Client:
-            return true;
-        }
-    }
-    return true;
+    return m_userNoBorder;
 }
 
 void XdgToplevelClient::setNoBorder(bool set)
 {
-    if (!userCanSetNoBorder()) {
-        return;
-    }
     set = rules()->checkNoBorder(set);
     if (m_userNoBorder == set) {
         return;
     }
     m_userNoBorder = set;
-    updateDecoration(true, false);
+    configureDecoration();
     updateWindowRules(Rules::NoBorder);
 }
 
-void XdgToplevelClient::updateDecoration(bool check_workspace_pos, bool force)
+void XdgToplevelClient::invalidateDecoration()
 {
-    if (!force && ((!isDecorated() && noBorder()) || (isDecorated() && !noBorder()))) {
-        return;
-    }
-    const QRect oldFrameGeometry = frameGeometry();
-    const QRect oldClientGeometry = clientGeometry();
-    if (force) {
-        destroyDecoration();
-    }
-    if (!noBorder()) {
-        createDecoration(oldFrameGeometry);
-    } else {
-        destroyDecoration();
-    }
-    if (m_serverDecoration && isDecorated()) {
-        m_serverDecoration->setMode(ServerSideDecorationManagerInterface::Mode::Server);
-    }
-    if (m_xdgDecoration) {
-        if (isDecorated() || m_userNoBorder) {
-            m_xdgDecoration->sendConfigure(XdgToplevelDecorationV1Interface::Mode::Server);
-        } else {
-            m_xdgDecoration->sendConfigure(XdgToplevelDecorationV1Interface::Mode::Client);
-        }
-        scheduleConfigure();
-    }
-    updateShadow();
-    if (check_workspace_pos) {
-        const QRect oldGeometryRestore = geometryRestore();
-        setGeometryRestore(frameGeometry());
-        checkWorkspacePosition(oldFrameGeometry, -2, oldClientGeometry);
-        setGeometryRestore(oldGeometryRestore);
-    }
+    clearDecoration();
+    configureDecoration();
 }
 
 bool XdgToplevelClient::supportsWindowRules() const
 {
-    return !m_plasmaShellSurface;
+    return true;
 }
 
 StrutRect XdgToplevelClient::strutRect(StrutArea area) const
@@ -652,7 +760,7 @@ StrutRect XdgToplevelClient::strutRect(StrutArea area) const
     }
 
     const QRect windowRect = frameGeometry();
-    const QRect outputRect = screens()->geometry(screen());
+    const QRect outputRect = output()->geometry();
 
     const bool left = windowRect.left() == outputRect.left();
     const bool right = windowRect.right() == outputRect.right();
@@ -688,7 +796,7 @@ StrutRect XdgToplevelClient::strutRect(StrutArea area) const
 
 bool XdgToplevelClient::hasStrut() const
 {
-    if (!isShown(true)) {
+    if (!isShown()) {
         return false;
     }
     if (!m_plasmaShellSurface) {
@@ -702,16 +810,12 @@ bool XdgToplevelClient::hasStrut() const
 
 void XdgToplevelClient::showOnScreenEdge()
 {
-    if (!m_plasmaShellSurface) {
-        return;
-    }
-
     // ShowOnScreenEdge can be called by an Edge, and hideClient could destroy the Edge
     // Use the singleshot to avoid use-after-free
     QTimer::singleShot(0, this, [this](){
-        hideClient(false);
+        showClient();
         workspace()->raiseClient(this);
-        if (m_plasmaShellSurface->panelBehavior() == PlasmaShellSurfaceInterface::PanelBehavior::AutoHide) {
+        if (m_plasmaShellSurface && m_plasmaShellSurface->panelBehavior() == PlasmaShellSurfaceInterface::PanelBehavior::AutoHide) {
             m_plasmaShellSurface->showAutoHidingPanel();
         }
     });
@@ -727,15 +831,43 @@ void XdgToplevelClient::closeWindow()
 
 XdgSurfaceConfigure *XdgToplevelClient::sendRoleConfigure() const
 {
-    const QSize requestedClientSize = frameSizeToClientSize(moveResizeGeometry().size());
-    const quint32 serial = m_shellSurface->sendConfigure(requestedClientSize, m_requestedStates);
+    QSize framePadding(0, 0);
+    if (m_nextDecoration) {
+        framePadding.setWidth(m_nextDecoration->borderLeft() + m_nextDecoration->borderRight());
+        framePadding.setHeight(m_nextDecoration->borderTop() + m_nextDecoration->borderBottom());
+    }
+
+    QSize nextClientSize = moveResizeGeometry().size();
+    if (!nextClientSize.isEmpty()) {
+        nextClientSize.rwidth() -= framePadding.width();
+        nextClientSize.rheight() -= framePadding.height();
+    }
+
+    if (nextClientSize.isEmpty()) {
+        QSize bounds = workspace()->clientArea(PlacementArea, this, output()).size();
+        bounds.rwidth() -= framePadding.width();
+        bounds.rheight() -= framePadding.height();
+        m_shellSurface->sendConfigureBounds(bounds);
+    }
+
+    const quint32 serial = m_shellSurface->sendConfigure(nextClientSize, m_nextStates);
 
     XdgToplevelConfigure *configureEvent = new XdgToplevelConfigure();
-    configureEvent->position = moveResizeGeometry().topLeft();
-    configureEvent->states = m_requestedStates;
+    configureEvent->bounds = moveResizeGeometry();
+    configureEvent->states = m_nextStates;
+    configureEvent->decoration = m_nextDecoration;
     configureEvent->serial = serial;
 
     return configureEvent;
+}
+
+void XdgToplevelClient::handleRolePrecommit()
+{
+    auto configureEvent = static_cast<XdgToplevelConfigure *>(lastAcknowledgedConfigure());
+    if (configureEvent && decoration() != configureEvent->decoration) {
+        setDecoration(configureEvent->decoration);
+        updateShadow();
+    }
 }
 
 void XdgToplevelClient::handleRoleCommit()
@@ -744,7 +876,6 @@ void XdgToplevelClient::handleRoleCommit()
     if (configureEvent) {
         handleStatesAcknowledged(configureEvent->states);
     }
-    updateDecoration(true, false);
 }
 
 void XdgToplevelClient::doMinimize()
@@ -767,9 +898,9 @@ void XdgToplevelClient::doSetActive()
     WaylandClient::doSetActive();
 
     if (isActive()) {
-        m_requestedStates |= XdgToplevelInterface::State::Activated;
+        m_nextStates |= XdgToplevelInterface::State::Activated;
     } else {
-        m_requestedStates &= ~XdgToplevelInterface::State::Activated;
+        m_nextStates &= ~XdgToplevelInterface::State::Activated;
     }
 
     scheduleConfigure();
@@ -778,9 +909,9 @@ void XdgToplevelClient::doSetActive()
 void XdgToplevelClient::doSetFullScreen()
 {
     if (isRequestedFullScreen()) {
-        m_requestedStates |= XdgToplevelInterface::State::FullScreen;
+        m_nextStates |= XdgToplevelInterface::State::FullScreen;
     } else {
-        m_requestedStates &= ~XdgToplevelInterface::State::FullScreen;
+        m_nextStates &= ~XdgToplevelInterface::State::FullScreen;
     }
 
     scheduleConfigure();
@@ -789,15 +920,15 @@ void XdgToplevelClient::doSetFullScreen()
 void XdgToplevelClient::doSetMaximized()
 {
     if (requestedMaximizeMode() & MaximizeHorizontal) {
-        m_requestedStates |= XdgToplevelInterface::State::MaximizedHorizontal;
+        m_nextStates |= XdgToplevelInterface::State::MaximizedHorizontal;
     } else {
-        m_requestedStates &= ~XdgToplevelInterface::State::MaximizedHorizontal;
+        m_nextStates &= ~XdgToplevelInterface::State::MaximizedHorizontal;
     }
 
     if (requestedMaximizeMode() & MaximizeVertical) {
-        m_requestedStates |= XdgToplevelInterface::State::MaximizedVertical;
+        m_nextStates |= XdgToplevelInterface::State::MaximizedVertical;
     } else {
-        m_requestedStates &= ~XdgToplevelInterface::State::MaximizedVertical;
+        m_nextStates &= ~XdgToplevelInterface::State::MaximizedVertical;
     }
 
     scheduleConfigure();
@@ -833,27 +964,27 @@ void XdgToplevelClient::doSetQuickTileMode()
     const Qt::Edges anchors = anchorsForQuickTileMode(quickTileMode());
 
     if (anchors & Qt::LeftEdge) {
-        m_requestedStates |= XdgToplevelInterface::State::TiledLeft;
+        m_nextStates |= XdgToplevelInterface::State::TiledLeft;
     } else {
-        m_requestedStates &= ~XdgToplevelInterface::State::TiledLeft;
+        m_nextStates &= ~XdgToplevelInterface::State::TiledLeft;
     }
 
     if (anchors & Qt::RightEdge) {
-        m_requestedStates |= XdgToplevelInterface::State::TiledRight;
+        m_nextStates |= XdgToplevelInterface::State::TiledRight;
     } else {
-        m_requestedStates &= ~XdgToplevelInterface::State::TiledRight;
+        m_nextStates &= ~XdgToplevelInterface::State::TiledRight;
     }
 
     if (anchors & Qt::TopEdge) {
-        m_requestedStates |= XdgToplevelInterface::State::TiledTop;
+        m_nextStates |= XdgToplevelInterface::State::TiledTop;
     } else {
-        m_requestedStates &= ~XdgToplevelInterface::State::TiledTop;
+        m_nextStates &= ~XdgToplevelInterface::State::TiledTop;
     }
 
     if (anchors & Qt::BottomEdge) {
-        m_requestedStates |= XdgToplevelInterface::State::TiledBottom;
+        m_nextStates |= XdgToplevelInterface::State::TiledBottom;
     } else {
-        m_requestedStates &= ~XdgToplevelInterface::State::TiledBottom;
+        m_nextStates &= ~XdgToplevelInterface::State::TiledBottom;
     }
 
     scheduleConfigure();
@@ -861,18 +992,20 @@ void XdgToplevelClient::doSetQuickTileMode()
 
 bool XdgToplevelClient::doStartInteractiveMoveResize()
 {
-    if (interactiveMoveResizePointerMode() != PositionCenter) {
-        m_requestedStates |= XdgToplevelInterface::State::Resizing;
+    if (interactiveMoveResizeGravity() != Gravity::None) {
+        m_nextGravity = interactiveMoveResizeGravity();
+        m_nextStates |= XdgToplevelInterface::State::Resizing;
+        scheduleConfigure();
     }
-
-    scheduleConfigure();
     return true;
 }
 
 void XdgToplevelClient::doFinishInteractiveMoveResize()
 {
-    m_requestedStates &= ~XdgToplevelInterface::State::Resizing;
-    scheduleConfigure();
+    if (m_nextStates & XdgToplevelInterface::State::Resizing) {
+        m_nextStates &= ~XdgToplevelInterface::State::Resizing;
+        scheduleConfigure();
+    }
 }
 
 bool XdgToplevelClient::takeFocus()
@@ -945,7 +1078,7 @@ void XdgToplevelClient::handleWindowClassChanged()
 {
     const QByteArray applicationId = m_shellSurface->windowClass().toUtf8();
     setResourceClass(resourceName(), applicationId);
-    if (shellSurface()->isConfigured() && supportsWindowRules()) {
+    if (shellSurface()->isConfigured()) {
         evaluateWindowRules();
     }
     setDesktopFileName(applicationId);
@@ -977,7 +1110,7 @@ void XdgToplevelClient::handleMoveRequested(SeatInterface *seat, quint32 serial)
     }
 }
 
-void XdgToplevelClient::handleResizeRequested(SeatInterface *seat, Qt::Edges edges, quint32 serial)
+void XdgToplevelClient::handleResizeRequested(SeatInterface *seat, XdgToplevelInterface::ResizeAnchor anchor, quint32 serial)
 {
     if (!seat->hasImplicitPointerGrab(serial) && !seat->hasImplicitTouchGrab(serial)) {
         return;
@@ -998,21 +1131,37 @@ void XdgToplevelClient::handleResizeRequested(SeatInterface *seat, Qt::Edges edg
     setInteractiveMoveOffset(cursorPos - pos());  // map from global
     setInvertedInteractiveMoveOffset(rect().bottomRight() - interactiveMoveOffset());
     setUnrestrictedInteractiveMoveResize(false);
-    auto toPosition = [edges] {
-        Position position = PositionCenter;
-        if (edges.testFlag(Qt::TopEdge)) {
-            position = PositionTop;
-        } else if (edges.testFlag(Qt::BottomEdge)) {
-            position = PositionBottom;
-        }
-        if (edges.testFlag(Qt::LeftEdge)) {
-            position = Position(position | PositionLeft);
-        } else if (edges.testFlag(Qt::RightEdge)) {
-            position = Position(position | PositionRight);
-        }
-        return position;
-    };
-    setInteractiveMoveResizePointerMode(toPosition());
+    Gravity gravity;
+    switch (anchor) {
+    case XdgToplevelInterface::ResizeAnchor::TopLeft:
+        gravity = Gravity::TopLeft;
+        break;
+    case XdgToplevelInterface::ResizeAnchor::Top:
+        gravity = Gravity::Top;
+        break;
+    case XdgToplevelInterface::ResizeAnchor::TopRight:
+        gravity = Gravity::TopRight;
+        break;
+    case XdgToplevelInterface::ResizeAnchor::Right:
+        gravity = Gravity::Right;
+        break;
+    case XdgToplevelInterface::ResizeAnchor::BottomRight:
+        gravity = Gravity::BottomRight;
+        break;
+    case XdgToplevelInterface::ResizeAnchor::Bottom:
+        gravity = Gravity::Bottom;
+        break;
+    case XdgToplevelInterface::ResizeAnchor::BottomLeft:
+        gravity = Gravity::BottomLeft;
+        break;
+    case XdgToplevelInterface::ResizeAnchor::Left:
+        gravity = Gravity::Left;
+        break;
+    default:
+        gravity = Gravity::None;
+        break;
+    }
+    setInteractiveMoveResizeGravity(gravity);
     if (!startInteractiveMoveResize()) {
         setInteractiveMoveResizePointerButtonDown(false);
     }
@@ -1190,54 +1339,61 @@ bool XdgToplevelClient::initialFullScreenMode() const
 void XdgToplevelClient::initialize()
 {
     bool needsPlacement = isPlaceable();
+    setupWindowRules(false);
 
-    // Decoration update is forced so an xdg_toplevel_decoration.configure event
-    // is sent if the client has called the set_mode() request with csd mode.
-    updateDecoration(false, true);
-
-    if (supportsWindowRules()) {
-        setupWindowRules(false);
-
-        moveResize(rules()->checkGeometry(frameGeometry(), true));
-        maximize(rules()->checkMaximize(initialMaximizeMode(), true));
-        setFullScreen(rules()->checkFullScreen(initialFullScreenMode(), true), false);
-        setOnActivities(rules()->checkActivity(activities(), true));
-        setDesktop(rules()->checkDesktop(desktop(), true));
-        setDesktopFileName(rules()->checkDesktopFile(desktopFileName(), true).toUtf8());
-        if (rules()->checkMinimize(isMinimized(), true)) {
-            minimize(true); // No animation.
-        }
-        setSkipTaskbar(rules()->checkSkipTaskbar(skipTaskbar(), true));
-        setSkipPager(rules()->checkSkipPager(skipPager(), true));
-        setSkipSwitcher(rules()->checkSkipSwitcher(skipSwitcher(), true));
-        setKeepAbove(rules()->checkKeepAbove(keepAbove(), true));
-        setKeepBelow(rules()->checkKeepBelow(keepBelow(), true));
-        setShortcut(rules()->checkShortcut(shortcut().toString(), true));
-
-        // Don't place the client if its position is set by a rule.
-        if (rules()->checkPosition(invalidPoint, true) != invalidPoint) {
-            needsPlacement = false;
-        }
-
-        // Don't place the client if the maximize state is set by a rule.
-        if (requestedMaximizeMode() != MaximizeRestore) {
-            needsPlacement = false;
-        }
-
-        discardTemporaryRules();
-        RuleBook::self()->discardUsed(this, false); // Remove Apply Now rules.
-        updateWindowRules(Rules::All);
+    // Move or resize the window only if enforced by a window rule.
+    const QPoint forcedPosition = rules()->checkPosition(invalidPoint, true);
+    if (forcedPosition != invalidPoint) {
+        move(forcedPosition);
     }
+    const QSize forcedSize = rules()->checkSize(QSize(), true);
+    if (forcedSize.isValid()) {
+        resize(forcedSize);
+    }
+
+    maximize(rules()->checkMaximize(initialMaximizeMode(), true));
+    setFullScreen(rules()->checkFullScreen(initialFullScreenMode(), true), false);
+    setOnActivities(rules()->checkActivity(activities(), true));
+    setDesktops(rules()->checkDesktops(desktops(), true));
+    setDesktopFileName(rules()->checkDesktopFile(desktopFileName(), true).toUtf8());
+    if (rules()->checkMinimize(isMinimized(), true)) {
+        minimize(true); // No animation.
+    }
+    setSkipTaskbar(rules()->checkSkipTaskbar(skipTaskbar(), true));
+    setSkipPager(rules()->checkSkipPager(skipPager(), true));
+    setSkipSwitcher(rules()->checkSkipSwitcher(skipSwitcher(), true));
+    setKeepAbove(rules()->checkKeepAbove(keepAbove(), true));
+    setKeepBelow(rules()->checkKeepBelow(keepBelow(), true));
+    setShortcut(rules()->checkShortcut(shortcut().toString(), true));
+    setNoBorder(rules()->checkNoBorder(noBorder(), true));
+
+    // Don't place the client if its position is set by a rule.
+    if (rules()->checkPosition(invalidPoint, true) != invalidPoint) {
+        needsPlacement = false;
+    }
+
+    // Don't place the client if the maximize state is set by a rule.
+    if (requestedMaximizeMode() != MaximizeRestore) {
+        needsPlacement = false;
+    }
+
+    discardTemporaryRules();
+    RuleBook::self()->discardUsed(this, false); // Remove Apply Now rules.
+    updateWindowRules(Rules::All);
+
     if (isRequestedFullScreen()) {
         needsPlacement = false;
     }
     if (needsPlacement) {
-        const QRect area = workspace()->clientArea(PlacementArea, Screens::self()->current(), desktop());
-        placeIn(area);
+        const QRect area = workspace()->clientArea(PlacementArea, this, workspace()->activeOutput());
+        Placement::self()->place(this, area);
     }
 
+    configureDecoration();
     scheduleConfigure();
     updateColorScheme();
+    setupWindowManagementInterface();
+
     m_isInitialized = true;
 }
 
@@ -1284,36 +1440,126 @@ void XdgToplevelClient::installAppMenu(AppMenuInterface *appMenu)
     updateMenu(appMenu->address());
 }
 
-void XdgToplevelClient::installServerDecoration(ServerSideDecorationInterface *decoration)
+XdgToplevelClient::DecorationMode XdgToplevelClient::preferredDecorationMode() const
 {
-    m_serverDecoration = decoration;
-
-    connect(m_serverDecoration, &ServerSideDecorationInterface::destroyed, this, [this] {
-        if (!isZombie() && readyForPainting()) {
-            updateDecoration(/* check_workspace_pos */ true);
-        }
-    });
-    connect(m_serverDecoration, &ServerSideDecorationInterface::modeRequested, this,
-        [this] (ServerSideDecorationManagerInterface::Mode mode) {
-            const bool changed = mode != m_serverDecoration->mode();
-            if (changed && readyForPainting()) {
-                updateDecoration(/* check_workspace_pos */ true);
-            }
-        }
-    );
-    if (readyForPainting()) {
-        updateDecoration(/* check_workspace_pos */ true);
+    if (!Decoration::DecorationBridge::hasPlugin()) {
+        return DecorationMode::Client;
+    } else if (m_userNoBorder || isRequestedFullScreen()) {
+        return DecorationMode::None;
     }
+
+    if (m_xdgDecoration) {
+        switch (m_xdgDecoration->preferredMode()) {
+        case XdgToplevelDecorationV1Interface::Mode::Undefined:
+            return DecorationMode::Server;
+        case XdgToplevelDecorationV1Interface::Mode::None:
+            return DecorationMode::None;
+        case XdgToplevelDecorationV1Interface::Mode::Client:
+            return DecorationMode::Client;
+        case XdgToplevelDecorationV1Interface::Mode::Server:
+            return DecorationMode::Server;
+        }
+    }
+
+    if (m_serverDecoration) {
+        switch (m_serverDecoration->preferredMode()) {
+        case ServerSideDecorationManagerInterface::Mode::None:
+            return DecorationMode::None;
+        case ServerSideDecorationManagerInterface::Mode::Client:
+            return DecorationMode::Client;
+        case ServerSideDecorationManagerInterface::Mode::Server:
+            return DecorationMode::Server;
+        }
+    }
+
+    return DecorationMode::Client;
+}
+
+void XdgToplevelClient::clearDecoration()
+{
+    m_nextDecoration = nullptr;
+}
+
+void XdgToplevelClient::configureDecoration()
+{
+    const DecorationMode decorationMode = preferredDecorationMode();
+    switch (decorationMode) {
+    case DecorationMode::None:
+    case DecorationMode::Client:
+        clearDecoration();
+        break;
+    case DecorationMode::Server:
+        if (!m_nextDecoration) {
+            m_nextDecoration.reset(Decoration::DecorationBridge::self()->createDecoration(this));
+        }
+        break;
+    }
+
+    // All decoration updates are synchronized to toplevel configure events.
+    if (m_xdgDecoration) {
+        configureXdgDecoration(decorationMode);
+    } else if (m_serverDecoration) {
+        configureServerDecoration(decorationMode);
+    }
+}
+
+void XdgToplevelClient::configureXdgDecoration(DecorationMode decorationMode)
+{
+    switch (decorationMode) {
+    case DecorationMode::None: // Faked as server side mode under the hood.
+        m_xdgDecoration->sendConfigure(XdgToplevelDecorationV1Interface::Mode::None);
+        break;
+    case DecorationMode::Client:
+        m_xdgDecoration->sendConfigure(XdgToplevelDecorationV1Interface::Mode::Client);
+        break;
+    case DecorationMode::Server:
+        m_xdgDecoration->sendConfigure(XdgToplevelDecorationV1Interface::Mode::Server);
+        break;
+    }
+    scheduleConfigure();
+}
+
+void XdgToplevelClient::configureServerDecoration(DecorationMode decorationMode)
+{
+    switch (decorationMode) {
+    case DecorationMode::None:
+        m_serverDecoration->setMode(ServerSideDecorationManagerInterface::Mode::None);
+        break;
+    case DecorationMode::Client:
+        m_serverDecoration->setMode(ServerSideDecorationManagerInterface::Mode::Client);
+        break;
+    case DecorationMode::Server:
+        m_serverDecoration->setMode(ServerSideDecorationManagerInterface::Mode::Server);
+        break;
+    }
+    scheduleConfigure();
 }
 
 void XdgToplevelClient::installXdgDecoration(XdgToplevelDecorationV1Interface *decoration)
 {
     m_xdgDecoration = decoration;
 
+    connect(m_xdgDecoration, &XdgToplevelDecorationV1Interface::destroyed,
+            this, &XdgToplevelClient::clearDecoration);
     connect(m_xdgDecoration, &XdgToplevelDecorationV1Interface::preferredModeChanged, this, [this] {
         if (m_isInitialized) {
-            // force is true as we must send a new configure response.
-            updateDecoration(/* check_workspace_pos */ false, /* force */ true);
+            configureDecoration();
+        }
+    });
+}
+
+void XdgToplevelClient::installServerDecoration(ServerSideDecorationInterface *decoration)
+{
+    m_serverDecoration = decoration;
+    if (m_isInitialized) {
+        configureDecoration();
+    }
+
+    connect(m_serverDecoration, &ServerSideDecorationInterface::destroyed,
+            this, &XdgToplevelClient::clearDecoration);
+    connect(m_serverDecoration, &ServerSideDecorationInterface::preferredModeChanged, this, [this]() {
+        if (m_isInitialized) {
+            configureDecoration();
         }
     });
 }
@@ -1329,215 +1575,10 @@ void XdgToplevelClient::installPalette(ServerSideDecorationPaletteInterface *pal
     updateColorScheme();
 }
 
-/**
- * \todo This whole plasma shell surface thing doesn't seem right. It turns xdg-toplevel into
- * something completely different! Perhaps plasmashell surfaces need to be implemented via a
- * proprietary protocol that doesn't piggyback on existing shell surface protocols. It'll lead
- * to cleaner code and will be technically correct, but I'm not sure whether this is do-able.
- */
-void XdgToplevelClient::installPlasmaShellSurface(PlasmaShellSurfaceInterface *shellSurface)
-{
-    m_plasmaShellSurface = shellSurface;
-
-    auto updatePosition = [this, shellSurface] { move(shellSurface->position()); };
-    auto updateRole = [this, shellSurface] {
-        NET::WindowType type = NET::Unknown;
-        switch (shellSurface->role()) {
-        case PlasmaShellSurfaceInterface::Role::Desktop:
-            type = NET::Desktop;
-            break;
-        case PlasmaShellSurfaceInterface::Role::Panel:
-            type = NET::Dock;
-            break;
-        case PlasmaShellSurfaceInterface::Role::OnScreenDisplay:
-            type = NET::OnScreenDisplay;
-            break;
-        case PlasmaShellSurfaceInterface::Role::Notification:
-            type = NET::Notification;
-            break;
-        case PlasmaShellSurfaceInterface::Role::ToolTip:
-            type = NET::Tooltip;
-            break;
-        case PlasmaShellSurfaceInterface::Role::CriticalNotification:
-            type = NET::CriticalNotification;
-            break;
-        case PlasmaShellSurfaceInterface::Role::Normal:
-        default:
-            type = NET::Normal;
-            break;
-        }
-        if (m_windowType == type) {
-            return;
-        }
-        m_windowType = type;
-        switch (m_windowType) {
-        case NET::Desktop:
-        case NET::Dock:
-        case NET::OnScreenDisplay:
-        case NET::Notification:
-        case NET::CriticalNotification:
-        case NET::Tooltip:
-            setOnAllDesktops(true);
-#if KWIN_BUILD_ACTIVITIES
-            setOnAllActivities(true);
-#endif
-            break;
-        default:
-            break;
-        }
-        workspace()->updateClientArea();
-    };
-    connect(shellSurface, &PlasmaShellSurfaceInterface::positionChanged, this, updatePosition);
-    connect(shellSurface, &PlasmaShellSurfaceInterface::roleChanged, this, updateRole);
-    connect(shellSurface, &PlasmaShellSurfaceInterface::panelBehaviorChanged, this, [this] {
-        updateShowOnScreenEdge();
-        workspace()->updateClientArea();
-    });
-    connect(shellSurface, &PlasmaShellSurfaceInterface::panelAutoHideHideRequested, this, [this] {
-        if (m_plasmaShellSurface->panelBehavior() == PlasmaShellSurfaceInterface::PanelBehavior::AutoHide) {
-            hideClient(true);
-            m_plasmaShellSurface->hideAutoHidingPanel();
-        }
-        updateShowOnScreenEdge();
-    });
-    connect(shellSurface, &PlasmaShellSurfaceInterface::panelAutoHideShowRequested, this, [this] {
-        hideClient(false);
-        ScreenEdges::self()->reserve(this, ElectricNone);
-        m_plasmaShellSurface->showAutoHidingPanel();
-    });
-    connect(shellSurface, &PlasmaShellSurfaceInterface::panelTakesFocusChanged, this, [this] {
-        if (m_plasmaShellSurface->panelTakesFocus()) {
-            workspace()->activateClient(this);
-        }
-    });
-    if (shellSurface->isPositionSet()) {
-        updatePosition();
-    }
-    updateRole();
-    updateShowOnScreenEdge();
-    connect(this, &XdgToplevelClient::frameGeometryChanged,
-            this, &XdgToplevelClient::updateShowOnScreenEdge);
-    connect(this, &XdgToplevelClient::windowShown,
-            this, &XdgToplevelClient::updateShowOnScreenEdge);
-
-    setSkipTaskbar(shellSurface->skipTaskbar());
-    connect(shellSurface, &PlasmaShellSurfaceInterface::skipTaskbarChanged, this, [this] {
-        setSkipTaskbar(m_plasmaShellSurface->skipTaskbar());
-    });
-
-    setSkipSwitcher(shellSurface->skipSwitcher());
-    connect(shellSurface, &PlasmaShellSurfaceInterface::skipSwitcherChanged, this, [this] {
-        setSkipSwitcher(m_plasmaShellSurface->skipSwitcher());
-    });
-}
-
-void XdgToplevelClient::updateShowOnScreenEdge()
-{
-    if (!ScreenEdges::self()) {
-        return;
-    }
-    if (!readyForPainting() || !m_plasmaShellSurface ||
-            m_plasmaShellSurface->role() != PlasmaShellSurfaceInterface::Role::Panel) {
-        ScreenEdges::self()->reserve(this, ElectricNone);
-        return;
-    }
-    const PlasmaShellSurfaceInterface::PanelBehavior panelBehavior = m_plasmaShellSurface->panelBehavior();
-    if ((panelBehavior == PlasmaShellSurfaceInterface::PanelBehavior::AutoHide && isHidden()) ||
-            panelBehavior == PlasmaShellSurfaceInterface::PanelBehavior::WindowsCanCover) {
-        // Screen edge API requires an edge, thus we need to figure out which edge the window borders.
-        const QRect clientGeometry = frameGeometry();
-        Qt::Edges edges;
-        for (int i = 0; i < screens()->count(); i++) {
-            const QRect screenGeometry = screens()->geometry(i);
-            if (screenGeometry.left() == clientGeometry.left()) {
-                edges |= Qt::LeftEdge;
-            }
-            if (screenGeometry.right() == clientGeometry.right()) {
-                edges |= Qt::RightEdge;
-            }
-            if (screenGeometry.top() == clientGeometry.top()) {
-                edges |= Qt::TopEdge;
-            }
-            if (screenGeometry.bottom() == clientGeometry.bottom()) {
-                edges |= Qt::BottomEdge;
-            }
-        }
-
-        // A panel might border multiple screen edges. E.g. a horizontal panel at the bottom will
-        // also border the left and right edge. Let's remove such cases.
-        if (edges & Qt::LeftEdge && edges & Qt::RightEdge) {
-            edges = edges & (~(Qt::LeftEdge | Qt::RightEdge));
-        }
-        if (edges & Qt::TopEdge && edges & Qt::BottomEdge) {
-            edges = edges & (~(Qt::TopEdge | Qt::BottomEdge));
-        }
-
-        // It's still possible that a panel borders two edges, e.g. bottom and left
-        // in that case the one which is sharing more with the edge wins.
-        auto check = [clientGeometry](Qt::Edges edges, Qt::Edge horizontal, Qt::Edge vertical) {
-            if (edges & horizontal && edges & vertical) {
-                if (clientGeometry.width() >= clientGeometry.height()) {
-                    return edges & ~horizontal;
-                } else {
-                    return edges & ~vertical;
-                }
-            }
-            return edges;
-        };
-        edges = check(edges, Qt::LeftEdge, Qt::TopEdge);
-        edges = check(edges, Qt::LeftEdge, Qt::BottomEdge);
-        edges = check(edges, Qt::RightEdge, Qt::TopEdge);
-        edges = check(edges, Qt::RightEdge, Qt::BottomEdge);
-
-        ElectricBorder border = ElectricNone;
-        if (edges & Qt::LeftEdge) {
-            border = ElectricLeft;
-        }
-        if (edges & Qt::RightEdge) {
-            border = ElectricRight;
-        }
-        if (edges & Qt::TopEdge) {
-            border = ElectricTop;
-        }
-        if (edges & Qt::BottomEdge) {
-            border = ElectricBottom;
-        }
-        ScreenEdges::self()->reserve(this, border);
-    } else {
-        ScreenEdges::self()->reserve(this, ElectricNone);
-    }
-}
-
-void XdgToplevelClient::updateClientArea()
-{
-    if (hasStrut()) {
-        workspace()->updateClientArea();
-    }
-}
-
-void XdgToplevelClient::setupWindowManagementIntegration()
-{
-    if (isLockScreen()) {
-        return;
-    }
-    connect(surface(), &SurfaceInterface::mapped,
-            this, &XdgToplevelClient::setupWindowManagementInterface);
-}
-
-void XdgToplevelClient::setupPlasmaShellIntegration()
-{
-    connect(surface(), &SurfaceInterface::mapped,
-            this, &XdgToplevelClient::updateShowOnScreenEdge);
-    connect(this, &XdgToplevelClient::frameGeometryChanged,
-            this, &XdgToplevelClient::updateClientArea);
-}
-
 void XdgToplevelClient::setFullScreen(bool set, bool user)
 {
     set = rules()->checkFullScreen(set);
-
-    const bool wasFullscreen = isRequestedFullScreen();
-    if (wasFullscreen == set) {
+    if (m_isRequestedFullScreen == set) {
         return;
     }
     if (isSpecialWindow()) {
@@ -1547,31 +1588,22 @@ void XdgToplevelClient::setFullScreen(bool set, bool user)
         return;
     }
 
-    if (wasFullscreen) {
-        workspace()->updateFocusMousePosition(Cursors::self()->mouse()->pos()); // may cause leave event
-    } else {
-        setFullscreenGeometryRestore(moveResizeGeometry());
-    }
     m_isRequestedFullScreen = set;
+    configureDecoration();
 
     if (set) {
-        workspace()->raiseClient(this);
-        dontInteractiveMoveResize();
-    }
-
-    updateDecoration(false, false);
-
-    if (set) {
-        const int screen = m_fullScreenRequestedOutput ? kwinApp()->platform()->enabledOutputs().indexOf(m_fullScreenRequestedOutput) : screens()->number(moveResizeGeometry().center());
-        moveResize(workspace()->clientArea(FullScreenArea, screen, desktop()));
+        const AbstractOutput *output = m_fullScreenRequestedOutput ? m_fullScreenRequestedOutput.data() : kwinApp()->platform()->outputAt(moveResizeGeometry().center());
+        setFullscreenGeometryRestore(moveResizeGeometry());
+        moveResize(workspace()->clientArea(FullScreenArea, this, output));
     } else {
         m_fullScreenRequestedOutput.clear();
         if (fullscreenGeometryRestore().isValid()) {
-            int currentScreen = screen();
+            AbstractOutput *currentOutput = output();
             moveResize(QRect(fullscreenGeometryRestore().topLeft(),
                              constrainFrameSize(fullscreenGeometryRestore().size())));
-            if( currentScreen != screen())
-                workspace()->sendClientToScreen( this, currentScreen );
+            if (currentOutput != output()) {
+                workspace()->sendClientToOutput(this, currentOutput);
+            }
         } else {
             // this can happen when the window was first shown already fullscreen,
             // so let the client set the size by itself
@@ -1597,8 +1629,8 @@ void XdgToplevelClient::changeMaximize(bool horizontal, bool vertical, bool adju
     }
 
     const QRect clientArea = isElectricBorderMaximizing() ?
-        workspace()->clientArea(MaximizeArea, Cursors::self()->mouse()->pos(), desktop()) :
-        workspace()->clientArea(MaximizeArea, moveResizeGeometry().center(), desktop());
+        workspace()->clientArea(MaximizeArea, this, Cursors::self()->mouse()->pos()) :
+        workspace()->clientArea(MaximizeArea, this, moveResizeGeometry().center());
 
     const MaximizeMode oldMode = m_requestedMaximizeMode;
     const QRect oldGeometry = moveResizeGeometry();
@@ -1616,15 +1648,10 @@ void XdgToplevelClient::changeMaximize(bool horizontal, bool vertical, bool adju
         return;
     }
 
-    StackingUpdatesBlocker blocker(workspace());
-    if (m_requestedMaximizeMode != MaximizeRestore) {
-        dontInteractiveMoveResize();
-    }
-
     // call into decoration update borders
-    if (isDecorated() && decoration()->client() && !(options->borderlessMaximizedWindows() && m_requestedMaximizeMode == KWin::MaximizeFull)) {
+    if (m_nextDecoration && !(options->borderlessMaximizedWindows() && m_requestedMaximizeMode == KWin::MaximizeFull)) {
         changeMaximizeRecursion = true;
-        const auto c = decoration()->client().toStrongRef();
+        const auto c = m_nextDecoration->client().toStrongRef();
         if ((m_requestedMaximizeMode & MaximizeVertical) != (oldMode & MaximizeVertical)) {
             Q_EMIT c->maximizedVerticallyChanged(m_requestedMaximizeMode & MaximizeVertical);
         }
@@ -1638,11 +1665,7 @@ void XdgToplevelClient::changeMaximize(bool horizontal, bool vertical, bool adju
     }
 
     if (options->borderlessMaximizedWindows()) {
-        // triggers a maximize change.
-        // The next setNoBorder interation will exit since there's no change but the first recursion pullutes the restore geometry
-        changeMaximizeRecursion = true;
-        setNoBorder(rules()->checkNoBorder(m_requestedMaximizeMode == MaximizeFull));
-        changeMaximizeRecursion = false;
+        setNoBorder(m_requestedMaximizeMode == MaximizeFull);
     }
 
     if (quickTileMode() == QuickTileMode(QuickTileFlag::None)) {
@@ -1656,21 +1679,6 @@ void XdgToplevelClient::changeMaximize(bool horizontal, bool vertical, bool adju
             savedGeometry.setRight(oldGeometry.right());
         }
         setGeometryRestore(savedGeometry);
-    }
-
-    // Conditional quick tiling exit points
-    const auto oldQuickTileMode = quickTileMode();
-    if (quickTileMode() != QuickTileMode(QuickTileFlag::None)) {
-        if (oldMode == MaximizeFull &&
-                !clientArea.contains(geometryRestore().center())) {
-            // Not restoring on the same screen
-            // TODO: The following doesn't work for some reason
-            //quick_tile_mode = QuickTileNone; // And exit quick tile mode manually
-        } else if ((oldMode == MaximizeVertical && m_requestedMaximizeMode == MaximizeRestore) ||
-                  (oldMode == MaximizeFull && m_requestedMaximizeMode == MaximizeHorizontal)) {
-            // Modifying geometry of a tiled window
-            updateQuickTileMode(QuickTileFlag::None); // Exit quick tile mode without restoring geometry
-        }
     }
 
     const MaximizeMode delta = m_requestedMaximizeMode ^ oldMode;
@@ -1712,13 +1720,14 @@ void XdgToplevelClient::changeMaximize(bool horizontal, bool vertical, bool adju
         }
     }
 
+    const auto oldQuickTileMode = quickTileMode();
     if (m_requestedMaximizeMode == MaximizeFull) {
         if (options->electricBorderMaximize()) {
             updateQuickTileMode(QuickTileFlag::Maximize);
         } else {
             updateQuickTileMode(QuickTileFlag::None);
         }
-    } else if (m_requestedMaximizeMode == MaximizeRestore) {
+    } else {
         updateQuickTileMode(QuickTileFlag::None);
     }
 
@@ -1736,7 +1745,8 @@ XdgPopupClient::XdgPopupClient(XdgPopupInterface *shellSurface)
     : XdgSurfaceClient(shellSurface->xdgSurface())
     , m_shellSurface(shellSurface)
 {
-    setDesktop(VirtualDesktopManager::self()->current());
+    m_windowType = NET::Unknown;
+    setDesktops({VirtualDesktopManager::self()->currentDesktop()});
 #if KWIN_BUILD_ACTIVITIES
     if (auto a = Activities::self()) {
         setOnActivities({a->current()});
@@ -1749,7 +1759,7 @@ XdgPopupClient::XdgPopupClient(XdgPopupInterface *shellSurface)
             this, &XdgPopupClient::initialize);
     connect(shellSurface, &XdgPopupInterface::repositionRequested,
             this, &XdgPopupClient::handleRepositionRequested);
-    connect(shellSurface, &XdgPopupInterface::destroyed,
+    connect(shellSurface, &XdgPopupInterface::aboutToBeDestroyed,
             this, &XdgPopupClient::destroyClient);
 }
 
@@ -1779,13 +1789,6 @@ void XdgPopupClient::relayout()
 
 XdgPopupClient::~XdgPopupClient()
 {
-}
-
-NET::WindowType XdgPopupClient::windowType(bool direct, int supported_types) const
-{
-    Q_UNUSED(direct)
-    Q_UNUSED(supported_types)
-    return NET::Unknown;
 }
 
 bool XdgPopupClient::hasPopupGrab() const
@@ -1826,59 +1829,6 @@ bool XdgPopupClient::isMovableAcrossScreens() const
 bool XdgPopupClient::hasTransientPlacementHint() const
 {
     return true;
-}
-
-static QPoint popupOffset(const QRect &anchorRect, const Qt::Edges anchorEdge,
-                          const Qt::Edges gravity, const QSize popupSize)
-{
-    QPoint anchorPoint;
-    switch (anchorEdge & (Qt::LeftEdge | Qt::RightEdge)) {
-    case Qt::LeftEdge:
-        anchorPoint.setX(anchorRect.x());
-        break;
-    case Qt::RightEdge:
-        anchorPoint.setX(anchorRect.x() + anchorRect.width());
-        break;
-    default:
-        anchorPoint.setX(qRound(anchorRect.x() + anchorRect.width() / 2.0));
-    }
-    switch (anchorEdge & (Qt::TopEdge | Qt::BottomEdge)) {
-    case Qt::TopEdge:
-        anchorPoint.setY(anchorRect.y());
-        break;
-    case Qt::BottomEdge:
-        anchorPoint.setY(anchorRect.y() + anchorRect.height());
-        break;
-    default:
-        anchorPoint.setY(qRound(anchorRect.y() + anchorRect.height() / 2.0));
-    }
-
-    // calculate where the top left point of the popup will end up with the applied gravity
-    // gravity indicates direction. i.e if gravitating towards the top the popup's bottom edge
-    // will next to the anchor point
-    QPoint popupPosAdjust;
-    switch (gravity & (Qt::LeftEdge | Qt::RightEdge)) {
-    case Qt::LeftEdge:
-        popupPosAdjust.setX(-popupSize.width());
-        break;
-    case Qt::RightEdge:
-        popupPosAdjust.setX(0);
-        break;
-    default:
-        popupPosAdjust.setX(qRound(-popupSize.width() / 2.0));
-    }
-    switch (gravity & (Qt::TopEdge | Qt::BottomEdge)) {
-    case Qt::TopEdge:
-        popupPosAdjust.setY(-popupSize.height());
-        break;
-    case Qt::BottomEdge:
-        popupPosAdjust.setY(0);
-        break;
-    default:
-        popupPosAdjust.setY(qRound(-popupSize.height() / 2.0));
-    }
-
-    return anchorPoint + popupPosAdjust;
 }
 
 QRect XdgPopupClient::transientPlacement(const QRect &bounds) const
@@ -2034,7 +1984,7 @@ XdgSurfaceConfigure *XdgPopupClient::sendRoleConfigure() const
     const quint32 serial = m_shellSurface->sendConfigure(QRect(popupPosition, moveResizeGeometry().size()));
 
     XdgSurfaceConfigure *configureEvent = new XdgSurfaceConfigure();
-    configureEvent->position = moveResizeGeometry().topLeft();
+    configureEvent->bounds = moveResizeGeometry();
     configureEvent->serial = serial;
 
     return configureEvent;
@@ -2055,20 +2005,9 @@ void XdgPopupClient::initialize()
 
     updateReactive();
 
-    const QRect area = workspace()->clientArea(PlacementArea, Screens::self()->current(), desktop());
-    placeIn(area);
+    const QRect area = workspace()->clientArea(PlacementArea, this, workspace()->activeOutput());
+    Placement::self()->place(this, area);
     scheduleConfigure();
-}
-
-void XdgPopupClient::installPlasmaShellSurface(PlasmaShellSurfaceInterface *shellSurface)
-{
-    m_plasmaShellSurface = shellSurface;
-
-    auto updatePosition = [this, shellSurface] { move(shellSurface->position()); };
-    connect(shellSurface, &PlasmaShellSurfaceInterface::positionChanged, this, updatePosition);
-    if (shellSurface->isPositionSet()) {
-        updatePosition();
-    }
 }
 
 } // namespace KWin

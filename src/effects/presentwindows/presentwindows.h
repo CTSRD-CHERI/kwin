@@ -14,7 +14,7 @@
 #include "presentwindows_proxy.h"
 
 #include <kwineffects.h>
-#include <kwineffectquickview.h>
+#include <kwinoffscreenquickview.h>
 
 #include <QElapsedTimer>
 
@@ -23,7 +23,7 @@ class QQuickView;
 
 namespace KWin
 {
-class CloseWindowView : public EffectQuickScene
+class CloseWindowView : public OffscreenQuickScene
 {
     Q_OBJECT
 public:
@@ -214,13 +214,14 @@ protected:
     // Window rearranging
     void rearrangeWindows();
     void reCreateGrids();
-    void calculateWindowTransformations(EffectWindowList windowlist, int screen,
+    void maybeRecreateGrids();
+    void calculateWindowTransformations(EffectWindowList windowlist, EffectScreen *screen,
                                         WindowMotionManager& motionManager, bool external = false);
-    void calculateWindowTransformationsClosest(EffectWindowList windowlist, int screen,
+    void calculateWindowTransformationsClosest(EffectWindowList windowlist, EffectScreen *screen,
             WindowMotionManager& motionManager);
-    void calculateWindowTransformationsKompose(EffectWindowList windowlist, int screen,
+    void calculateWindowTransformationsKompose(EffectWindowList windowlist, EffectScreen *screen,
             WindowMotionManager& motionManager);
-    void calculateWindowTransformationsNatural(EffectWindowList windowlist, int screen,
+    void calculateWindowTransformationsNatural(EffectWindowList windowlist, EffectScreen *screen,
             WindowMotionManager& motionManager);
 
     // Helper functions for window rearranging
@@ -289,7 +290,7 @@ private:
     std::chrono::milliseconds m_lastPresentTime;
 
     // Grid layout info
-    QList<GridSize> m_gridSizes;
+    QMap<EffectScreen *, GridSize> m_gridSizes;
 
     // Filter box
     EffectFrame* m_filterFrame;

@@ -22,8 +22,8 @@
 #include "placement.h"
 #include "platform.h"
 #include "pluginmanager.h"
+#include "renderbackend.h"
 #include "kwinadaptor.h"
-#include "scene.h"
 #include "unmanaged.h"
 #include "workspace.h"
 #include "virtualdesktops.h"
@@ -202,7 +202,7 @@ QVariantMap clientToVariantMap(const AbstractClient *c)
         {QStringLiteral("y"), c->y()},
         {QStringLiteral("width"), c->width()},
         {QStringLiteral("height"), c->height()},
-        {QStringLiteral("x11DesktopNumber"), c->desktop()},
+        {QStringLiteral("desktops"), c->desktopIds()},
         {QStringLiteral("minimized"), c->isMinimized()},
         {QStringLiteral("shaded"), c->isShade()},
         {QStringLiteral("fullscreen"), c->isFullScreen()},
@@ -273,18 +273,16 @@ QString CompositorDBusInterface::compositingNotPossibleReason() const
 
 QString CompositorDBusInterface::compositingType() const
 {
-    if (!m_compositor->scene()) {
+    if (!m_compositor->compositing()) {
         return QStringLiteral("none");
     }
-    switch (m_compositor->scene()->compositingType()) {
-#if QT_CONFIG(opengl)
+    switch (m_compositor->backend()->compositingType()) {
     case OpenGLCompositing:
         if (QOpenGLContext::openGLModuleType() == QOpenGLContext::LibGLES) {
             return QStringLiteral("gles");
         } else {
             return QStringLiteral("gl2");
         }
-#endif
     case QPainterCompositing:
         return QStringLiteral("qpainter");
     case NoCompositing:
@@ -335,7 +333,6 @@ void CompositorDBusInterface::reinitialize()
 QStringList CompositorDBusInterface::supportedOpenGLPlatformInterfaces() const
 {
     QStringList interfaces;
-#if QT_CONFIG(opengl)
     bool supportsGlx = false;
 #if HAVE_EPOXY_GLX
     supportsGlx = (kwinApp()->operationMode() == Application::OperationModeX11);
@@ -347,7 +344,6 @@ QStringList CompositorDBusInterface::supportedOpenGLPlatformInterfaces() const
         interfaces << QStringLiteral("glx");
     }
     interfaces << QStringLiteral("egl");
-#endif
     return interfaces;
 }
 
@@ -391,7 +387,8 @@ VirtualDesktopManagerDBusInterface::VirtualDesktopManagerDBusInterface(VirtualDe
 
     connect(m_manager, &VirtualDesktopManager::rowsChanged, this, &VirtualDesktopManagerDBusInterface::rowsChanged);
 
-    for (auto *vd : m_manager->desktops()) {
+    const QVector<VirtualDesktop *> allDesks = m_manager->desktops();
+    for (auto *vd : allDesks) {
         connect(vd, &VirtualDesktop::x11DesktopNumberChanged, this,
             [this, vd]() {
                 DBusDesktopDataStruct data{.position = vd->x11DesktopNumber() - 1, .id = vd->id(), .name = vd->name()};
@@ -462,7 +459,7 @@ void VirtualDesktopManagerDBusInterface::setCurrent(const QString &id)
         return;
     }
 
-    auto *vd = m_manager->desktopForId(id.toUtf8());
+    auto *vd = m_manager->desktopForId(id);
     if (vd) {
         m_manager->setCurrent(vd);
     }
@@ -510,7 +507,7 @@ void VirtualDesktopManagerDBusInterface::createDesktop(uint position, const QStr
 
 void VirtualDesktopManagerDBusInterface::setDesktopName(const QString &id, const QString &name)
 {
-    VirtualDesktop *vd = m_manager->desktopForId(id.toUtf8());
+    VirtualDesktop *vd = m_manager->desktopForId(id);
     if (!vd) {
         return;
     }
@@ -524,7 +521,7 @@ void VirtualDesktopManagerDBusInterface::setDesktopName(const QString &id, const
 
 void VirtualDesktopManagerDBusInterface::removeDesktop(const QString &id)
 {
-    m_manager->removeVirtualDesktop(id.toUtf8());
+    m_manager->removeVirtualDesktop(id);
 }
 
 PluginManagerDBusInterface::PluginManagerDBusInterface(PluginManager *manager)

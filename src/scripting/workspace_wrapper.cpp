@@ -11,6 +11,7 @@
 #include "workspace_wrapper.h"
 #include "x11client.h"
 #include "outline.h"
+#include "platform.h"
 #include "screens.h"
 #include "virtualdesktops.h"
 #include "workspace.h"
@@ -35,6 +36,7 @@ WorkspaceWrapper::WorkspaceWrapper(QObject* parent) : QObject(parent)
     connect(ws, &Workspace::clientActivated, this, &WorkspaceWrapper::clientActivated);
     connect(vds, &VirtualDesktopManager::countChanged, this, &WorkspaceWrapper::numberDesktopsChanged);
     connect(vds, &VirtualDesktopManager::layoutChanged, this, &WorkspaceWrapper::desktopLayoutChanged);
+    connect(vds, &VirtualDesktopManager::currentChanged, this, &WorkspaceWrapper::currentVirtualDesktopChanged);
     connect(ws, &Workspace::clientDemandsAttentionChanged, this, &WorkspaceWrapper::clientDemandsAttentionChanged);
 #ifdef KWIN_BUILD_ACTIVITIES
     if (KWin::Activities *activities = KWin::Activities::self()) {
@@ -67,12 +69,22 @@ int WorkspaceWrapper::currentDesktop() const
     return VirtualDesktopManager::self()->current();
 }
 
+VirtualDesktop *WorkspaceWrapper::currentVirtualDesktop() const
+{
+    return VirtualDesktopManager::self()->currentDesktop();
+}
+
 int WorkspaceWrapper::numberOfDesktops() const
 {
     return VirtualDesktopManager::self()->count();
 }
 
 void WorkspaceWrapper::setCurrentDesktop(int desktop)
+{
+    VirtualDesktopManager::self()->setCurrent(desktop);
+}
+
+void WorkspaceWrapper::setCurrentVirtualDesktop(VirtualDesktop *desktop)
 {
     VirtualDesktopManager::self()->setCurrent(desktop);
 }
@@ -140,12 +152,12 @@ SLOTWRAPPER(slotWindowRaise)
 SLOTWRAPPER(slotWindowLower)
 SLOTWRAPPER(slotWindowRaiseOrLower)
 SLOTWRAPPER(slotActivateAttentionWindow)
-SLOTWRAPPER(slotWindowPackLeft)
-SLOTWRAPPER(slotWindowPackRight)
-SLOTWRAPPER(slotWindowPackUp)
-SLOTWRAPPER(slotWindowPackDown)
-SLOTWRAPPER(slotWindowGrowHorizontal)
-SLOTWRAPPER(slotWindowGrowVertical)
+SLOTWRAPPER(slotWindowMoveLeft)
+SLOTWRAPPER(slotWindowMoveRight)
+SLOTWRAPPER(slotWindowMoveUp)
+SLOTWRAPPER(slotWindowMoveDown)
+SLOTWRAPPER(slotWindowExpandHorizontal)
+SLOTWRAPPER(slotWindowExpandVertical)
 SLOTWRAPPER(slotWindowShrinkHorizontal)
 SLOTWRAPPER(slotWindowShrinkVertical)
 
@@ -225,7 +237,7 @@ QSize WorkspaceWrapper::workspaceSize() const
 
 QSize WorkspaceWrapper::displaySize() const
 {
-    return screens()->displaySize();
+    return workspace()->geometry().size();
 }
 
 int WorkspaceWrapper::displayWidth() const
@@ -260,7 +272,8 @@ QRect WorkspaceWrapper::clientArea(ClientAreaOption option, int screen, int desk
 
 QString WorkspaceWrapper::desktopName(int desktop) const
 {
-    return VirtualDesktopManager::self()->name(desktop);
+    const VirtualDesktop *vd = VirtualDesktopManager::self()->desktopForX11Id(desktop);
+    return vd ? vd->name() : QString();
 }
 
 void WorkspaceWrapper::createDesktop(int position, const QString &name) const
@@ -350,25 +363,25 @@ int WorkspaceWrapper::numScreens() const
 
 int WorkspaceWrapper::activeScreen() const
 {
-    return screens()->current();
+    return kwinApp()->platform()->enabledOutputs().indexOf(workspace()->activeOutput());
 }
 
 QRect WorkspaceWrapper::virtualScreenGeometry() const
 {
-    return screens()->geometry();
+    return workspace()->geometry();
 }
 
 QSize WorkspaceWrapper::virtualScreenSize() const
 {
-    return screens()->size();
+    return workspace()->geometry().size();
 }
 
 void WorkspaceWrapper::sendClientToScreen(AbstractClient *client, int screen)
 {
-    if (screen < 0 || screen >= screens()->count()) {
-        return;
+    AbstractOutput *output = kwinApp()->platform()->findOutput(screen);
+    if (output) {
+        workspace()->sendClientToOutput(client, output);
     }
-    workspace()->sendClientToScreen(client, screen);
 }
 
 QtScriptWorkspaceWrapper::QtScriptWorkspaceWrapper(QObject* parent)

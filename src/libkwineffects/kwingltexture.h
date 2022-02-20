@@ -103,6 +103,7 @@ public:
     virtual void discard();
     void bind();
     void unbind();
+    void render(const QRect &rect);
     void render(const QRegion &region, const QRect& rect, bool hardwareClipping = false);
 
     GLuint texture() const;
@@ -116,10 +117,13 @@ public:
      * Make the texture fully transparent
      */
     void clear();
+    /**
+     * @deprecated track modifications to the texture yourself
+     */
+    void setDirty();
     bool isDirty() const;
     void setFilter(GLenum filter);
     void setWrapMode(GLenum mode);
-    void setDirty();
 
     void generateMipmaps();
 

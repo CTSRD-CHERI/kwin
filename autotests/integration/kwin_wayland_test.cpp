@@ -15,7 +15,7 @@
 #include "pluginmanager.h"
 #include "wayland_server.h"
 #include "workspace.h"
-#include "xcbutils.h"
+#include "utils/xcbutils.h"
 #include "xwl/xwayland.h"
 
 #include <KPluginMetaData>
@@ -58,6 +58,12 @@ WaylandTestApplication::WaylandTestApplication(OperationMode mode, int &argc, ch
     qunsetenv("XKB_DEFAULT_VARIANT");
     qunsetenv("XKB_DEFAULT_OPTIONS");
 
+    auto config = KSharedConfig::openConfig(QString(), KConfig::SimpleConfig);
+    KConfigGroup windowsGroup = config->group("Windows");
+    windowsGroup.writeEntry("Placement", Placement::policyToString(Placement::Smart));
+    windowsGroup.sync();
+    setConfig(config);
+
     const auto ownPath = libraryPaths().last();
     removeLibraryPath(ownPath);
     addLibraryPath(ownPath);
@@ -83,12 +89,12 @@ WaylandTestApplication::~WaylandTestApplication()
     delete m_xwayland;
     m_xwayland = nullptr;
     destroyWorkspace();
-    waylandServer()->dispatch();
     if (QStyle *s = style()) {
         s->unpolish(this);
     }
-    waylandServer()->terminateClientConnections();
+    destroyInputMethod();
     destroyCompositor();
+    destroyInput();
 }
 
 void WaylandTestApplication::performStartup()
@@ -108,7 +114,6 @@ void WaylandTestApplication::performStartup()
     }
     waylandServer()->initPlatform();
     createColorManager();
-    waylandServer()->createInternalConnection();
 
     // try creating the Wayland Backend
     createInput();

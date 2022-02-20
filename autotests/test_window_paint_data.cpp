@@ -105,8 +105,8 @@ public:
     QRect clientGeometry() const override {
         return QRect();
     }
-    int screen() const override {
-        return 0;
+    EffectScreen *screen() const override {
+        return nullptr;
     }
     QPoint pos() const override {
         return QPoint();
@@ -188,6 +188,9 @@ public:
     }
     bool decorationHasAlpha() const override {
         return false;
+    }
+    KDecoration2::Decoration *decoration() const override {
+        return nullptr;
     }
     QString caption() const override {
         return QString();

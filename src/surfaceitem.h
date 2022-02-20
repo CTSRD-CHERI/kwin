@@ -11,7 +11,9 @@
 namespace KWin
 {
 
+class Deleted;
 class SurfacePixmap;
+class Toplevel;
 
 /**
  * The SurfaceItem class represents a surface with some contents.
@@ -23,6 +25,8 @@ class KWIN_EXPORT SurfaceItem : public Item
 public:
     QMatrix4x4 surfaceToBufferMatrix() const;
     void setSurfaceToBufferMatrix(const QMatrix4x4 &matrix);
+
+    Toplevel *window() const;
 
     virtual QRegion shape() const;
     virtual QRegion opaque() const;
@@ -41,12 +45,15 @@ public:
     void unreferencePreviousPixmap();
 
 protected:
-    explicit SurfaceItem(Scene::Window *window, Item *parent = nullptr);
+    explicit SurfaceItem(Toplevel *window, Item *parent = nullptr);
 
     virtual SurfacePixmap *createPixmap() = 0;
     void preprocess() override;
     WindowQuadList buildQuads() const override;
 
+    void handleWindowClosed(Toplevel *original, Deleted *deleted);
+
+    Toplevel *m_window;
     QRegion m_damage;
     QScopedPointer<SurfacePixmap> m_pixmap;
     QScopedPointer<SurfacePixmap> m_previousPixmap;
@@ -54,10 +61,10 @@ protected:
     int m_referencePixmapCounter = 0;
 };
 
-class KWIN_EXPORT PlatformSurfaceTexture
+class KWIN_EXPORT SurfaceTexture
 {
 public:
-    virtual ~PlatformSurfaceTexture();
+    virtual ~SurfaceTexture();
 
     virtual bool isValid() const = 0;
 };
@@ -67,9 +74,9 @@ class KWIN_EXPORT SurfacePixmap : public QObject
     Q_OBJECT
 
 public:
-    explicit SurfacePixmap(PlatformSurfaceTexture *platformTexture, QObject *parent = nullptr);
+    explicit SurfacePixmap(SurfaceTexture *texture, QObject *parent = nullptr);
 
-    PlatformSurfaceTexture *platformTexture() const;
+    SurfaceTexture *texture() const;
 
     bool hasAlphaChannel() const;
     QSize size() const;
@@ -89,7 +96,7 @@ protected:
     bool m_hasAlphaChannel = false;
 
 private:
-    QScopedPointer<PlatformSurfaceTexture> m_platformTexture;
+    QScopedPointer<SurfaceTexture> m_texture;
     bool m_isDiscarded = false;
 };
 

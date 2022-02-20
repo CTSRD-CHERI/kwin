@@ -20,8 +20,10 @@ namespace KWin
 
 class AbstractOutput;
 class CompositorSelectionOwner;
+class RenderBackend;
 class RenderLoop;
 class Scene;
+class Toplevel;
 class X11Client;
 class X11SyncManager;
 
@@ -38,13 +40,6 @@ public:
 
     ~Compositor() override;
     static Compositor *self();
-
-    // when adding repaints caused by a window, you probably want to use
-    // either Toplevel::addRepaint() or Toplevel::addWorkspaceRepaint()
-    void addRepaint(const QRect& r);
-    void addRepaint(const QRegion& r);
-    void addRepaint(int x, int y, int w, int h);
-    void addRepaintFull();
 
     /**
      * Schedules a new repaint if no repaint is currently scheduled.
@@ -73,6 +68,9 @@ public:
     Scene *scene() const {
         return m_scene;
     }
+    RenderBackend *backend() const {
+        return m_backend;
+    }
 
     /**
      * @brief Static check to test whether the Compositor is available and active.
@@ -86,6 +84,7 @@ public:
     // for delayed supportproperty management of effects
     void keepSupportProperty(xcb_atom_t atom);
     void removeSupportProperty(xcb_atom_t atom);
+    QList<Toplevel *> windowsToRender() const;
 
 Q_SIGNALS:
     void compositingToggled(bool active);
@@ -130,17 +129,21 @@ private:
     void releaseCompositorSelection();
     void deleteUnusedSupportProperties();
 
-    int screenForRenderLoop(RenderLoop *renderLoop) const;
     void registerRenderLoop(RenderLoop *renderLoop, AbstractOutput *output);
     void unregisterRenderLoop(RenderLoop *renderLoop);
 
-    State m_state;
+    bool attemptOpenGLCompositing();
+    bool attemptQPainterCompositing();
 
-    CompositorSelectionOwner *m_selectionOwner;
+    AbstractOutput *findOutput(RenderLoop *loop) const;
+
+    State m_state = State::Off;
+    CompositorSelectionOwner *m_selectionOwner = nullptr;
     QTimer m_releaseSelectionTimer;
     QList<xcb_atom_t> m_unusedSupportProperties;
     QTimer m_unusedSupportPropertyTimer;
-    Scene *m_scene;
+    Scene *m_scene = nullptr;
+    RenderBackend *m_backend = nullptr;
     QMap<RenderLoop *, AbstractOutput *> m_renderLoops;
 };
 

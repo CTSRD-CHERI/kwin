@@ -52,9 +52,7 @@ private:
 class Glow
 {
 public:
-#if QT_CONFIG(opengl)
     QScopedPointer<GLTexture> texture;
-#endif
     QScopedPointer<QImage> image;
     QSize pictureSize;
     qreal strength;

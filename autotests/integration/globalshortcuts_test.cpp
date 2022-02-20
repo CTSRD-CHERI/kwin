@@ -11,8 +11,8 @@
 #include "cursor.h"
 #include "input.h"
 #include "internal_client.h"
+#include "keyboard_input.h"
 #include "platform.h"
-#include "screens.h"
 #include "useractions.h"
 #include "wayland_server.h"
 #include "workspace.h"
@@ -74,7 +74,7 @@ void GlobalShortcutsTest::initTestCase()
 void GlobalShortcutsTest::init()
 {
     QVERIFY(Test::setupWaylandConnection());
-    screens()->setCurrent(0);
+    workspace()->setActiveOutput(QPoint(640, 512));
     KWin::Cursors::self()->mouse()->setPos(QPoint(640, 512));
 
     auto xkb = input()->keyboard()->xkb();
@@ -236,7 +236,7 @@ void GlobalShortcutsTest::testUserActionsMenu()
     // https://github.com/xkbcommon/libxkbcommon/issues/17
 
     // first create a window
-    QScopedPointer<Surface> surface(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
     auto c = Test::renderAndWaitForShown(surface.data(), QSize(100, 50), Qt::blue);
     QVERIFY(c);
@@ -378,7 +378,7 @@ void GlobalShortcutsTest::testX11ClientShortcut()
 
 void GlobalShortcutsTest::testWaylandClientShortcut()
 {
-    QScopedPointer<Surface> surface(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
     auto client = Test::renderAndWaitForShown(surface.data(), QSize(100, 50), Qt::blue);
 
@@ -416,7 +416,7 @@ void GlobalShortcutsTest::testSetupWindowShortcut()
 {
     // QTBUG-62102
 
-    QScopedPointer<Surface> surface(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
     auto client = Test::renderAndWaitForShown(surface.data(), QSize(100, 50), Qt::blue);
 

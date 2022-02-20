@@ -17,7 +17,7 @@
 
 class QTimer;
 
-#include "kwineffectquickview.h"
+#include "kwinoffscreenquickview.h"
 
 namespace KWin
 {
@@ -83,7 +83,6 @@ public:
         return clickBehavior == SwitchDesktopAndActivateWindow;
     }
 private Q_SLOTS:
-    void toggle();
     // slots for global shortcut changed
     // needed to toggle the effect
     void globalShortcutChanged(QAction *action, const QKeySequence& seq);
@@ -96,7 +95,7 @@ private Q_SLOTS:
     void slotWindowFrameGeometryChanged(KWin::EffectWindow *w, const QRect &old);
 
 private:
-    QPointF scalePos(const QPoint& pos, int desktop, int screen = -1) const;
+    QPointF scalePos(const QPoint& pos, int desktop, EffectScreen *screen) const;
     QPoint unscalePos(const QPoint& pos, int* desktop = nullptr) const;
     int posToDesktop(const QPoint& pos) const;
     EffectWindow* windowAt(QPoint pos) const;
@@ -106,7 +105,9 @@ private:
     int desktopToLeft(int desktop, bool wrap = true) const;
     int desktopUp(int desktop, bool wrap = true) const;
     int desktopDown(int desktop, bool wrap = true) const;
-    void setActive(bool active);
+    void deactivate();
+    void activate();
+    void toggle();
     void setup();
     void setupGrid();
     void finish();
@@ -127,7 +128,12 @@ private:
     int clickBehavior;
 
     bool activated;
+
     QTimeLine timeline;
+    // used to indicate whether or not the prepaint thingy should drive the
+    // animation.
+    bool timelineRunning = false;
+
     int paintingDesktop;
     int highlightedDesktop;
     int sourceDesktop;
@@ -149,22 +155,23 @@ private:
     Qt::Orientation orientation;
     QPoint activeCell;
     // Per screen variables
-    QList<double> scale; // Because the border isn't a ratio each screen is different
-    QList<double> unscaledBorder;
-    QList<QSizeF> scaledSize;
-    QList<QPointF> scaledOffset;
+    QMap<EffectScreen *, double> scale; // Because the border isn't a ratio each screen is different
+    QMap<EffectScreen *, double> unscaledBorder;
+    QMap<EffectScreen *, QSizeF> scaledSize;
+    QMap<EffectScreen *, QPointF> scaledOffset;
 
     // Shortcut - needed to toggle the effect
     QList<QKeySequence> shortcut;
 
     PresentWindowsEffectProxy* m_proxy;
-    QList<WindowMotionManager> m_managers;
+    QMap<EffectScreen *, QList<WindowMotionManager>> m_managers;
     QRect m_windowMoveGeometry;
     QPoint m_windowMoveStartPoint;
 
-    QVector<EffectQuickScene*> m_desktopButtons;
+    QVector<OffscreenQuickScene*> m_desktopButtons;
 
-    QAction *m_activateAction;
+    QAction *m_gestureAction;
+    QAction *m_shortcutAction;
 
 };
 

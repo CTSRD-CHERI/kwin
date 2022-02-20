@@ -14,7 +14,6 @@
 #include "deleted.h"
 #include "effects.h"
 #include "effectloader.h"
-#include "screens.h"
 #include "wayland_server.h"
 #include "workspace.h"
 #include "scripting/scriptedeffect.h"
@@ -83,7 +82,7 @@ void DontCrashCancelAnimationFromAnimationEndedTest::testScript()
 
     using namespace KWayland::Client;
     // create a window
-    Surface *surface = Test::createSurface(Test::waylandCompositor());
+    KWayland::Client::Surface *surface = Test::createSurface(Test::waylandCompositor());
     QVERIFY(surface);
     Test::XdgToplevel *shellSurface = Test::createXdgToplevelSurface(surface, surface);
     QVERIFY(shellSurface);

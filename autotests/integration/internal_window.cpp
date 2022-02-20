@@ -7,12 +7,12 @@
     SPDX-License-Identifier: GPL-2.0-or-later
 */
 #include "kwin_wayland_test.h"
+#include "abstract_output.h"
 #include "platform.h"
 #include "cursor.h"
 #include "deleted.h"
 #include "effects.h"
 #include "internal_client.h"
-#include "screens.h"
 #include "wayland_server.h"
 #include "workspace.h"
 
@@ -186,9 +186,10 @@ void InternalWindowTest::initTestCase()
 
     kwinApp()->start();
     QVERIFY(applicationStartedSpy.wait());
-    QCOMPARE(screens()->count(), 2);
-    QCOMPARE(screens()->geometry(0), QRect(0, 0, 1280, 1024));
-    QCOMPARE(screens()->geometry(1), QRect(1280, 0, 1280, 1024));
+    const auto outputs = kwinApp()->platform()->enabledOutputs();
+    QCOMPARE(outputs.count(), 2);
+    QCOMPARE(outputs[0]->geometry(), QRect(0, 0, 1280, 1024));
+    QCOMPARE(outputs[1]->geometry(), QRect(1280, 0, 1280, 1024));
     Test::initWaylandWorkspace();
 }
 
@@ -222,7 +223,7 @@ void InternalWindowTest::testEnterLeave()
     QVERIFY(!c->isDecorated());
     QCOMPARE(workspace()->findInternal(&win), c);
     QCOMPARE(c->frameGeometry(), QRect(0, 0, 100, 100));
-    QVERIFY(c->isShown(false));
+    QVERIFY(c->isShown());
     QVERIFY(workspace()->stackingOrder().contains(c));
 
     QSignalSpy enterSpy(&win, &HelperWindow::entered);
@@ -377,7 +378,7 @@ void InternalWindowTest::testKeyboardTriggersLeave()
     QVERIFY(enteredSpy.isValid());
     QSignalSpy leftSpy(keyboard.data(), &Keyboard::left);
     QVERIFY(leftSpy.isValid());
-    QScopedPointer<Surface> surface(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
 
     // now let's render

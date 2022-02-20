@@ -43,7 +43,7 @@ void BufferSizeChangeTest::testShmBufferSizeChange()
 
     using namespace KWayland::Client;
 
-    QScopedPointer<Surface> surface(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
     QVERIFY(!surface.isNull());
 
     QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
@@ -56,7 +56,7 @@ void BufferSizeChangeTest::testShmBufferSizeChange()
     // add a first repaint
     QSignalSpy frameRenderedSpy(Compositor::self()->scene(), &Scene::frameRendered);
     QVERIFY(frameRenderedSpy.isValid());
-    Compositor::self()->addRepaintFull();
+    Compositor::self()->scene()->addRepaintFull();
     QVERIFY(frameRenderedSpy.wait());
 
     // now change buffer size
@@ -65,7 +65,7 @@ void BufferSizeChangeTest::testShmBufferSizeChange()
     QSignalSpy damagedSpy(client, &AbstractClient::damaged);
     QVERIFY(damagedSpy.isValid());
     QVERIFY(damagedSpy.wait());
-    KWin::Compositor::self()->addRepaintFull();
+    KWin::Compositor::self()->scene()->addRepaintFull();
     QVERIFY(frameRenderedSpy.wait());
 }
 
@@ -74,13 +74,13 @@ void BufferSizeChangeTest::testShmBufferSizeChangeOnSubSurface()
     using namespace KWayland::Client;
 
     // setup parent surface
-    QScopedPointer<Surface> parentSurface(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> parentSurface(Test::createSurface());
     QVERIFY(!parentSurface.isNull());
     QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(parentSurface.data()));
     QVERIFY(!shellSurface.isNull());
 
     // setup sub surface
-    QScopedPointer<Surface> surface(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
     QVERIFY(!surface.isNull());
     QScopedPointer<SubSurface> subSurface(Test::createSubSurface(surface.data(), parentSurface.data()));
     QVERIFY(!subSurface.isNull());
@@ -93,19 +93,19 @@ void BufferSizeChangeTest::testShmBufferSizeChangeOnSubSurface()
     // add a first repaint
     QSignalSpy frameRenderedSpy(Compositor::self()->scene(), &Scene::frameRendered);
     QVERIFY(frameRenderedSpy.isValid());
-    Compositor::self()->addRepaintFull();
+    Compositor::self()->scene()->addRepaintFull();
     QVERIFY(frameRenderedSpy.wait());
 
     // change buffer size of sub surface
     QSignalSpy damagedParentSpy(parent, &AbstractClient::damaged);
     QVERIFY(damagedParentSpy.isValid());
     Test::render(surface.data(), QSize(20, 10), Qt::red);
-    parentSurface->commit(Surface::CommitFlag::None);
+    parentSurface->commit(KWayland::Client::Surface::CommitFlag::None);
 
     QVERIFY(damagedParentSpy.wait());
 
     // add a second repaint
-    KWin::Compositor::self()->addRepaintFull();
+    KWin::Compositor::self()->scene()->addRepaintFull();
     QVERIFY(frameRenderedSpy.wait());
 }
 

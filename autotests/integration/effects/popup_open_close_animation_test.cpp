@@ -21,8 +21,6 @@
 
 #include "decorations/decoratedclient.h"
 
-#include "effect_builtins.h"
-
 #include <KWayland/Client/surface.h>
 
 #include <linux/input.h>
@@ -59,8 +57,7 @@ void PopupOpenCloseAnimationTest::initTestCase()
 
     auto config = KSharedConfig::openConfig(QString(), KConfig::SimpleConfig);
     KConfigGroup plugins(config, QStringLiteral("Plugins"));
-    ScriptedEffectLoader loader;
-    const auto builtinNames = BuiltInEffects::availableEffectNames() << loader.listOfKnownEffects();
+    const auto builtinNames = EffectLoader().listOfKnownEffects();
     for (const QString &name : builtinNames) {
         plugins.writeEntry(name + QStringLiteral("Enabled"), false);
     }
@@ -100,7 +97,7 @@ void PopupOpenCloseAnimationTest::testAnimatePopups()
 
     // Create the main window.
     using namespace KWayland::Client;
-    QScopedPointer<Surface> mainWindowSurface(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> mainWindowSurface(Test::createSurface());
     QVERIFY(!mainWindowSurface.isNull());
     QScopedPointer<Test::XdgToplevel> mainWindowShellSurface(Test::createXdgToplevelSurface(mainWindowSurface.data()));
     QVERIFY(!mainWindowShellSurface.isNull());
@@ -117,7 +114,7 @@ void PopupOpenCloseAnimationTest::testAnimatePopups()
     QVERIFY(!effect->isActive());
 
     // Create a popup, it should be animated.
-    QScopedPointer<Surface> popupSurface(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> popupSurface(Test::createSurface());
     QVERIFY(!popupSurface.isNull());
     QScopedPointer<Test::XdgPositioner> positioner(Test::createXdgPositioner());
     positioner->set_size(20, 20);
@@ -162,7 +159,7 @@ void PopupOpenCloseAnimationTest::testAnimateUserActionsPopup()
 
     // Create the test client.
     using namespace KWayland::Client;
-    QScopedPointer<Surface> surface(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
     QVERIFY(!surface.isNull());
     QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
     QVERIFY(!shellSurface.isNull());
@@ -214,13 +211,19 @@ void PopupOpenCloseAnimationTest::testAnimateDecorationTooltips()
 
     // Create the test client.
     using namespace KWayland::Client;
-    QScopedPointer<Surface> surface(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
     QVERIFY(!surface.isNull());
-    QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
+    QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data(), Test::CreationSetup::CreateOnly));
     QVERIFY(!shellSurface.isNull());
     QScopedPointer<Test::XdgToplevelDecorationV1> deco(Test::createXdgToplevelDecorationV1(shellSurface.data()));
     QVERIFY(!deco.isNull());
+
+    QSignalSpy surfaceConfigureRequestedSpy(shellSurface->xdgSurface(), &Test::XdgSurface::configureRequested);
     deco->set_mode(Test::XdgToplevelDecorationV1::mode_server_side);
+    surface->commit(KWayland::Client::Surface::CommitFlag::None);
+    QVERIFY(surfaceConfigureRequestedSpy.wait());
+
+    shellSurface->xdgSurface()->ack_configure(surfaceConfigureRequestedSpy.last().at(0).value<quint32>());
     AbstractClient *client = Test::renderAndWaitForShown(surface.data(), QSize(100, 50), Qt::blue);
     QVERIFY(client);
     QVERIFY(client->isDecorated());

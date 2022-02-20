@@ -38,15 +38,13 @@ install(TARGETS kwinxrenderutils EXPORT KWinEffectsTargets ${KDE_INSTALL_TARGETS
 set(kwin_EFFECTSLIB_SRCS
     anidata.cpp
     kwinanimationeffect.cpp
-    kwineffectquickview.cpp
+    kwindeformeffect.cpp
     kwineffects.cpp
+    kwinoffscreenquickview.cpp
+    kwinquickeffect.cpp
     logging.cpp
+    sharedqmlengine.cpp
 )
-if(KWIN_BUILD_OPENGL)
-    list(APPEND kwin_EFFECTSLIB_SRCS
-        kwindeformeffect.cpp
-    )
-endif()
 
 add_library(kwineffects SHARED ${kwin_EFFECTSLIB_SRCS})
 generate_export_header(kwineffects EXPORT_FILE_NAME kwineffects_export.h)
@@ -58,15 +56,9 @@ target_link_libraries(kwineffects
         XCB::XCB
     PRIVATE
         Qt::Quick
-        KF5::Declarative
-
+        KF5::I18n
+        kwinglutils
 )
-if(KWIN_BUILD_OPENGL)
-  target_link_libraries(kwineffects PRIVATE kwinglutils)
-endif()
-if(KWIN_BUILD_WAYLAND)
-  target_link_libraries(kwineffects PUBLIC Plasma::KWaylandServer)
-endif()
 set_target_properties(kwineffects PROPERTIES
     VERSION ${KWINEFFECTS_VERSION}
     SOVERSION ${KWINEFFECTS_SOVERSION}
@@ -77,23 +69,17 @@ install(TARGETS kwineffects EXPORT KWinEffectsTargets ${KDE_INSTALL_TARGETS_DEFA
 
 # kwingl(es)utils library
 set(kwin_GLUTILSLIB_SRCS
-    logging.cpp
-)
-
-add_library(kwinglutils SHARED ${kwin_GLUTILSLIB_SRCS})
-generate_export_header(kwinglutils BASE_NAME kwinglutils EXPORT_FILE_NAME kwinglutils_export.h)
-target_link_libraries(kwinglutils PUBLIC XCB::XCB KF5::CoreAddons KF5::ConfigCore KF5::WindowSystem)
-if (KWIN_BUILD_OPENGL)
-  message(FATAL_ERROR building opengl)
-  target_link_libraries(kwinglutils PUBLIC epoxy::epoxy)
-  target_sources(kwinglutils
     kwinglplatform.cpp
     kwingltexture.cpp
     kwinglutils.cpp
     kwinglutils_funcs.cpp
     kwineglimagetexture.cpp
-  )
-endif()
+    logging.cpp
+)
+
+add_library(kwinglutils SHARED ${kwin_GLUTILSLIB_SRCS})
+generate_export_header(kwinglutils BASE_NAME kwinglutils EXPORT_FILE_NAME kwinglutils_export.h)
+target_link_libraries(kwinglutils PUBLIC XCB::XCB KF5::CoreAddons KF5::ConfigCore KF5::WindowSystem epoxy::epoxy)
 set_target_properties(kwinglutils PROPERTIES
     VERSION ${KWINEFFECTS_VERSION}
     SOVERSION ${KWINEFFECTS_SOVERSION}
@@ -109,13 +95,14 @@ install(FILES
     ${CMAKE_CURRENT_BINARY_DIR}/kwinxrenderutils_export.h
     kwinanimationeffect.h
     kwindeformeffect.h
-    kwineffectquickview.h
     kwineffects.h
     kwinglobals.h
     kwinglplatform.h
     kwingltexture.h
     kwinglutils.h
     kwinglutils_funcs.h
+    kwinoffscreenquickview.h
+    kwinquickeffect.h
     kwinxrenderutils.h
     DESTINATION ${KDE_INSTALL_INCLUDEDIR} COMPONENT Devel)
 

@@ -11,19 +11,16 @@
 #define KWIN_TOPLEVEL_H
 
 // kwin
-#include "input.h"
-#include "utils.h"
-#include "virtualdesktops.h"
-#include "xcbutils.h"
+#include "utils/common.h"
+#include "utils/xcbutils.h"
 // KDE
 #include <NETWM>
 // Qt
 #include <QObject>
 #include <QMatrix4x4>
+#include <QPointer>
+#include <QRect>
 #include <QUuid>
-// xcb
-#include <xcb/damage.h>
-#include <xcb/xfixes.h>
 // c++
 #include <functional>
 
@@ -43,6 +40,7 @@ class Deleted;
 class EffectWindowImpl;
 class Shadow;
 class SurfaceItem;
+class VirtualDesktop;
 class WindowItem;
 
 /**
@@ -54,6 +52,9 @@ enum class ReleaseReason {
     KWinShutsDown ///< Release on KWin Shutdown (window still valid)
 };
 
+/**
+ * Represents a window.
+ */
 class KWIN_EXPORT Toplevel : public QObject
 {
     Q_OBJECT
@@ -259,12 +260,6 @@ class KWIN_EXPORT Toplevel : public QObject
     Q_PROPERTY(bool skipsCloseAnimation READ skipsCloseAnimation WRITE setSkipCloseAnimation NOTIFY skipCloseAnimationChanged)
 
     /**
-     * The Id of the Wayland Surface associated with this Toplevel.
-     * On X11 only setups the value is @c 0.
-     */
-    Q_PROPERTY(quint32 surfaceId READ surfaceId NOTIFY surfaceIdChanged)
-
-    /**
      * Interface to the Wayland Surface.
      * Relevant only in Wayland, in X11 it will be nullptr
      */
@@ -293,6 +288,11 @@ class KWIN_EXPORT Toplevel : public QObject
      * @since 5.20
      */
     Q_PROPERTY(int pid READ pid CONSTANT)
+
+    /**
+     * The position of this window within Workspace's window stack.
+     */
+    Q_PROPERTY(int stackingOrder READ stackingOrder NOTIFY stackingOrderChanged)
 
 public:
     explicit Toplevel();
@@ -339,30 +339,17 @@ public:
     int y() const;
     int width() const;
     int height() const;
-    bool isOnScreen(int screen) const;   // true if it's at least partially there
     bool isOnOutput(AbstractOutput *output) const;
-    bool isOnActiveScreen() const;
+    bool isOnActiveOutput() const;
     int screen() const; // the screen where the center is
-    /**
-     * The scale of the screen this window is currently on
-     * @note The buffer scale can be different.
-     * @since 5.12
-     */
-    qreal screenScale() const; //
-    /**
-     * Returns the ratio between physical pixels and device-independent pixels for
-     * the attached buffer (or pixmap).
-     *
-     * For X11 clients, this method always returns 1.
-     */
-    virtual qreal bufferScale() const;
+    AbstractOutput *output() const;
+    void setOutput(AbstractOutput *output);
     virtual QPoint clientPos() const = 0; // inside of geometry()
     QSize clientSize() const;
     /**
      * Returns a rectangle that the window occupies on the screen, including drop-shadows.
      */
     QRect visibleGeometry() const;
-    virtual QRect transparentRect() const = 0;
     virtual bool isClient() const;
     virtual bool isDeleted() const;
 
@@ -403,6 +390,7 @@ public:
     virtual bool isLockScreen() const;
     virtual bool isInputMethod() const;
     virtual bool isOutline() const;
+    virtual bool isInternal() const;
 
     /**
      * Returns the virtual desktop within the workspace() the client window
@@ -413,6 +401,7 @@ public:
     virtual int desktop() const = 0;
     virtual QVector<VirtualDesktop *> desktops() const = 0;
     virtual QStringList activities() const = 0;
+    bool isOnDesktop(VirtualDesktop *desktop) const;
     bool isOnDesktop(int d) const;
     bool isOnActivity(const QString &activity) const;
     bool isOnCurrentDesktop() const;
@@ -464,6 +453,10 @@ public:
     void elevate(bool elevate);
 
     /**
+     * Returns the Shadow associated with this Toplevel or @c null if it has no shadow.
+     */
+    Shadow *shadow() const;
+    /**
      * Updates the Shadow associated with this Toplevel from X11 Property.
      * Call this method when the Property changes or Compositing is started.
      */
@@ -487,7 +480,7 @@ public:
     bool skipsCloseAnimation() const;
     void setSkipCloseAnimation(bool set);
 
-    quint32 surfaceId() const;
+    quint32 pendingSurfaceId() const;
     KWaylandServer::SurfaceInterface *surface() const;
     void setSurface(KWaylandServer::SurfaceInterface *surface);
 
@@ -567,9 +560,12 @@ public:
      */
     virtual bool isShade() const { return false; }
 
+    int stackingOrder() const;
+    void setStackingOrder(int order); ///< @internal
+
 Q_SIGNALS:
+    void stackingOrderChanged();
     void shadeChanged();
-    void markedAsZombie();
     void opacityChanged(KWin::Toplevel* toplevel, qreal oldOpacity);
     void damaged(KWin::Toplevel* toplevel, const QRegion& damage);
     void inputTransformationChanged();
@@ -606,11 +602,6 @@ Q_SIGNALS:
      */
     void windowClassChanged();
     /**
-     * Emitted when a Wayland Surface gets associated with this Toplevel.
-     * @since 5.3
-     */
-    void surfaceIdChanged(quint32);
-    /**
      * @since 5.4
      */
     void hasAlphaChanged();
@@ -619,13 +610,6 @@ Q_SIGNALS:
      * Emitted whenever the Surface for this Toplevel changes.
      */
     void surfaceChanged();
-
-    /*
-     * Emitted when the client's screen changes onto a screen of a different scale
-     * or the screen we're on changes
-     * @since 5.12
-     */
-    void screenScaleChanged();
 
     /**
      * Emitted whenever the client's shadow changes.
@@ -656,9 +640,9 @@ protected Q_SLOTS:
      * Checks whether the screen number for this Toplevel changed and updates if needed.
      * Any method changing the geometry of the Toplevel should call this method.
      */
-    void checkScreen();
-    void setupCheckScreenConnection();
-    void removeCheckScreenConnection();
+    void checkOutput();
+    void setupCheckOutputConnection();
+    void removeCheckOutputConnection();
     void setReadyForPainting();
 
 protected:
@@ -686,6 +670,7 @@ protected:
     void getSkipCloseAnimation();
     void copyToDeleted(Toplevel* c);
     void disownDataPassedToDeleted();
+    void deleteShadow();
     void deleteEffectWindow();
     void setDepth(int depth);
     QRect m_frameGeometry;
@@ -707,6 +692,7 @@ private:
     Xcb::Window m_client;
     bool is_shape;
     EffectWindowImpl* effect_window;
+    Shadow *m_shadow = nullptr;
     QByteArray resource_name;
     QByteArray resource_class;
     ClientMachine *m_clientMachine;
@@ -714,13 +700,13 @@ private:
     QRegion opaque_region;
     mutable QRegion m_shapeRegion;
     mutable bool m_shapeRegionIsValid = false;
-    int m_screen;
+    AbstractOutput *m_output = nullptr;
     bool m_skipCloseAnimation;
-    quint32 m_surfaceId = 0;
-    KWaylandServer::SurfaceInterface *m_surface = nullptr;
+    quint32 m_pendingSurfaceId = 0;
+    QPointer<KWaylandServer::SurfaceInterface> m_surface;
     // when adding new data members, check also copyToDeleted()
-    qreal m_screenScale = 1.0;
     qreal m_opacity = 1.0;
+    int m_stackingOrder = 0;
 };
 
 inline xcb_window_t Toplevel::window() const
@@ -894,6 +880,11 @@ inline bool Toplevel::isOutline() const
     return false;
 }
 
+inline bool Toplevel::isInternal() const
+{
+    return false;
+}
+
 inline bool Toplevel::shape() const
 {
     return is_shape;
@@ -928,12 +919,7 @@ const EffectWindowImpl* Toplevel::effectWindow() const
 
 inline bool Toplevel::isOnAllDesktops() const
 {
-    return kwinApp()->operationMode() == Application::OperationModeWaylandOnly ||
-           kwinApp()->operationMode() == Application::OperationModeXwayland
-        //Wayland
-        ? desktops().isEmpty()
-        //X11
-        : desktop() == NET::OnAllDesktops;
+    return desktops().isEmpty();
 }
 
 inline bool Toplevel::isOnAllActivities() const
@@ -941,23 +927,9 @@ inline bool Toplevel::isOnAllActivities() const
     return activities().isEmpty();
 }
 
-inline bool Toplevel::isOnDesktop(int d) const
-{
-    return (kwinApp()->operationMode() == Application::OperationModeWaylandOnly ||
-            kwinApp()->operationMode() == Application::OperationModeXwayland
-            ? desktops().contains(VirtualDesktopManager::self()->desktopForX11Id(d))
-            : desktop() == d
-           ) || isOnAllDesktops();
-}
-
 inline bool Toplevel::isOnActivity(const QString &activity) const
 {
     return activities().isEmpty() || activities().contains(activity);
-}
-
-inline bool Toplevel::isOnCurrentDesktop() const
-{
-    return isOnDesktop(VirtualDesktopManager::self()->current());
 }
 
 inline QByteArray Toplevel::resourceName() const
@@ -975,14 +947,9 @@ inline const ClientMachine *Toplevel::clientMachine() const
     return m_clientMachine;
 }
 
-inline quint32 Toplevel::surfaceId() const
+inline quint32 Toplevel::pendingSurfaceId() const
 {
-    return m_surfaceId;
-}
-
-inline KWaylandServer::SurfaceInterface *Toplevel::surface() const
-{
-    return m_surface;
+    return m_pendingSurfaceId;
 }
 
 inline const QSharedPointer<QOpenGLFramebufferObject> &Toplevel::internalFramebufferObject() const

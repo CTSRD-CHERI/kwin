@@ -9,9 +9,10 @@
 */
 #include "abstract_wayland_output.h"
 #include "screens.h"
+#include "waylandoutputconfig.h"
 
 // KWayland
-#include <KWaylandServer/outputchangeset.h>
+#include <KWaylandServer/outputchangeset_v2.h>
 // KF5
 #include <KLocalizedString>
 
@@ -19,11 +20,6 @@
 
 namespace KWin
 {
-
-static AbstractWaylandOutput::Transform outputDeviceTransformToKWinTransform(KWaylandServer::OutputDeviceInterface::Transform transform)
-{
-    return static_cast<AbstractWaylandOutput::Transform>(transform);
-}
 
 AbstractWaylandOutput::AbstractWaylandOutput(QObject *parent)
     : AbstractOutput(parent)
@@ -55,7 +51,7 @@ QUuid AbstractWaylandOutput::uuid() const
 
 QRect AbstractWaylandOutput::geometry() const
 {
-    return QRect(globalPos(), pixelSize() / scale());
+    return QRect(m_position, pixelSize() / scale());
 }
 
 QSize AbstractWaylandOutput::physicalSize() const
@@ -68,12 +64,7 @@ int AbstractWaylandOutput::refreshRate() const
     return m_refreshRate;
 }
 
-QPoint AbstractWaylandOutput::globalPos() const
-{
-    return m_position;
-}
-
-void AbstractWaylandOutput::setGlobalPos(const QPoint &pos)
+void AbstractWaylandOutput::moveTo(const QPoint &pos)
 {
     if (m_position != pos) {
         m_position = pos;
@@ -116,9 +107,21 @@ QByteArray AbstractWaylandOutput::edid() const
     return m_edid;
 }
 
+bool AbstractWaylandOutput::Mode::operator==(const Mode &other) const {
+    return id == other.id && other.flags == flags && size == other.size && refreshRate == other.refreshRate;
+}
+
 QVector<AbstractWaylandOutput::Mode> AbstractWaylandOutput::modes() const
 {
     return m_modes;
+}
+
+void AbstractWaylandOutput::setModes(const QVector<Mode> &modes)
+{
+    if (m_modes != modes) {
+        m_modes = modes;
+        Q_EMIT modesChanged();
+    }
 }
 
 qreal AbstractWaylandOutput::scale() const
@@ -145,53 +148,19 @@ void AbstractWaylandOutput::setSubPixelInternal(SubPixel subPixel)
     m_subPixel = subPixel;
 }
 
-void AbstractWaylandOutput::applyChanges(const KWaylandServer::OutputChangeSet *changeSet)
+void AbstractWaylandOutput::applyChanges(const WaylandOutputConfig &config)
 {
-    qCDebug(KWIN_CORE) << "Apply changes to the Wayland output.";
-    bool emitModeChanged = false;
-    bool overallSizeCheckNeeded = false;
+    auto props = config.constChangeSet(this);
+    Q_EMIT aboutToChange();
 
-    // Enablement changes are handled by platform.
-    if (changeSet->modeChanged()) {
-        qCDebug(KWIN_CORE) << "Setting new mode:" << changeSet->mode();
-        updateMode(changeSet->mode());
-        emitModeChanged = true;
-    }
-    if (changeSet->transformChanged()) {
-        qCDebug(KWIN_CORE) << "Server setting transform: " << (int)(changeSet->transform());
-        auto transform = outputDeviceTransformToKWinTransform(changeSet->transform());
-        setTransformInternal(transform);
-        updateTransform(transform);
-        emitModeChanged = true;
-    }
-    if (changeSet->positionChanged()) {
-        qCDebug(KWIN_CORE) << "Server setting position: " << changeSet->position();
-        setGlobalPos(changeSet->position());
-        // may just work already!
-        overallSizeCheckNeeded = true;
-    }
-    if (changeSet->scaleChanged()) {
-        qCDebug(KWIN_CORE) << "Setting scale:" << changeSet->scaleF();
-        setScale(changeSet->scaleF());
-        emitModeChanged = true;
-    }
-    if (changeSet->overscanChanged()) {
-        qCDebug(KWIN_CORE) << "Setting overscan:" << changeSet->overscan();
-        setOverscan(changeSet->overscan());
-    }
-    if (changeSet->vrrPolicyChanged()) {
-        qCDebug(KWIN_CORE) << "Setting VRR Policy:" << changeSet->vrrPolicy();
-        setVrrPolicy(static_cast<RenderLoop::VrrPolicy>(changeSet->vrrPolicy()));
-    }
+    setEnabled(props->enabled);
+    updateTransform(props->transform);
+    moveTo(props->pos);
+    setScale(props->scale);
+    setVrrPolicy(props->vrrPolicy);
+    setRgbRangeInternal(props->rgbRange);
 
-    overallSizeCheckNeeded |= emitModeChanged;
-    if (overallSizeCheckNeeded) {
-        Q_EMIT screens()->changed();
-    }
-
-    if (emitModeChanged) {
-        Q_EMIT modeChanged();
-    }
+    Q_EMIT changed();
 }
 
 bool AbstractWaylandOutput::isEnabled() const
@@ -215,10 +184,15 @@ QString AbstractWaylandOutput::description() const
 
 void AbstractWaylandOutput::setCurrentModeInternal(const QSize &size, int refreshRate)
 {
-    if (m_modeSize != size || m_refreshRate != refreshRate) {
+    const bool sizeChanged = m_modeSize != size;
+    if (sizeChanged || m_refreshRate != refreshRate) {
         m_modeSize = size;
         m_refreshRate = refreshRate;
-        Q_EMIT geometryChanged();
+
+        Q_EMIT currentModeChanged();
+        if (sizeChanged) {
+            Q_EMIT geometryChanged();
+        }
     }
 }
 
@@ -269,7 +243,7 @@ void AbstractWaylandOutput::setTransformInternal(Transform transform)
     if (m_transform != transform) {
         m_transform = transform;
         Q_EMIT transformChanged();
-        Q_EMIT modeChanged();
+        Q_EMIT currentModeChanged();
         Q_EMIT geometryChanged();
     }
 }
@@ -368,11 +342,6 @@ uint32_t AbstractWaylandOutput::overscan() const
     return m_overscan;
 }
 
-void AbstractWaylandOutput::setOverscan(uint32_t overscan)
-{
-    Q_UNUSED(overscan);
-}
-
 void AbstractWaylandOutput::setVrrPolicy(RenderLoop::VrrPolicy policy)
 {
     if (renderLoop()->vrrPolicy() != policy && (m_capabilities & Capability::Vrr)) {
@@ -384,6 +353,29 @@ void AbstractWaylandOutput::setVrrPolicy(RenderLoop::VrrPolicy policy)
 RenderLoop::VrrPolicy AbstractWaylandOutput::vrrPolicy() const
 {
     return renderLoop()->vrrPolicy();
+}
+
+bool AbstractWaylandOutput::isPlaceholder() const
+{
+    return m_isPlaceholder;
+}
+
+void AbstractWaylandOutput::setPlaceholder(bool isPlaceholder)
+{
+    m_isPlaceholder = isPlaceholder;
+}
+
+AbstractWaylandOutput::RgbRange AbstractWaylandOutput::rgbRange() const
+{
+    return m_rgbRange;
+}
+
+void AbstractWaylandOutput::setRgbRangeInternal(RgbRange range)
+{
+    if (m_rgbRange != range) {
+        m_rgbRange = range;
+        Q_EMIT rgbRangeChanged();
+    }
 }
 
 }

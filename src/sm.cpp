@@ -15,6 +15,7 @@
 #include <pwd.h>
 #include <kconfig.h>
 
+#include "virtualdesktops.h"
 #include "workspace.h"
 #include "x11client.h"
 #include <QDebug>
@@ -39,7 +40,7 @@ static KConfig *sessionConfig(QString id, QString key)
     lastId = id;
     lastKey = key;
     if (!config) {
-        config = new KConfig(pattern.arg(id).arg(key), KConfig::SimpleConfig);
+        config = new KConfig(pattern.arg(id, key), KConfig::SimpleConfig);
     }
     return config;
 }
@@ -276,7 +277,7 @@ SessionInfo* Workspace::takeSessionInfo(X11Client *c)
     // First search ``session''
     if (! sessionId.isEmpty()) {
         // look for a real session managed client (algorithm suggested by ICCCM)
-        Q_FOREACH (SessionInfo * info, session) {
+        for (SessionInfo *info : qAsConst(session)) {
             if (realInfo)
                 break;
             if (info->sessionId == sessionId && sessionInfoWindowTypeMatch(c, info)) {
@@ -297,7 +298,7 @@ SessionInfo* Workspace::takeSessionInfo(X11Client *c)
         }
     } else {
         // look for a sessioninfo with matching features.
-        Q_FOREACH (SessionInfo * info, session) {
+        for (SessionInfo *info : qAsConst(session)) {
             if (realInfo)
                 break;
             if (info->resourceName == resourceName

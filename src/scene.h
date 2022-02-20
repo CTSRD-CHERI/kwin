@@ -11,7 +11,7 @@
 #define KWIN_SCENE_H
 
 #include "toplevel.h"
-#include "utils.h"
+#include "utils/common.h"
 #include "kwineffects.h"
 
 #include <QElapsedTimer>
@@ -32,8 +32,6 @@ class EffectFrameImpl;
 class EffectWindowImpl;
 class GLTexture;
 class Item;
-class OverlayWindow;
-class PlatformSurfaceTexture;
 class RenderLoop;
 class Shadow;
 class ShadowItem;
@@ -41,6 +39,7 @@ class SurfaceItem;
 class SurfacePixmapInternal;
 class SurfacePixmapWayland;
 class SurfacePixmapX11;
+class SurfaceTexture;
 class WindowItem;
 
 // The base class for compositing backends.
@@ -53,27 +52,37 @@ public:
     class EffectFrame;
     class Window;
 
+    void initialize();
+
     /**
      * Schedules a repaint for the specified @a region.
      */
     void addRepaint(const QRegion &region);
+    void addRepaint(const QRect &rect);
+    void addRepaint(int x, int y, int width, int height);
+    void addRepaintFull();
+
+    QRect geometry() const;
+    void setGeometry(const QRect &rect);
 
     /**
-     * Returns the repaints region for output with the specified @a screenId.
+     * Returns the repaints region for output with the specified @a output.
      */
-    QRegion repaints(int screenId) const;
-    void resetRepaints(int screenId);
+    QRegion repaints(AbstractOutput *output) const;
+    void resetRepaints(AbstractOutput *output);
 
     // Returns true if the ctor failed to properly initialize.
     virtual bool initFailed() const = 0;
-    virtual CompositingType compositingType() const = 0;
 
     // Repaints the given screen areas, windows provides the stacking order.
     // The entry point for the main part of the painting pass.
     // returns the time since the last vblank signal - if there's one
     // ie. "what of this frame is lost to painting"
-    virtual void paint(int screenId, const QRegion &damage, const QList<Toplevel *> &windows,
+    virtual void paint(AbstractOutput *output, const QRegion &damage, const QList<Toplevel *> &windows,
                        RenderLoop *renderLoop) = 0;
+
+
+    void paintScreen(AbstractOutput *output, const QList<Toplevel *> &toplevels);
 
     /**
      * Adds the Toplevel to the Scene.
@@ -131,11 +140,9 @@ public:
         PAINT_WINDOW_LANCZOS = 1 << 8
         // PAINT_SCREEN_WITH_TRANSFORMED_WINDOWS_WITHOUT_FULL_REPAINTS = 1 << 9 has been removed
     };
-    virtual OverlayWindow* overlayWindow() const = 0;
 
     virtual bool makeOpenGLContextCurrent();
     virtual void doneOpenGLContextCurrent();
-    virtual bool supportsSurfacelessContext() const;
     virtual bool supportsNativeFence() const;
 
     virtual QMatrix4x4 screenProjectionMatrix() const;
@@ -160,7 +167,7 @@ public:
      * The render buffer used by a QPainter based compositor.
      * Default implementation returns @c nullptr.
      */
-    virtual QImage *qpainterRenderBuffer(int screenId) const;
+    virtual QImage *qpainterRenderBuffer(AbstractOutput *output) const;
 
     /**
      * The backend specific extensions (e.g. EGL/GLX extensions).
@@ -176,15 +183,22 @@ public:
         return {};
     }
 
-    virtual PlatformSurfaceTexture *createPlatformSurfaceTextureInternal(SurfacePixmapInternal *pixmap);
-    virtual PlatformSurfaceTexture *createPlatformSurfaceTextureX11(SurfacePixmapX11 *pixmap);
-    virtual PlatformSurfaceTexture *createPlatformSurfaceTextureWayland(SurfacePixmapWayland *pixmap);
+    virtual SurfaceTexture *createSurfaceTextureInternal(SurfacePixmapInternal *pixmap);
+    virtual SurfaceTexture *createSurfaceTextureX11(SurfacePixmapX11 *pixmap);
+    virtual SurfaceTexture *createSurfaceTextureWayland(SurfacePixmapWayland *pixmap);
 
     virtual void paintDesktop(int desktop, int mask, const QRegion &region, ScreenPaintData &data);
 
+    QMatrix4x4 renderTargetProjectionMatrix() const;
+    QRect renderTargetRect() const;
+    void setRenderTargetRect(const QRect &rect);
+    qreal renderTargetScale() const;
+    void setRenderTargetScale(qreal scale);
+
+    QRegion mapToRenderTarget(const QRegion &region) const;
+
 Q_SIGNALS:
     void frameRendered();
-    void resetCompositing();
 
 public Q_SLOTS:
     // a window has been closed
@@ -195,10 +209,9 @@ protected:
     void clearStackingOrder();
     // shared implementation, starts painting the screen
     void paintScreen(const QRegion &damage, const QRegion &repaint,
-                     QRegion *updateRegion, QRegion *validRegion, RenderLoop *renderLoop,
-                     const QMatrix4x4 &projection = QMatrix4x4());
+                     QRegion *updateRegion, QRegion *validRegion);
     // Render cursor texture in case hardware cursor is disabled/non-applicable
-    virtual void paintCursor(const QRegion &region) = 0;
+    virtual void paintCursor(AbstractOutput *output, const QRegion &region) = 0;
     friend class EffectsHandlerImpl;
     // called after all effects had their paintScreen() called
     void finalPaintScreen(int mask, const QRegion &region, ScreenPaintData& data);
@@ -215,7 +228,7 @@ protected:
      *
      * @p damage contains the reported damage as suggested by windows and effects on prepaint calls.
      */
-    virtual void aboutToStartPainting(int screenId, const QRegion &damage);
+    virtual void aboutToStartPainting(AbstractOutput *output, const QRegion &damage);
     // called after all effects had their paintWindow() called
     void finalPaintWindow(EffectWindowImpl* w, int mask, const QRegion &region, WindowPaintData& data);
     // shared implementation, starts painting the window
@@ -226,7 +239,7 @@ protected:
     // the default is NOOP
     virtual void extendPaintRegion(QRegion &region, bool opaqueFullscreen);
 
-    virtual void paintEffectQuickView(EffectQuickView *w) = 0;
+    virtual void paintOffscreenQuickView(OffscreenQuickView *w) = 0;
 
     // saved data for 2nd pass of optimized screen painting
     struct Phase2Data {
@@ -246,35 +259,24 @@ protected:
     // The dirty region before it was unioned with repaint_region
     QRegion damaged_region;
     // The screen that is being currently painted
-    int painted_screen = -1;
+    AbstractOutput *painted_screen = nullptr;
 
     // windows in their stacking order
     QVector< Window* > stacking_order;
 private:
+    void removeRepaints(AbstractOutput *output);
+    void addCursorRepaints();
+
     std::chrono::milliseconds m_expectedPresentTimestamp = std::chrono::milliseconds::zero();
-    void reallocRepaints();
     QHash< Toplevel*, Window* > m_windows;
-    QVector<QRegion> m_repaints;
+    QMap<AbstractOutput *, QRegion> m_repaints;
+    QRect m_geometry;
+    QMatrix4x4 m_renderTargetProjectionMatrix;
+    QRect m_renderTargetRect;
+    qreal m_renderTargetScale = 1;
     // how many times finalPaintScreen() has been called
     int m_paintScreenCount = 0;
-};
-
-/**
- * Factory class to create a Scene. Needs to be implemented by the plugins.
- */
-class KWIN_EXPORT SceneFactory : public QObject
-{
-    Q_OBJECT
-public:
-    ~SceneFactory() override;
-
-    /**
-     * @returns The created Scene, may be @c nullptr.
-     */
-    virtual Scene *create(QObject *parent = nullptr) const = 0;
-
-protected:
-    explicit SceneFactory(QObject *parent);
+    QRect m_lastCursorGeometry;
 };
 
 // The base class for windows representations in composite backends
@@ -327,10 +329,6 @@ public:
     WindowItem *windowItem() const;
     SurfaceItem *surfaceItem() const;
     ShadowItem *shadowItem() const;
-
-    virtual QSharedPointer<GLTexture> windowTexture() {
-        return {};
-    }
 
 protected:
     Toplevel* toplevel;
@@ -417,7 +415,5 @@ Toplevel* Scene::Window::window() const
 }
 
 } // namespace
-
-Q_DECLARE_INTERFACE(KWin::SceneFactory, "org.kde.kwin.Scene")
 
 #endif

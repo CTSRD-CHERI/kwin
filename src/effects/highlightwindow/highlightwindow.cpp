@@ -12,6 +12,8 @@
 
 #include <QDBusConnection>
 
+Q_LOGGING_CATEGORY(KWIN_HIGHLIGHTWINDOW, "kwin_effect_highlightwindow", QtWarningMsg)
+
 namespace KWin
 {
 
@@ -84,12 +86,14 @@ void HighlightWindowEffect::slotWindowAdded(EffectWindow* w)
         // This window was demanded to be highlighted before it appeared on the screen.
         for (const WId &id : qAsConst(m_highlightedIds)) {
             if (w == effects->findWindow(id)) {
-                startHighlightAnimation(w, 0);
+                const quint64 animationId = startHighlightAnimation(w);
+                complete(animationId);
                 return;
             }
         }
         if (isHighlightWindow(w)) {
-            startGhostAnimation(w, 0); // this window is not currently highlighted
+            const quint64 animationId = startGhostAnimation(w); // this window is not currently highlighted
+            complete(animationId);
         }
     }
     slotPropertyNotify(w, m_atom, w);   // Check initial value
@@ -138,7 +142,7 @@ void HighlightWindowEffect::slotPropertyNotify(EffectWindow* w, long a, EffectWi
         m_highlightedIds << data[i];
         EffectWindow* foundWin = effects->findWindow(data[i]);
         if (!foundWin) {
-            qCDebug(KWINEFFECTS) << "Invalid window targetted for highlight. Requested:" << data[i];
+            qCDebug(KWIN_HIGHLIGHTWINDOW) << "Invalid window targetted for highlight. Requested:" << data[i];
             continue; // might come in later.
         }
         m_highlightedWindows.append(foundWin);
@@ -206,11 +210,8 @@ void HighlightWindowEffect::highlightWindows(const QVector<KWin::EffectWindow *>
     prepareHighlighting();
 }
 
-void HighlightWindowEffect::startGhostAnimation(EffectWindow *window, int duration)
+quint64 HighlightWindowEffect::startGhostAnimation(EffectWindow *window)
 {
-    if (duration == -1) {
-        duration = m_fadeDuration;
-    }
     quint64 &animationId = m_animations[window];
     if (animationId) {
         retarget(animationId, FPx2(m_ghostOpacity, m_ghostOpacity), m_fadeDuration);
@@ -219,13 +220,11 @@ void HighlightWindowEffect::startGhostAnimation(EffectWindow *window, int durati
         animationId = set(window, Opacity, 0, m_fadeDuration, FPx2(m_ghostOpacity, m_ghostOpacity),
                           m_easingCurve, 0, FPx2(startOpacity, startOpacity), false, false);
     }
+    return animationId;
 }
 
-void HighlightWindowEffect::startHighlightAnimation(EffectWindow *window, int duration)
+quint64 HighlightWindowEffect::startHighlightAnimation(EffectWindow *window)
 {
-    if (duration == -1) {
-        duration = m_fadeDuration;
-    }
     quint64 &animationId = m_animations[window];
     if (animationId) {
         retarget(animationId, FPx2(1.0, 1.0), m_fadeDuration);
@@ -234,6 +233,7 @@ void HighlightWindowEffect::startHighlightAnimation(EffectWindow *window, int du
         animationId = set(window, Opacity, 0, m_fadeDuration, FPx2(1.0, 1.0),
                           m_easingCurve, 0, FPx2(startOpacity, startOpacity), false, false);
     }
+    return animationId;
 }
 
 void HighlightWindowEffect::startRevertAnimation(EffectWindow *window)

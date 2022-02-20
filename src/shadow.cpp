@@ -20,11 +20,9 @@
 #include <KDecoration2/Decoration>
 #include <KDecoration2/DecorationShadow>
 
-#if HAVE_WAYLAND
 #include <KWaylandServer/shmclientbuffer.h>
 #include <KWaylandServer/shadow_interface.h>
 #include <KWaylandServer/surface_interface.h>
-#endif
 
 #include <QWindow>
 
@@ -95,10 +93,6 @@ Shadow *Shadow::createShadowFromDecoration(Toplevel *toplevel)
 
 Shadow *Shadow::createShadowFromWayland(Toplevel *toplevel)
 {
-#if !HAVE_WAYLAND
-    Q_UNREACHABLE();
-    return nullptr;
-#else
     auto surface = toplevel->surface();
     if (!surface) {
         return nullptr;
@@ -113,7 +107,6 @@ Shadow *Shadow::createShadowFromWayland(Toplevel *toplevel)
         return nullptr;
     }
     return shadow;
-#endif
 }
 
 Shadow *Shadow::createShadowFromInternalWindow(Toplevel *toplevel)
@@ -154,13 +147,13 @@ bool Shadow::init(const QVector< uint32_t > &data)
 {
     QVector<Xcb::WindowGeometry> pixmapGeometries(ShadowElementsCount);
     QVector<xcb_get_image_cookie_t> getImageCookies(ShadowElementsCount);
-    auto *c = connection();
+    auto *c = kwinApp()->x11Connection();
     for (int i = 0; i < ShadowElementsCount; ++i) {
         pixmapGeometries[i] = Xcb::WindowGeometry(data[i]);
     }
     auto discardReplies = [&getImageCookies](int start) {
         for (int i = start; i < getImageCookies.size(); ++i) {
-            xcb_discard_reply(connection(), getImageCookies.at(i).sequence);
+            xcb_discard_reply(kwinApp()->x11Connection(), getImageCookies.at(i).sequence);
         }
     };
     for (int i = 0; i < ShadowElementsCount; ++i) {
@@ -221,7 +214,6 @@ bool Shadow::init(KDecoration2::Decoration *decoration)
     return true;
 }
 
-#if HAVE_WAYLAND
 static QPixmap shadowTileForBuffer(KWaylandServer::ClientBuffer *buffer)
 {
     auto shmBuffer = qobject_cast<KWaylandServer::ShmClientBuffer *>(buffer);
@@ -254,7 +246,6 @@ bool Shadow::init(const QPointer< KWaylandServer::ShadowInterface > &shadow)
     Q_EMIT textureChanged();
     return true;
 }
-#endif
 
 bool Shadow::init(const QWindow *window)
 {
@@ -308,7 +299,6 @@ bool Shadow::updateShadow()
         return false;
     }
 
-#if HAVE_WAYLAND
     if (waylandServer()) {
         if (m_topLevel && m_topLevel->surface()) {
             if (const auto &s = m_topLevel->surface()->shadow()) {
@@ -318,7 +308,6 @@ bool Shadow::updateShadow()
             }
         }
     }
-#endif
 
     if (InternalClient *client = qobject_cast<InternalClient *>(m_topLevel)) {
         if (init(client->internalWindow())) {
@@ -334,6 +323,11 @@ bool Shadow::updateShadow()
     init(data);
 
     return true;
+}
+
+Toplevel *Shadow::toplevel() const
+{
+    return m_topLevel;
 }
 
 void Shadow::setToplevel(Toplevel *topLevel)

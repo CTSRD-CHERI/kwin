@@ -67,6 +67,10 @@ public:
                                                             const QSize &size,
                                                             quint32 flags) override;
 
+    QVector<KWaylandServer::LinuxDmaBufV1Feedback::Tranche> tranches() const {
+        return m_tranches;
+    }
+
 private:
     EGLImage createImage(const QVector<KWaylandServer::LinuxDmaBufV1Plane> &planes,
                          uint32_t format,
@@ -80,6 +84,7 @@ private:
     void setSupportedFormatsAndModifiers();
 
     AbstractEglBackend *m_backend;
+    QVector<KWaylandServer::LinuxDmaBufV1Feedback::Tranche> m_tranches;
 
     friend class EglDmabufBuffer;
 };

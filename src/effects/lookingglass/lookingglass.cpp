@@ -27,6 +27,14 @@
 
 #include <cmath>
 
+Q_LOGGING_CATEGORY(KWIN_LOOKINGGLASS, "kwin_effect_lookingglass", QtWarningMsg)
+
+static void ensureResources()
+{
+    // Must initialize resources manually because the effect is a static lib.
+    Q_INIT_RESOURCE(lookingglass);
+}
+
 namespace KWin
 {
 
@@ -83,12 +91,14 @@ void LookingGlassEffect::reconfigure(ReconfigureFlags)
     LookingGlassConfig::self()->read();
     initialradius = LookingGlassConfig::radius();
     radius = initialradius;
-    qCDebug(KWINEFFECTS) << "Radius from config:" << radius;
+    qCDebug(KWIN_LOOKINGGLASS) << "Radius from config:" << radius;
     m_valid = loadData();
 }
 
 bool LookingGlassEffect::loadData()
 {
+    ensureResources();
+
     const QSize screenSize = effects->virtualScreenSize();
     int texw = screenSize.width();
     int texh = screenSize.height();
@@ -99,17 +109,17 @@ bool LookingGlassEffect::loadData()
     m_texture->setFilter(GL_LINEAR_MIPMAP_LINEAR);
     m_texture->setWrapMode(GL_CLAMP_TO_EDGE);
 
-    m_fbo = new GLRenderTarget(*m_texture);
+    m_fbo = new GLRenderTarget(m_texture);
     if (!m_fbo->valid()) {
         return false;
     }
 
-    m_shader = ShaderManager::instance()->generateShaderFromResources(ShaderTrait::MapTexture, QString(), QStringLiteral("lookingglass.frag"));
+    m_shader = ShaderManager::instance()->generateShaderFromFile(ShaderTrait::MapTexture, QString(), QStringLiteral(":/effects/lookingglass/shaders/lookingglass.frag"));
     if (m_shader->isValid()) {
         ShaderBinder binder(m_shader);
         m_shader->setUniform("u_textureSize", QVector2D(screenSize.width(), screenSize.height()));
     } else {
-        qCCritical(KWINEFFECTS) << "The shader failed to load!";
+        qCCritical(KWIN_LOOKINGGLASS) << "The shader failed to load!";
         return false;
     }
 
@@ -195,7 +205,7 @@ void LookingGlassEffect::prePaintScreen(ScreenPrePaintData& data, std::chrono::m
             zoom = qMin(zoom * qMax(1.0 + diff, 1.2), target_zoom);
         else
             zoom = qMax(zoom * qMin(1.0 - diff, 0.8), target_zoom);
-        qCDebug(KWINEFFECTS) << "zoom is now " << zoom;
+        qCDebug(KWIN_LOOKINGGLASS) << "zoom is now " << zoom;
         radius = qBound((double)initialradius, initialradius * zoom, 3.5 * initialradius);
 
         if (zoom <= 1.0f) {

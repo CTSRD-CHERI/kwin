@@ -23,7 +23,6 @@ namespace KWin
 class KWinScreenEdgeData;
 class KWinScreenEdgesConfigForm;
 class KWinScreenEdgeScriptSettings;
-enum class BuiltInEffect;
 
 class KWinScreenEdgesConfig : public KCModule
 {
@@ -55,10 +54,9 @@ private:
         DesktopGrid,
         TabBox,
         TabBoxAlternative,
+        Overview,
         EffectCount
     };
-
-    bool effectEnabled(const BuiltInEffect &effect, const KConfigGroup &cfg) const;
 
     void monitorInit();
     void monitorLoadSettings();

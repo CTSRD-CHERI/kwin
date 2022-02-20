@@ -402,7 +402,7 @@ void KeyboardLayoutTest::testWindowPolicy()
 
     // create a window
     using namespace KWayland::Client;
-    QScopedPointer<Surface> surface(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
     auto c1 = Test::renderAndWaitForShown(surface.data(), QSize(100, 100), Qt::blue);
     QVERIFY(c1);
@@ -413,7 +413,7 @@ void KeyboardLayoutTest::testWindowPolicy()
     QCOMPARE(xkb->layoutName(), QStringLiteral("German"));
 
     // create a second window
-    QScopedPointer<Surface> surface2(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface2(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface2(Test::createXdgToplevelSurface(surface2.data()));
     auto c2 = Test::renderAndWaitForShown(surface2.data(), QSize(100, 100), Qt::red);
     QVERIFY(c2);
@@ -444,14 +444,14 @@ void KeyboardLayoutTest::testApplicationPolicy()
 
     // create a window
     using namespace KWayland::Client;
-    QScopedPointer<Surface> surface(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
     shellSurface->set_app_id(QStringLiteral("org.kde.foo"));
     auto c1 = Test::renderAndWaitForShown(surface.data(), QSize(100, 100), Qt::blue);
     QVERIFY(c1);
 
     // create a second window
-    QScopedPointer<Surface> surface2(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface2(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface2(Test::createXdgToplevelSurface(surface2.data()));
     shellSurface2->set_app_id(QStringLiteral("org.kde.foo"));
     auto c2 = Test::renderAndWaitForShown(surface2.data(), QSize(100, 100), Qt::red);
@@ -503,16 +503,16 @@ void KeyboardLayoutTest::testNumLock()
     QCOMPARE(xkb->layoutName(), QStringLiteral("English (US)"));
 
     // by default not set
-    QVERIFY(!xkb->leds().testFlag(Xkb::LED::NumLock));
+    QVERIFY(!xkb->leds().testFlag(LED::NumLock));
     quint32 timestamp = 0;
     kwinApp()->platform()->keyboardKeyPressed(KEY_NUMLOCK, timestamp++);
     kwinApp()->platform()->keyboardKeyReleased(KEY_NUMLOCK, timestamp++);
     // now it should be on
-    QVERIFY(xkb->leds().testFlag(Xkb::LED::NumLock));
+    QVERIFY(xkb->leds().testFlag(LED::NumLock));
     // and back to off
     kwinApp()->platform()->keyboardKeyPressed(KEY_NUMLOCK, timestamp++);
     kwinApp()->platform()->keyboardKeyReleased(KEY_NUMLOCK, timestamp++);
-    QVERIFY(!xkb->leds().testFlag(Xkb::LED::NumLock));
+    QVERIFY(!xkb->leds().testFlag(LED::NumLock));
 
     // let's reconfigure to enable through config
     auto group = InputConfig::self()->inputConfig()->group("Keyboard");
@@ -520,22 +520,22 @@ void KeyboardLayoutTest::testNumLock()
     group.sync();
     xkb->reconfigure();
     // now it should be on
-    QVERIFY(xkb->leds().testFlag(Xkb::LED::NumLock));
+    QVERIFY(xkb->leds().testFlag(LED::NumLock));
     // pressing should result in it being off
     kwinApp()->platform()->keyboardKeyPressed(KEY_NUMLOCK, timestamp++);
     kwinApp()->platform()->keyboardKeyReleased(KEY_NUMLOCK, timestamp++);
-    QVERIFY(!xkb->leds().testFlag(Xkb::LED::NumLock));
+    QVERIFY(!xkb->leds().testFlag(LED::NumLock));
 
     // pressing again should enable it
     kwinApp()->platform()->keyboardKeyPressed(KEY_NUMLOCK, timestamp++);
     kwinApp()->platform()->keyboardKeyReleased(KEY_NUMLOCK, timestamp++);
-    QVERIFY(xkb->leds().testFlag(Xkb::LED::NumLock));
+    QVERIFY(xkb->leds().testFlag(LED::NumLock));
 
     // now reconfigure to disable on load
     group.writeEntry("NumLock", 1);
     group.sync();
     xkb->reconfigure();
-    QVERIFY(!xkb->leds().testFlag(Xkb::LED::NumLock));
+    QVERIFY(!xkb->leds().testFlag(LED::NumLock));
 }
 
 WAYLANDTEST_MAIN(KeyboardLayoutTest)

@@ -12,7 +12,6 @@
 #include "keyboard_input.h"
 #include "platform.h"
 #include "screenedge.h"
-#include "screens.h"
 #include "wayland_server.h"
 #include "workspace.h"
 
@@ -105,7 +104,7 @@ void NoGlobalShortcutsTest::initTestCase()
 
 void NoGlobalShortcutsTest::init()
 {
-    screens()->setCurrent(0);
+    workspace()->setActiveOutput(QPoint(640, 512));
     KWin::Cursors::self()->mouse()->setPos(QPoint(640, 512));
 }
 

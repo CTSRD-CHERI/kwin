@@ -14,6 +14,7 @@
 #include <QIcon>
 #include <QQmlEngine>
 #include <QtDBus>
+#include <QX11Info>
 
 #include <KColorSchemeManager>
 #include <KConfig>
@@ -420,7 +421,7 @@ void RulesModel::populateRuleList()
     auto size = addRule(new RuleItem(QLatin1String("size"),
                                      RulePolicy::SetRule, RuleItem::Size,
                                      i18n("Size"), i18n("Size & Position"),
-                                     QIcon::fromTheme("image-resize-symbolic")));
+                                     QIcon::fromTheme("transform-scale")));
     size->setFlag(RuleItem::AffectsWarning);
 
     addRule(new RuleItem(QLatin1String("maximizehoriz"),
@@ -433,14 +434,26 @@ void RulesModel::populateRuleList()
                          i18n("Maximized vertically"), i18n("Size & Position"),
                          QIcon::fromTheme("resizerow")));
 
-    auto desktop = addRule(new RuleItem(QLatin1String("desktop"),
-                                        RulePolicy::SetRule, RuleItem::Option,
-                                        i18n("Virtual Desktop"), i18n("Size & Position"),
-                                        QIcon::fromTheme("virtual-desktops")));
-    desktop->setOptionsData(virtualDesktopsModelData());
+    RuleItem *desktops;
+    if (QX11Info::isPlatformX11()) {
+        // Single selection of Virtual Desktop on X11
+        desktops = new RuleItem(QLatin1String("desktops"),
+                                RulePolicy::SetRule, RuleItem::Option,
+                                i18n("Virtual Desktop"), i18n("Size & Position"),
+                                QIcon::fromTheme("virtual-desktops"));
+    } else {
+        // Multiple selection on Wayland
+        desktops = new RuleItem(QLatin1String("desktops"),
+                                RulePolicy::SetRule, RuleItem::OptionList,
+                                i18n("Virtual Desktops"), i18n("Size & Position"),
+                                QIcon::fromTheme("virtual-desktops"));
+    }
+    addRule(desktops);
+    desktops->setOptionsData(virtualDesktopsModelData());
 
     connect(this, &RulesModel::virtualDesktopsUpdated,
-            this, [this] { m_rules["desktop"]->setOptionsData(virtualDesktopsModelData()); });
+            this, [this] { m_rules["desktops"]->setOptionsData(virtualDesktopsModelData()); });
+
     updateVirtualDesktops();
 
 #ifdef KWIN_BUILD_ACTIVITIES
@@ -500,12 +513,12 @@ void RulesModel::populateRuleList()
     addRule(new RuleItem(QLatin1String("minsize"),
                          RulePolicy::ForceRule, RuleItem::Size,
                          i18n("Minimum Size"), i18n("Size & Position"),
-                         QIcon::fromTheme("image-resize-symbolic")));
+                         QIcon::fromTheme("transform-scale")));
 
     addRule(new RuleItem(QLatin1String("maxsize"),
                          RulePolicy::ForceRule, RuleItem::Size,
                          i18n("Maximum Size"), i18n("Size & Position"),
-                         QIcon::fromTheme("image-resize-symbolic")));
+                         QIcon::fromTheme("transform-scale")));
 
     addRule(new RuleItem(QLatin1String("strictgeometry"),
                          RulePolicy::ForceRule, RuleItem::Boolean,
@@ -645,7 +658,6 @@ const QHash<QString, QString> RulesModel::x11PropertyHash()
         { "caption",            "title"         },
         { "role",               "windowrole"    },
         { "clientMachine",      "clientmachine" },
-        { "x11DesktopNumber",   "desktop"       },
         { "maximizeHorizontal", "maximizehoriz" },
         { "maximizeVertical",   "maximizevert"  },
         { "minimized",          "minimize"      },
@@ -658,7 +670,8 @@ const QHash<QString, QString> RulesModel::x11PropertyHash()
         { "skipPager",          "skippager"     },
         { "skipSwitcher",       "skipswitcher"  },
         { "type",               "type"          },
-        { "desktopFile",        "desktopfile"   }
+        { "desktopFile",        "desktopfile"   },
+        { "desktops",           "desktops"      },
     };
     return propertyToRule;
 };
@@ -721,7 +734,7 @@ QList<OptionsModel::Data> RulesModel::windowTypesModelData() const
         { NET::Splash,  i18n("Splash Screen")     , QIcon::fromTheme("embosstool")               },
         { NET::Desktop, i18n("Desktop")           , QIcon::fromTheme("desktop")                  },
         // { NET::Override, i18n("Unmanaged Window")   },  deprecated
-        { NET::TopMenu, i18n("Standalone Menubar"), QIcon::fromTheme("open-menu-symbolic")       },
+        { NET::TopMenu, i18n("Standalone Menubar"), QIcon::fromTheme("application-menu")       },
         { NET::OnScreenDisplay, i18n("On Screen Display"), QIcon::fromTheme("osd-duplicate")     }
     };
     return modelData;
@@ -729,15 +742,14 @@ QList<OptionsModel::Data> RulesModel::windowTypesModelData() const
 
 QList<OptionsModel::Data> RulesModel::virtualDesktopsModelData() const
 {
-    QList<OptionsModel::Data> modelData;
+    QList<OptionsModel::Data> modelData = { {QString(), i18n("All Desktops"), QIcon::fromTheme("window-pin")} };
     for (const DBusDesktopDataStruct &desktop : m_virtualDesktops) {
         modelData << OptionsModel::Data{
-            desktop.position + 1,  // "desktop" setting uses the desktop position (int) starting at 1
+            desktop.id,
             QString::number(desktop.position + 1).rightJustified(2) + QStringLiteral(": ") + desktop.name,
             QIcon::fromTheme("virtual-desktops")
         };
     }
-    modelData << OptionsModel::Data{ NET::OnAllDesktops, i18n("All Desktops"), QIcon::fromTheme("window-pin") };
     return modelData;
 }
 

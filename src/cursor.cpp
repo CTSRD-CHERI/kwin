@@ -13,8 +13,11 @@
 #include "keyboard_input.h"
 #include "main.h"
 #include "platform.h"
-#include "utils.h"
-#include "xcbutils.h"
+#include "utils/common.h"
+#include "utils/xcbutils.h"
+#include "abstract_output.h"
+#include "composite.h"
+#include "scene.h"
 // KDE
 #include <KConfig>
 #include <KConfigGroup>
@@ -23,6 +26,8 @@
 #include <QDBusConnection>
 #include <QScreen>
 #include <QTimer>
+
+#include <xcb/xcb_cursor.h>
 
 namespace KWin
 {
@@ -58,6 +63,27 @@ void Cursors::removeCursor(Cursor* cursor)
     }
 }
 
+void Cursors::hideCursor()
+{
+    m_cursorHideCounter++;
+    if (m_cursorHideCounter == 1) {
+        Q_EMIT hiddenChanged();
+    }
+}
+
+void Cursors::showCursor()
+{
+    m_cursorHideCounter--;
+    if (m_cursorHideCounter == 0) {
+        Q_EMIT hiddenChanged();
+    }
+}
+
+bool Cursors::isCursorHidden() const
+{
+    return m_cursorHideCounter > 0;
+}
+
 void Cursors::setCurrentCursor(Cursor* cursor)
 {
     if (m_currentCursor == cursor)
@@ -66,11 +92,9 @@ void Cursors::setCurrentCursor(Cursor* cursor)
     Q_ASSERT(m_cursors.contains(cursor) || !cursor);
 
     if (m_currentCursor) {
-        disconnect(m_currentCursor, &Cursor::rendered, this, &Cursors::currentCursorRendered);
         disconnect(m_currentCursor, &Cursor::cursorChanged, this, &Cursors::emitCurrentCursorChanged);
     }
     m_currentCursor = cursor;
-    connect(m_currentCursor, &Cursor::rendered, this, &Cursors::currentCursorRendered);
     connect(m_currentCursor, &Cursor::cursorChanged, this, &Cursors::emitCurrentCursorChanged);
 
     Q_EMIT currentCursorChanged(m_currentCursor);
@@ -125,6 +149,7 @@ void Cursor::updateTheme(const QString &name, int size)
     if (m_themeName != name || m_themeSize != size) {
         m_themeName = name;
         m_themeSize = size;
+        m_cursors.clear();
         Q_EMIT themeChanged();
     }
 }
@@ -180,26 +205,49 @@ void Cursor::updateCursor(const QImage &image, const QPoint &hotspot)
     Q_EMIT cursorChanged();
 }
 
-xcb_cursor_t Cursor::getX11Cursor(CursorShape shape)
+void Cursor::markAsRendered(std::chrono::milliseconds timestamp)
 {
-    Q_UNUSED(shape)
-    return XCB_CURSOR_NONE;
-}
-
-xcb_cursor_t Cursor::getX11Cursor(const QByteArray &name)
-{
-    Q_UNUSED(name)
-    return XCB_CURSOR_NONE;
+    Q_EMIT rendered(timestamp);
 }
 
 xcb_cursor_t Cursor::x11Cursor(CursorShape shape)
 {
-    return getX11Cursor(shape);
+    return x11Cursor(shape.name());
 }
 
 xcb_cursor_t Cursor::x11Cursor(const QByteArray &name)
 {
-    return getX11Cursor(name);
+    Q_ASSERT(kwinApp()->x11Connection());
+    auto it = m_cursors.constFind(name);
+    if (it != m_cursors.constEnd()) {
+        return it.value();
+    }
+
+    if (name.isEmpty()) {
+        return XCB_CURSOR_NONE;
+    }
+
+    xcb_cursor_context_t *ctx;
+    if (xcb_cursor_context_new(kwinApp()->x11Connection(), kwinApp()->x11DefaultScreen(), &ctx) < 0) {
+        return XCB_CURSOR_NONE;
+    }
+
+    xcb_cursor_t cursor = xcb_cursor_load_cursor(ctx, name.constData());
+    if (cursor == XCB_CURSOR_NONE) {
+        const auto &names = Cursor::cursorAlternativeNames(name);
+        for (const QByteArray &cursorName : names) {
+            cursor = xcb_cursor_load_cursor(ctx, cursorName.constData());
+            if (cursor != XCB_CURSOR_NONE) {
+                break;
+            }
+        }
+    }
+    if (cursor != XCB_CURSOR_NONE) {
+        m_cursors.insert(name, cursor);
+    }
+
+    xcb_cursor_context_free(ctx);
+    return cursor;
 }
 
 void Cursor::doSetPos()

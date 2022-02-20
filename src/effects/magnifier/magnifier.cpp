@@ -126,7 +126,7 @@ void MagnifierEffect::paintScreen(int mask, const QRegion &region, ScreenPaintDa
                       cursor.y() - (double)area.height() / (zoom*2),
                       (double)area.width() / zoom, (double)area.height() / zoom);
         if (effects->isOpenGLCompositing()) {
-            m_fbo->blitFromFramebuffer(srcArea);
+            m_fbo->blitFromFramebuffer(effects->mapToRenderTarget(srcArea));
             // paint magnifier
             m_texture->bind();
             auto s = ShaderManager::instance()->pushShader(ShaderTrait::MapTexture);
@@ -135,7 +135,7 @@ void MagnifierEffect::paintScreen(int mask, const QRegion &region, ScreenPaintDa
             mvp.ortho(0, size.width(), size.height(), 0, 0, 65535);
             mvp.translate(area.x(), area.y());
             s->setUniform(GLShader::ModelViewProjectionMatrix, mvp);
-            m_texture->render(infiniteRegion(), area);
+            m_texture->render(area);
             ShaderManager::instance()->popShader();
             m_texture->unbind();
             QVector<float> verts;
@@ -206,7 +206,7 @@ void MagnifierEffect::zoomIn()
         effects->makeOpenGLContextCurrent();
         m_texture = new GLTexture(GL_RGBA8, magnifier_size.width(), magnifier_size.height());
         m_texture->setYInverted(false);
-        m_fbo = new GLRenderTarget(*m_texture);
+        m_fbo = new GLRenderTarget(m_texture);
     }
     effects->addRepaint(magnifierArea().adjusted(-FRAME_WIDTH, -FRAME_WIDTH, FRAME_WIDTH, FRAME_WIDTH));
 }
@@ -245,7 +245,7 @@ void MagnifierEffect::toggle()
             effects->makeOpenGLContextCurrent();
             m_texture = new GLTexture(GL_RGBA8, magnifier_size.width(), magnifier_size.height());
             m_texture->setYInverted(false);
-            m_fbo = new GLRenderTarget(*m_texture);
+            m_fbo = new GLRenderTarget(m_texture);
         }
     } else {
         target_zoom = 1;

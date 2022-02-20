@@ -14,7 +14,6 @@
 #include "effects.h"
 #include "platform.h"
 #include "wayland_server.h"
-#include "effect_builtins.h"
 #include "workspace.h"
 
 #include <KConfigGroup>
@@ -63,8 +62,7 @@ void SceneQPainterTest::initTestCase()
     // disable all effects - we don't want to have it interact with the rendering
     auto config = KSharedConfig::openConfig(QString(), KConfig::SimpleConfig);
     KConfigGroup plugins(config, QStringLiteral("Plugins"));
-    ScriptedEffectLoader loader;
-    const auto builtinNames = BuiltInEffects::availableEffectNames() << loader.listOfKnownEffects();
+    const auto builtinNames = EffectLoader().listOfKnownEffects();
     for (QString name : builtinNames) {
         plugins.writeEntry(name + QStringLiteral("Enabled"), false);
     }
@@ -89,7 +87,7 @@ void SceneQPainterTest::initTestCase()
 void SceneQPainterTest::testStartFrame()
 {
     // this test verifies that the initial rendering is correct
-    Compositor::self()->addRepaintFull();
+    Compositor::self()->scene()->addRepaintFull();
     auto scene = Compositor::self()->scene();
     QVERIFY(scene);
     QCOMPARE(kwinApp()->platform()->selectedCompositor(), QPainterCompositing);
@@ -105,7 +103,8 @@ void SceneQPainterTest::testStartFrame()
     const QImage cursorImage = cursor->image();
     QVERIFY(!cursorImage.isNull());
     p.drawImage(cursor->pos() - cursor->hotspot(), cursorImage);
-    QCOMPARE(referenceImage, *scene->qpainterRenderBuffer(0));
+    const auto outputs = kwinApp()->platform()->enabledOutputs();
+    QCOMPARE(referenceImage, *scene->qpainterRenderBuffer(outputs.constFirst()));
 }
 
 void SceneQPainterTest::testCursorMoving()
@@ -136,7 +135,8 @@ void SceneQPainterTest::testCursorMoving()
     const QImage cursorImage = cursor->image();
     QVERIFY(!cursorImage.isNull());
     p.drawImage(QPoint(45, 45) - cursor->hotspot(), cursorImage);
-    QCOMPARE(referenceImage, *scene->qpainterRenderBuffer(0));
+    const auto outputs = kwinApp()->platform()->enabledOutputs();
+    QCOMPARE(referenceImage, *scene->qpainterRenderBuffer(outputs.constFirst()));
 }
 
 void SceneQPainterTest::testWindow()
@@ -146,7 +146,7 @@ void SceneQPainterTest::testWindow()
     using namespace KWayland::Client;
     QVERIFY(Test::setupWaylandConnection(Test::AdditionalWaylandInterface::Seat));
     QVERIFY(Test::waitForWaylandPointer());
-    QScopedPointer<Surface> s(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> s(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> ss(Test::createXdgToplevelSurface(s.data()));
     QScopedPointer<Pointer> p(Test::waylandSeat()->createPointer());
 
@@ -168,19 +168,20 @@ void SceneQPainterTest::testWindow()
     painter.fillRect(0, 0, 200, 300, Qt::blue);
 
     // now let's set a cursor image
-    QScopedPointer<Surface> cs(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> cs(Test::createSurface());
     QVERIFY(!cs.isNull());
     Test::render(cs.data(), QSize(10, 10), Qt::red);
     p->setCursor(cs.data(), QPoint(5, 5));
     QVERIFY(frameRenderedSpy.wait());
     painter.fillRect(KWin::Cursors::self()->mouse()->pos().x() - 5, KWin::Cursors::self()->mouse()->pos().y() - 5, 10, 10, Qt::red);
-    QCOMPARE(referenceImage, *scene->qpainterRenderBuffer(0));
+    const auto outputs = kwinApp()->platform()->enabledOutputs();
+    QCOMPARE(referenceImage, *scene->qpainterRenderBuffer(outputs.constFirst()));
     // let's move the cursor again
     KWin::Cursors::self()->mouse()->setPos(10, 10);
     QVERIFY(frameRenderedSpy.wait());
     painter.fillRect(0, 0, 200, 300, Qt::blue);
     painter.fillRect(5, 5, 10, 10, Qt::red);
-    QCOMPARE(referenceImage, *scene->qpainterRenderBuffer(0));
+    QCOMPARE(referenceImage, *scene->qpainterRenderBuffer(outputs.constFirst()));
 }
 
 void SceneQPainterTest::testWindowScaled()
@@ -190,7 +191,7 @@ void SceneQPainterTest::testWindowScaled()
     using namespace KWayland::Client;
     QVERIFY(Test::setupWaylandConnection(Test::AdditionalWaylandInterface::Seat));
     QVERIFY(Test::waitForWaylandPointer());
-    QScopedPointer<Surface> s(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> s(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> ss(Test::createXdgToplevelSurface(s.data()));
     QScopedPointer<Pointer> p(Test::waylandSeat()->createPointer());
     QSignalSpy pointerEnteredSpy(p.data(), &Pointer::entered);
@@ -202,7 +203,7 @@ void SceneQPainterTest::testWindowScaled()
     QVERIFY(frameRenderedSpy.isValid());
 
     // now let's set a cursor image
-    QScopedPointer<Surface> cs(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> cs(Test::createSurface());
     QVERIFY(!cs.isNull());
     Test::render(cs.data(), QSize(10, 10), Qt::red);
 
@@ -230,7 +231,8 @@ void SceneQPainterTest::testWindowScaled()
     painter.fillRect(100, 150, 100, 100, Qt::red);
     painter.fillRect(5, 5, 10, 10, Qt::red); //cursor
 
-    QCOMPARE(referenceImage, *scene->qpainterRenderBuffer(0));
+    const auto outputs = kwinApp()->platform()->enabledOutputs();
+    QCOMPARE(referenceImage, *scene->qpainterRenderBuffer(outputs.constFirst()));
 }
 
 void SceneQPainterTest::testCompositorRestart()
@@ -241,7 +243,7 @@ void SceneQPainterTest::testCompositorRestart()
     // first create a window
     using namespace KWayland::Client;
     QVERIFY(Test::setupWaylandConnection());
-    QScopedPointer<Surface> s(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> s(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> ss(Test::createXdgToplevelSurface(s.data()));
     QVERIFY(Test::renderAndWaitForShown(s.data(), QSize(200, 300), Qt::blue));
 
@@ -259,7 +261,7 @@ void SceneQPainterTest::testCompositorRestart()
     QVERIFY(scene);
 
     // this should directly trigger a frame
-    KWin::Compositor::self()->addRepaintFull();
+    KWin::Compositor::self()->scene()->addRepaintFull();
     QSignalSpy frameRenderedSpy(scene, &Scene::frameRendered);
     QVERIFY(frameRenderedSpy.isValid());
     QVERIFY(frameRenderedSpy.wait());
@@ -274,7 +276,8 @@ void SceneQPainterTest::testCompositorRestart()
     const QImage cursorImage = cursor->image();
     QVERIFY(!cursorImage.isNull());
     painter.drawImage(QPoint(400, 400) - cursor->hotspot(), cursorImage);
-    QCOMPARE(referenceImage, *scene->qpainterRenderBuffer(0));
+    const auto outputs = kwinApp()->platform()->enabledOutputs();
+    QCOMPARE(referenceImage, *scene->qpainterRenderBuffer(outputs.constFirst()));
 }
 
 struct XcbConnectionDeleter
@@ -357,13 +360,13 @@ void SceneQPainterTest::testX11Window()
     QVERIFY(scene);
 
     // this should directly trigger a frame
-    KWin::Compositor::self()->addRepaintFull();
+    KWin::Compositor::self()->scene()->addRepaintFull();
     QSignalSpy frameRenderedSpy(scene, &Scene::frameRendered);
     QVERIFY(frameRenderedSpy.isValid());
     QVERIFY(frameRenderedSpy.wait());
 
     const QPoint startPos = client->pos() + client->clientPos();
-    auto image = scene->qpainterRenderBuffer(0);
+    auto image = scene->qpainterRenderBuffer(kwinApp()->platform()->enabledOutputs().constFirst());
     QCOMPARE(image->copy(QRect(startPos, client->clientSize())), compareImage);
 
     // and destroy the window again

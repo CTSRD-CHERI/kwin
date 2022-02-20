@@ -66,12 +66,6 @@ public:
     void switchToPreviousLayout();
     bool switchToLayout(xkb_layout_index_t layout);
 
-    enum class LED {
-        NumLock = 1 << 0,
-        CapsLock = 1 << 1,
-        ScrollLock = 1 << 2
-    };
-    Q_DECLARE_FLAGS(LEDs, LED)
     LEDs leds() const {
         return m_leds;
     }
@@ -87,9 +81,14 @@ public:
     quint32 currentLayout() const {
         return m_currentLayout;
     }
+
+    const auto &modifierState() const
+    {
+        return m_modifierState;
+    }
     QString layoutName(xkb_layout_index_t index) const;
     QString layoutName() const;
-    const QString &layoutShortName(int index) const;
+    QString layoutShortName(int index) const;
     quint32 numberOfLayouts() const;
 
     /**
@@ -97,13 +96,12 @@ public:
      */
     void forwardModifiers();
 
-#if HAVE_WAYLAND
     void setSeat(KWaylandServer::SeatInterface *seat);
-#endif
     QByteArray keymapContents() const;
 
 Q_SIGNALS:
     void ledsChanged(const LEDs &leds);
+    void modifierStateChanged();
 
 private:
     void applyEnvironmentRules(xkb_rule_names &);
@@ -151,9 +149,7 @@ private:
     };
     Ownership m_ownership = Ownership::Server;
 
-#if HAVE_WAYLAND
     QPointer<KWaylandServer::SeatInterface> m_seat;
-#endif
 };
 
 inline
@@ -163,8 +159,5 @@ Qt::KeyboardModifiers Xkb::modifiers() const
 }
 
 }
-
-Q_DECLARE_METATYPE(KWin::Xkb::LED)
-Q_DECLARE_METATYPE(KWin::Xkb::LEDs)
 
 #endif

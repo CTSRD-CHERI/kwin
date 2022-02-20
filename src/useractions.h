@@ -129,24 +129,6 @@ private Q_SLOTS:
      */
     void activityPopupAboutToShow();
     /**
-     * Sends the client to desktop \a desk
-     *
-     * @param action Invoked Action containing the Desktop as data element
-     */
-    void slotSendToDesktop(QAction *action);
-    /**
-     * Toggle whether the Client is on a desktop (Wayland only)
-     *
-     * @param action Invoked Action containing the Desktop as data element
-     */
-    void slotToggleOnVirtualDesktop(QAction *action);
-    /**
-     * Sends the Client to screen \a screen
-     *
-     * @param action Invoked Action containing the Screen as data element
-     */
-    void slotSendToScreen(QAction *action);
-    /**
      * Toggles whether the Client is on the \a activity
      *
      * @param action Invoked Action containing the Id of the Activity to toggle the Client on

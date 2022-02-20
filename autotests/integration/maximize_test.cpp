@@ -8,18 +8,17 @@
 */
 #include "kwin_wayland_test.h"
 #include "abstract_client.h"
+#include "abstract_output.h"
 #include "cursor.h"
 #include "decorations/decorationbridge.h"
 #include "decorations/settings.h"
 #include "platform.h"
-#include "screens.h"
 #include "wayland_server.h"
 #include "workspace.h"
 
 #include <KWayland/Client/compositor.h>
 #include <KWayland/Client/shm_pool.h>
 #include <KWayland/Client/surface.h>
-#include <KWayland/Client/server_decoration.h>
 #include <KWayland/Client/plasmashell.h>
 
 #include <KDecoration2/DecoratedClient>
@@ -58,20 +57,20 @@ void TestMaximized::initTestCase()
 
     kwinApp()->start();
     QVERIFY(applicationStartedSpy.wait());
-    QCOMPARE(screens()->count(), 2);
-    QCOMPARE(screens()->geometry(0), QRect(0, 0, 1280, 1024));
-    QCOMPARE(screens()->geometry(1), QRect(1280, 0, 1280, 1024));
+    const auto outputs = kwinApp()->platform()->enabledOutputs();
+    QCOMPARE(outputs.count(), 2);
+    QCOMPARE(outputs[0]->geometry(), QRect(0, 0, 1280, 1024));
+    QCOMPARE(outputs[1]->geometry(), QRect(1280, 0, 1280, 1024));
     Test::initWaylandWorkspace();
 }
 
 void TestMaximized::init()
 {
-    QVERIFY(Test::setupWaylandConnection(Test::AdditionalWaylandInterface::Decoration |
-                                         Test::AdditionalWaylandInterface::XdgDecorationV1 |
+    QVERIFY(Test::setupWaylandConnection(Test::AdditionalWaylandInterface::XdgDecorationV1 |
                                          Test::AdditionalWaylandInterface::PlasmaShell));
 
-    screens()->setCurrent(0);
-    KWin::Cursors::self()->mouse()->setPos(QPoint(512, 512));
+    workspace()->setActiveOutput(QPoint(640, 512));
+    KWin::Cursors::self()->mouse()->setPos(QPoint(640, 512));
 }
 
 void TestMaximized::cleanup()
@@ -91,10 +90,16 @@ void TestMaximized::testMaximizedPassedToDeco()
     // this test verifies that when a XdgShellClient gets maximized the Decoration receives the signal
 
     // Create the test client.
-    QScopedPointer<Surface> surface(Test::createSurface());
-    QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
-    QScopedPointer<ServerSideDecoration> ssd(Test::waylandServerSideDecoration()->create(surface.data()));
+    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
+    QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data(), Test::CreationSetup::CreateOnly));
+    QScopedPointer<Test::XdgToplevelDecorationV1> xdgDecoration(Test::createXdgToplevelDecorationV1(shellSurface.data()));
 
+    QSignalSpy toplevelConfigureRequestedSpy(shellSurface.data(), &Test::XdgToplevel::configureRequested);
+    QSignalSpy surfaceConfigureRequestedSpy(shellSurface->xdgSurface(), &Test::XdgSurface::configureRequested);
+    surface->commit(KWayland::Client::Surface::CommitFlag::None);
+    QVERIFY(surfaceConfigureRequestedSpy.wait());
+
+    shellSurface->xdgSurface()->ack_configure(surfaceConfigureRequestedSpy.last().at(0).value<quint32>());
     auto client = Test::renderAndWaitForShown(surface.data(), QSize(100, 50), Qt::blue);
     QVERIFY(client);
     QVERIFY(client->isDecorated());
@@ -104,10 +109,8 @@ void TestMaximized::testMaximizedPassedToDeco()
     QCOMPARE(client->maximizeMode(), MaximizeMode::MaximizeRestore);
 
     // Wait for configure event that signals the client is active now.
-    QSignalSpy toplevelConfigureRequestedSpy(shellSurface.data(), &Test::XdgToplevel::configureRequested);
-    QSignalSpy surfaceConfigureRequestedSpy(shellSurface->xdgSurface(), &Test::XdgSurface::configureRequested);
     QVERIFY(surfaceConfigureRequestedSpy.wait());
-    QCOMPARE(surfaceConfigureRequestedSpy.count(), 1);
+    QCOMPARE(surfaceConfigureRequestedSpy.count(), 2);
 
     // When there are no borders, there is no change to them when maximizing.
     // TODO: we should test both cases with fixed fake decoration for autotests.
@@ -123,7 +126,7 @@ void TestMaximized::testMaximizedPassedToDeco()
 
     workspace()->slotWindowMaximize();
     QVERIFY(surfaceConfigureRequestedSpy.wait());
-    QCOMPARE(surfaceConfigureRequestedSpy.count(), 2);
+    QCOMPARE(surfaceConfigureRequestedSpy.count(), 3);
     QCOMPARE(toplevelConfigureRequestedSpy.last().at(0).toSize(), QSize(1280, 1024 - decoration->borderTop()));
     shellSurface->xdgSurface()->ack_configure(surfaceConfigureRequestedSpy.last().at(0).value<quint32>());
     Test::render(surface.data(), toplevelConfigureRequestedSpy.last().at(0).toSize(), Qt::red);
@@ -143,7 +146,7 @@ void TestMaximized::testMaximizedPassedToDeco()
     // now unmaximize again
     workspace()->slotWindowMaximize();
     QVERIFY(surfaceConfigureRequestedSpy.wait());
-    QCOMPARE(surfaceConfigureRequestedSpy.count(), 3);
+    QCOMPARE(surfaceConfigureRequestedSpy.count(), 4);
     QCOMPARE(toplevelConfigureRequestedSpy.last().at(0).toSize(), QSize(100, 50));
 
     shellSurface->xdgSurface()->ack_configure(surfaceConfigureRequestedSpy.last().at(0).value<quint32>());
@@ -176,9 +179,8 @@ void TestMaximized::testInitiallyMaximizedBorderless()
     QCOMPARE(options->borderlessMaximizedWindows(), true);
 
     // Create the test client.
-    QScopedPointer<Surface> surface(Test::createSurface());
-    QScopedPointer<Test::XdgToplevel> shellSurface(
-        Test::createXdgToplevelSurface(surface.data(), surface.data(), Test::CreationSetup::CreateOnly));
+    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
+    QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data(), Test::CreationSetup::CreateOnly));
     QScopedPointer<Test::XdgToplevelDecorationV1> decoration(Test::createXdgToplevelDecorationV1(shellSurface.data()));
 
     QSignalSpy toplevelConfigureRequestedSpy(shellSurface.data(), &Test::XdgToplevel::configureRequested);
@@ -186,7 +188,7 @@ void TestMaximized::testInitiallyMaximizedBorderless()
     shellSurface->set_maximized();
     QSignalSpy decorationConfigureRequestedSpy(decoration.data(), &Test::XdgToplevelDecorationV1::configureRequested);
     decoration->set_mode(Test::XdgToplevelDecorationV1::mode_server_side);
-    surface->commit(Surface::CommitFlag::None);
+    surface->commit(KWayland::Client::Surface::CommitFlag::None);
 
     // Wait for the initial configure event.
     Test::XdgToplevel::States states;
@@ -227,16 +229,15 @@ void TestMaximized::testBorderlessMaximizedWindow()
     QCOMPARE(options->borderlessMaximizedWindows(), true);
 
     // Create the test client.
-    QScopedPointer<Surface> surface(Test::createSurface());
-    QScopedPointer<Test::XdgToplevel> shellSurface(
-        Test::createXdgToplevelSurface(surface.data(), surface.data(), Test::CreationSetup::CreateOnly));
+    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
+    QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data(), Test::CreationSetup::CreateOnly));
     QScopedPointer<Test::XdgToplevelDecorationV1> decoration(Test::createXdgToplevelDecorationV1(shellSurface.data()));
 
     QSignalSpy toplevelConfigureRequestedSpy(shellSurface.data(), &Test::XdgToplevel::configureRequested);
     QSignalSpy surfaceConfigureRequestedSpy(shellSurface->xdgSurface(), &Test::XdgSurface::configureRequested);
     QSignalSpy decorationConfigureRequestedSpy(decoration.data(), &Test::XdgToplevelDecorationV1::configureRequested);
     decoration->set_mode(Test::XdgToplevelDecorationV1::mode_server_side);
-    surface->commit(Surface::CommitFlag::None);
+    surface->commit(KWayland::Client::Surface::CommitFlag::None);
 
     // Wait for the initial configure event.
     Test::XdgToplevel::States states;
@@ -308,10 +309,10 @@ void TestMaximized::testBorderlessMaximizedWindow()
 void TestMaximized::testMaximizedGainFocusAndBeActivated()
 {
     // This test verifies that a window will be raised and gain focus  when it's maximized
-    QScopedPointer<Surface> surface(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> xdgShellSurface(Test::createXdgToplevelSurface(surface.data()));
     auto client = Test::renderAndWaitForShown(surface.data(), QSize(100, 50), Qt::blue);
-    QScopedPointer<Surface> surface2(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface2(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> xdgShellSurface2(Test::createXdgToplevelSurface(surface2.data()));
     auto client2 = Test::renderAndWaitForShown(surface2.data(), QSize(100, 50), Qt::blue);
 

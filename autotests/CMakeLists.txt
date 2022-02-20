@@ -133,159 +133,7 @@ target_link_libraries(testXcbWindow
 add_test(NAME kwin-testXcbWindow COMMAND testXcbWindow)
 ecm_mark_as_test(testXcbWindow)
 
-########################################################
-# Test BuiltInEffectLoader
-########################################################
-set(testBuiltInEffectLoader_SRCS
-    ../src/effectloader.cpp
-    mock_effectshandler.cpp
-    test_builtin_effectloader.cpp
-)
-add_executable(testBuiltInEffectLoader ${testBuiltInEffectLoader_SRCS})
-set_target_properties(testBuiltInEffectLoader PROPERTIES COMPILE_DEFINITIONS "NO_NONE_WINDOW")
-
-target_link_libraries(testBuiltInEffectLoader
-    Qt::Concurrent
-    Qt::Qml
-    Qt::Test
-    Qt::X11Extras
-
-    KF5::Package
-
-    kwineffects
-    kwin4_effect_builtins
-)
-
-add_test(NAME kwin-testBuiltInEffectLoader COMMAND testBuiltInEffectLoader)
-ecm_mark_as_test(testBuiltInEffectLoader)
-
-########################################################
-# Test ScriptedEffectLoader
-########################################################
 include_directories(${KWin_SOURCE_DIR}/src)
-set(testScriptedEffectLoader_SRCS
-    ../src/effectloader.cpp
-    ../src/cursor.cpp
-    ../src/screens.cpp
-    ../src/scripting/scriptedeffect.cpp
-    ../src/scripting/scripting_logging.cpp
-    ../src/scripting/scriptingutils.cpp
-    mock_abstract_client.cpp
-    mock_effectshandler.cpp
-    mock_screens.cpp
-    mock_workspace.cpp
-    test_scripted_effectloader.cpp
-)
-kconfig_add_kcfg_files(testScriptedEffectLoader_SRCS ../src/settings.kcfgc)
-add_executable(testScriptedEffectLoader ${testScriptedEffectLoader_SRCS})
-
-target_link_libraries(testScriptedEffectLoader
-    Qt::Concurrent
-    Qt::Qml
-    Qt::Test
-    Qt::X11Extras
-
-    KF5::ConfigGui
-    KF5::GlobalAccel
-    KF5::I18n
-    KF5::Notifications
-    KF5::Package
-
-    kwineffects
-    kwin4_effect_builtins
-)
-
-add_test(NAME kwin-testScriptedEffectLoader COMMAND testScriptedEffectLoader)
-ecm_mark_as_test(testScriptedEffectLoader)
-
-########################################################
-# Test PluginEffectLoader
-########################################################
-set(testPluginEffectLoader_SRCS
-    ../src/effectloader.cpp
-    mock_effectshandler.cpp
-    test_plugin_effectloader.cpp
-)
-add_executable(testPluginEffectLoader ${testPluginEffectLoader_SRCS})
-
-target_link_libraries(testPluginEffectLoader
-    Qt::Concurrent
-    Qt::Qml
-    Qt::Test
-    Qt::X11Extras
-
-    KF5::Package
-
-    kwineffects
-    kwin4_effect_builtins
-)
-
-add_test(NAME kwin-testPluginEffectLoader COMMAND testPluginEffectLoader)
-ecm_mark_as_test(testPluginEffectLoader)
-
-########################################################
-# FakeEffectPlugin
-########################################################
-add_library(fakeeffectplugin MODULE fakeeffectplugin.cpp)
-set_target_properties(fakeeffectplugin PROPERTIES PREFIX "")
-target_link_libraries(fakeeffectplugin kwineffects)
-
-########################################################
-# FakeEffectPlugin-Version
-########################################################
-add_library(effectversionplugin MODULE fakeeffectplugin_version.cpp)
-set_target_properties(effectversionplugin PROPERTIES PREFIX "")
-target_link_libraries(effectversionplugin kwineffects)
-
-########################################################
-# Test ScreenEdges
-########################################################
-set(testScreenEdges_SRCS
-    ../src/atoms.cpp
-    ../src/gestures.cpp
-    ../src/plugins/platforms/x11/standalone/edge.cpp
-    ../src/screenedge.cpp
-    ../src/screens.cpp
-    ../src/virtualdesktops.cpp
-    ../src/cursor.cpp
-    ../src/xcbutils.cpp # init of extensions
-    mock_abstract_client.cpp
-    mock_screens.cpp
-    mock_workspace.cpp
-    mock_x11client.cpp
-    test_screen_edges.cpp
-)
-kconfig_add_kcfg_files(testScreenEdges_SRCS ../src/settings.kcfgc)
-qt_add_dbus_interface(testScreenEdges_SRCS ${KSCREENLOCKER_DBUS_INTERFACES_DIR}/kf5_org.freedesktop.ScreenSaver.xml screenlocker_interface )
-
-add_executable(testScreenEdges ${testScreenEdges_SRCS})
-set_target_properties(testScreenEdges PROPERTIES COMPILE_DEFINITIONS "NO_NONE_WINDOW")
-target_include_directories(testScreenEdges BEFORE PRIVATE ./)
-target_link_libraries(testScreenEdges
-    Qt::DBus
-    Qt::Test
-    Qt::X11Extras
-
-    KF5::ConfigCore
-    KF5::ConfigGui
-    KF5::GlobalAccel
-    KF5::I18n
-    KF5::Notifications
-    Plasma::KWaylandServer
-    KF5::WindowSystem
-
-    XCB::COMPOSITE
-    XCB::DAMAGE
-    XCB::GLX
-    XCB::RANDR
-    XCB::SHM
-    XCB::SYNC
-    XCB::XCB
-    XCB::XFIXES
-)
-
-add_test(NAME kwin_testScreenEdges COMMAND testScreenEdges)
-ecm_mark_as_test(testScreenEdges)
 
 ########################################################
 # Test OnScreenNotification
@@ -338,13 +186,13 @@ add_test(NAME kwin-testX11TimestampUpdate COMMAND testX11TimestampUpdate)
 ecm_mark_as_test(testX11TimestampUpdate)
 
 set(testOpenGLContextAttributeBuilder_SRCS
-    ../src/abstract_opengl_context_attribute_builder.cpp
-    ../src/egl_context_attribute_builder.cpp
+    ../src/utils/abstract_opengl_context_attribute_builder.cpp
+    ../src/utils/egl_context_attribute_builder.cpp
     opengl_context_attribute_builder_test.cpp
 )
 
 if (HAVE_EPOXY_GLX)
-    set(testOpenGLContextAttributeBuilder_SRCS ${testOpenGLContextAttributeBuilder_SRCS} ../src/plugins/platforms/x11/standalone/glx_context_attribute_builder.cpp)
+    set(testOpenGLContextAttributeBuilder_SRCS ${testOpenGLContextAttributeBuilder_SRCS} ../src/backends/x11/standalone/glx_context_attribute_builder.cpp)
 endif()
 add_executable(testOpenGLContextAttributeBuilder ${testOpenGLContextAttributeBuilder_SRCS})
 target_link_libraries(testOpenGLContextAttributeBuilder Qt::Test)
@@ -364,6 +212,8 @@ target_link_libraries(testXkb
     KF5::ConfigCore
     Plasma::KWaylandServer
     KF5::WindowSystem
+
+    kwineffects
 
     XKB::XKB
     Qt5::XkbCommonSupportPrivate

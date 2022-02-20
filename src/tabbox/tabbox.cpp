@@ -30,12 +30,13 @@
 #include "keyboard_input.h"
 #include "pointer_input.h"
 #include "focuschain.h"
+#include "platform.h"
 #include "screenedge.h"
 #include "screens.h"
 #include "unmanaged.h"
 #include "virtualdesktops.h"
 #include "workspace.h"
-#include "xcbutils.h"
+#include "utils/xcbutils.h"
 // Qt
 #include <QAction>
 #include <QKeyEvent>
@@ -81,7 +82,7 @@ TabBoxHandlerImpl::~TabBoxHandlerImpl()
 
 int TabBoxHandlerImpl::activeScreen() const
 {
-    return screens()->current();
+    return kwinApp()->platform()->enabledOutputs().indexOf(workspace()->activeOutput());
 }
 
 int TabBoxHandlerImpl::currentDesktop() const
@@ -93,14 +94,15 @@ QString TabBoxHandlerImpl::desktopName(TabBoxClient* client) const
 {
     if (TabBoxClientImpl* c = static_cast< TabBoxClientImpl* >(client)) {
         if (!c->client()->isOnAllDesktops())
-            return VirtualDesktopManager::self()->name(c->client()->desktop());
+            return desktopName(c->client()->desktop());
     }
-    return VirtualDesktopManager::self()->name(VirtualDesktopManager::self()->current());
+    return desktopName(VirtualDesktopManager::self()->current());
 }
 
 QString TabBoxHandlerImpl::desktopName(int desktop) const
 {
-    return VirtualDesktopManager::self()->name(desktop);
+    const VirtualDesktop *vd = VirtualDesktopManager::self()->desktopForX11Id(desktop);
+    return vd ? vd->name() : QString();
 }
 
 QWeakPointer<TabBoxClient> TabBoxHandlerImpl::nextClientFocusChain(TabBoxClient* client) const
@@ -234,9 +236,9 @@ bool TabBoxHandlerImpl::checkMultiScreen(TabBoxClient* client) const
     case TabBoxConfig::IgnoreMultiScreen:
         return true;
     case TabBoxConfig::ExcludeCurrentScreenClients:
-        return current->screen() != screens()->current();
+        return current->output() != workspace()->activeOutput();
     default:       // TabBoxConfig::OnlyCurrentScreenClients
-        return current->screen() == screens()->current();
+        return current->output() == workspace()->activeOutput();
     }
 }
 
@@ -273,9 +275,9 @@ QWeakPointer<TabBoxClient> TabBoxHandlerImpl::clientToAddToList(TabBoxClient* cl
 
 TabBoxClientList TabBoxHandlerImpl::stackingOrder() const
 {
-    QList<Toplevel *> stacking = Workspace::self()->stackingOrder();
+    const QList<Toplevel *> stacking = Workspace::self()->stackingOrder();
     TabBoxClientList ret;
-    Q_FOREACH (Toplevel *toplevel, stacking) {
+    for (Toplevel *toplevel : stacking) {
         if (auto client = qobject_cast<AbstractClient*>(toplevel)) {
             ret.append(client->tabBoxClient());
         }
@@ -319,9 +321,10 @@ void TabBoxHandlerImpl::shadeClient(TabBoxClient *c, bool b) const
 
 QWeakPointer<TabBoxClient> TabBoxHandlerImpl::desktopClient() const
 {
-    Q_FOREACH (Toplevel *toplevel, Workspace::self()->stackingOrder()) {
+    const auto stackingOrder = Workspace::self()->stackingOrder();
+    for (Toplevel *toplevel : stackingOrder) {
         auto client = qobject_cast<AbstractClient*>(toplevel);
-        if (client && client->isDesktop() && client->isOnCurrentDesktop() && client->screen() == screens()->current()) {
+        if (client && client->isDesktop() && client->isOnCurrentDesktop() && client->output() == workspace()->activeOutput()) {
             return client->tabBoxClient();
         }
     }
@@ -651,9 +654,9 @@ AbstractClient* TabBox::currentClient()
 
 QList<AbstractClient*> TabBox::currentClientList()
 {
-    TabBoxClientList list = m_tabBox->clientList();
+    const TabBoxClientList list = m_tabBox->clientList();
     QList<AbstractClient*> ret;
-    Q_FOREACH (const QWeakPointer<TabBoxClient> &clientPointer, list) {
+    for (const QWeakPointer<TabBoxClient> &clientPointer : list) {
         QSharedPointer<TabBoxClient> client = clientPointer.toStrongRef();
         if (!client)
             continue;
@@ -747,12 +750,12 @@ void TabBox::reconfigure()
     QList<ElectricBorder> *borders = &m_borderActivate;
     QString borderConfig = QStringLiteral("BorderActivate");
     for (int i = 0; i < 2; ++i) {
-        Q_FOREACH (ElectricBorder border, *borders) {
+        for (ElectricBorder border : qAsConst(*borders)) {
             ScreenEdges::self()->unreserve(border, this);
         }
         borders->clear();
         QStringList list = config.readEntry(borderConfig, QStringList());
-        Q_FOREACH (const QString &s, list) {
+        for (const QString &s : qAsConst(list)) {
             bool ok;
             const int i = s.toInt(&ok);
             if (!ok)
@@ -1211,7 +1214,7 @@ void TabBox::CDEWalkThroughWindows(bool forward)
             --i) {
         auto it = qobject_cast<AbstractClient*>(Workspace::self()->stackingOrder().at(i));
         if (it && it->isOnCurrentActivity() && it->isOnCurrentDesktop() && !it->isSpecialWindow()
-                && it->isShown(false) && it->wantsTabFocus()
+                && !it->isShade() && it->isShown() && it->wantsTabFocus()
                 && !it->keepAbove() && !it->keepBelow()) {
             c = it;
             break;

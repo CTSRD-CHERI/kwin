@@ -3,7 +3,8 @@
     This file is part of the KDE project.
 
     SPDX-FileCopyrightText: 2019 Roman Gilg <subdiff@gmail.com>
-
+    SPDX-FileCopyrightText: 2021 David Edmundson <davidedmundson@kde.org>
+    SPDX-FileCopyrightText: 2021 David Redondo <kde@david-redondo.de>
     SPDX-License-Identifier: GPL-2.0-or-later
 */
 #include "drag.h"
@@ -34,7 +35,7 @@ void Drag::sendClientMessage(xcb_window_t target, xcb_atom_t type, xcb_client_me
         type,       // type
         *data,      // data
     };
-    static_assert(sizeof(ev) == 32, "Would leak stack data otherwise");
+    static_assert(sizeof(event) == 32, "Would leak stack data otherwise");
 
     xcb_connection_t *xcbConn = kwinApp()->x11Connection();
     xcb_send_event(xcbConn,

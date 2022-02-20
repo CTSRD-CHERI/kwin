@@ -13,18 +13,16 @@
 
 #include "config-kwin.h"
 
+#include <QMatrix4x4>
 #include <QVariant>
 #include <QTimeLine>
 #include <QFontMetrics>
-#include <QMatrix4x4>
 #include <QPainter>
 #include <QPixmap>
 #include <QtMath>
 
 #include <ksharedconfig.h>
 #include <kconfiggroup.h>
-
-// #include <KWaylandServer/surface_interface.h>
 
 #if defined(__SSE2__)
 #  include <emmintrin.h>
@@ -686,6 +684,46 @@ bool Effect::perform(Feature feature, const QVariantList &arguments)
     return false;
 }
 
+bool Effect::tabletToolEvent(QTabletEvent *event)
+{
+    Q_UNUSED(event)
+    return false;
+}
+
+bool Effect::tabletToolButtonEvent(uint button, bool pressed, quint64 tabletToolId)
+{
+    Q_UNUSED(button)
+    Q_UNUSED(pressed)
+    Q_UNUSED(tabletToolId)
+    return false;
+}
+
+bool Effect::tabletPadButtonEvent(uint button, bool pressed, void *tabletPadId)
+{
+    Q_UNUSED(button)
+    Q_UNUSED(pressed)
+    Q_UNUSED(tabletPadId)
+    return false;
+}
+
+bool Effect::tabletPadStripEvent(int number, int position, bool isFinger, void *tabletPadId)
+{
+    Q_UNUSED(number)
+    Q_UNUSED(position)
+    Q_UNUSED(isFinger)
+    Q_UNUSED(tabletPadId)
+    return false;
+}
+
+bool Effect::tabletPadRingEvent(int number, int position, bool isFinger, void *tabletPadId)
+{
+    Q_UNUSED(number)
+    Q_UNUSED(position)
+    Q_UNUSED(isFinger)
+    Q_UNUSED(tabletPadId)
+    return false;
+}
+
 bool Effect::blocksDirectScanout() const
 {
     return true;
@@ -740,6 +778,26 @@ CompositingType EffectsHandler::compositingType() const
 bool EffectsHandler::isOpenGLCompositing() const
 {
     return compositing_type & OpenGLCompositing;
+}
+
+QRect EffectsHandler::mapToRenderTarget(const QRect &rect) const
+{
+    const QRect targetRect = renderTargetRect();
+    const qreal targetScale = renderTargetScale();
+
+    return QRect((rect.x() - targetRect.x()) * targetScale,
+                 (rect.y() - targetRect.y()) * targetScale,
+                 rect.width() * targetScale,
+                 rect.height() * targetScale);
+}
+
+QRegion EffectsHandler::mapToRenderTarget(const QRegion &region) const
+{
+    QRegion result;
+    for (const QRect &rect : region) {
+        result += mapToRenderTarget(rect);
+    }
+    return result;
 }
 
 EffectsHandler* effects = nullptr;
@@ -950,7 +1008,7 @@ WindowQuadList WindowQuadList::makeGrid(int maxQuadSize) const
     double top    = first().top();
     double bottom = first().bottom();
 
-    Q_FOREACH (const WindowQuad &quad, *this) {
+    for (const WindowQuad &quad : qAsConst(*this)) {
         left   = qMin(left,   quad.left());
         right  = qMax(right,  quad.right());
         top    = qMin(top,    quad.top());
@@ -959,7 +1017,7 @@ WindowQuadList WindowQuadList::makeGrid(int maxQuadSize) const
 
     WindowQuadList ret;
 
-    for (const WindowQuad &quad : *this) {
+    for (const WindowQuad &quad : qAsConst(*this)) {
         const double quadLeft   = quad.left();
         const double quadRight  = quad.right();
         const double quadTop    = quad.top();
@@ -1384,8 +1442,7 @@ void WindowMotionManager::apply(EffectWindow *w, WindowPaintData &data)
 void WindowMotionManager::moveWindow(EffectWindow *w, QPoint target, double scale, double yScale)
 {
     QHash<EffectWindow*, WindowMotion>::iterator it = m_managedWindows.find(w);
-    if (it == m_managedWindows.end())
-        abort(); // Notify the effect author that they did something wrong
+    Q_ASSERT(it != m_managedWindows.end()); // Notify the effect author that they did something wrong
 
     WindowMotion *motion = &it.value();
 

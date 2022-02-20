@@ -16,6 +16,12 @@ class Decoration;
 namespace KWin
 {
 class DecorationItem;
+class Deleted;
+class InternalClient;
+class Shadow;
+class ShadowItem;
+class SurfaceItem;
+class Toplevel;
 
 /**
  * The WindowItem class represents a window in the scene.
@@ -31,19 +37,21 @@ public:
     SurfaceItem *surfaceItem() const;
     DecorationItem *decorationItem() const;
     ShadowItem *shadowItem() const;
-
-    void setShadow(Shadow *shadow);
+    Toplevel *window() const;
 
 protected:
-    explicit WindowItem(Scene::Window *window, Item *parent = nullptr);
+    explicit WindowItem(Toplevel *window, Item *parent = nullptr);
     void updateSurfaceItem(SurfaceItem *surfaceItem);
 
 private Q_SLOTS:
+    void handleWindowClosed(Toplevel *original, Deleted *deleted);
     void updateDecorationItem();
+    void updateShadowItem();
     void updateSurfacePosition();
     void updateSurfaceVisibility();
 
 private:
+    Toplevel *m_window;
     QScopedPointer<SurfaceItem> m_surfaceItem;
     QScopedPointer<DecorationItem> m_decorationItem;
     QScopedPointer<ShadowItem> m_shadowItem;
@@ -60,13 +68,12 @@ class KWIN_EXPORT WindowItemX11 : public WindowItem
     Q_OBJECT
 
 public:
-    explicit WindowItemX11(Scene::Window *window, Item *parent = nullptr);
+    explicit WindowItemX11(Toplevel *window, Item *parent = nullptr);
 
 private Q_SLOTS:
     void initialize();
 };
 
-#if HAVE_WAYLAND
 /**
  * The WindowItemWayland class represents a Wayland window.
  */
@@ -75,9 +82,8 @@ class KWIN_EXPORT WindowItemWayland : public WindowItem
     Q_OBJECT
 
 public:
-    explicit WindowItemWayland(Scene::Window *window, Item *parent = nullptr);
+    explicit WindowItemWayland(Toplevel *window, Item *parent = nullptr);
 };
-#endif
 
 /**
  * The WindowItemInternal class represents a window created by the compositor, for
@@ -88,7 +94,7 @@ class KWIN_EXPORT WindowItemInternal : public WindowItem
     Q_OBJECT
 
 public:
-    explicit WindowItemInternal(Scene::Window *window, Item *parent = nullptr);
+    explicit WindowItemInternal(InternalClient *window, Item *parent = nullptr);
 };
 
 } // namespace KWin

@@ -15,12 +15,11 @@
 #include "platform.h"
 #include "sm.h"
 #include "workspace.h"
-#include "xcbutils.h"
+#include "utils/xcbutils.h"
 
 #include <KConfigGroup>
 #include <KCrash>
 #include <KLocalizedString>
-#include <KPluginLoader>
 #include <KPluginMetaData>
 #include <KSelectionOwner>
 #include <KQuickAddons/QtQuickSettings>
@@ -113,7 +112,7 @@ private:
     bool genericReply(xcb_atom_t target_P, xcb_atom_t property_P, xcb_window_t requestor_P) override {
         if (target_P == xa_version) {
             int32_t version[] = { 2, 0 };
-            xcb_change_property(connection(), XCB_PROP_MODE_REPLACE, requestor_P,
+            xcb_change_property(kwinApp()->x11Connection(), XCB_PROP_MODE_REPLACE, requestor_P,
                                 property_P, XCB_ATOM_INTEGER, 32, 2, version);
         } else
             return KSelectionOwner::genericReply(target_P, property_P, requestor_P);
@@ -124,7 +123,7 @@ private:
         KSelectionOwner::replyTargets(property_P, requestor_P);
         xcb_atom_t atoms[ 1 ] = { xa_version };
         // PropModeAppend !
-        xcb_change_property(connection(), XCB_PROP_MODE_APPEND, requestor_P,
+        xcb_change_property(kwinApp()->x11Connection(), XCB_PROP_MODE_APPEND, requestor_P,
                             property_P, XCB_ATOM_ATOM, 32, 1, atoms);
     }
 
@@ -133,8 +132,8 @@ private:
         if (xa_version == XCB_ATOM_NONE) {
             const QByteArray name(QByteArrayLiteral("VERSION"));
             ScopedCPointer<xcb_intern_atom_reply_t> atom(xcb_intern_atom_reply(
-                connection(),
-                xcb_intern_atom_unchecked(connection(), false, name.length(), name.constData()),
+                kwinApp()->x11Connection(),
+                xcb_intern_atom_unchecked(kwinApp()->x11Connection(), false, name.length(), name.constData()),
                 nullptr));
             if (!atom.isNull()) {
                 xa_version = atom->atom;
@@ -148,8 +147,8 @@ private:
         QByteArray screen(QByteArrayLiteral("WM_S"));
         screen.append(QByteArray::number(screen_P));
         ScopedCPointer<xcb_intern_atom_reply_t> atom(xcb_intern_atom_reply(
-            connection(),
-            xcb_intern_atom_unchecked(connection(), false, screen.length(), screen.constData()),
+            kwinApp()->x11Connection(),
+            xcb_intern_atom_unchecked(kwinApp()->x11Connection(), false, screen.length(), screen.constData()),
             nullptr));
         if (atom.isNull()) {
             return XCB_ATOM_NONE;
@@ -193,7 +192,7 @@ void ApplicationX11::lostSelection()
     destroyCompositor();
     destroyWorkspace();
     // Remove windowmanager privileges
-    Xcb::selectInput(rootWindow(), XCB_EVENT_MASK_PROPERTY_CHANGE);
+    Xcb::selectInput(kwinApp()->x11RootWindow(), XCB_EVENT_MASK_PROPERTY_CHANGE);
     removeNativeX11EventFilter();
     quit();
 }
@@ -226,7 +225,7 @@ void ApplicationX11::performStartup()
         ::exit(1);
     });
     connect(owner.data(), &KSelectionOwner::lostOwnership, this, &ApplicationX11::lostSelection);
-    connect(owner.data(), &KSelectionOwner::claimedOwnership, [this]{
+    connect(owner.data(), &KSelectionOwner::claimedOwnership, this, [this]{
         installNativeX11EventFilter();
         // first load options - done internally by a different thread
         createOptions();
@@ -239,9 +238,9 @@ void ApplicationX11::performStartup()
 
         // Check  whether another windowmanager is running
         const uint32_t maskValues[] = {XCB_EVENT_MASK_SUBSTRUCTURE_REDIRECT};
-        ScopedCPointer<xcb_generic_error_t> redirectCheck(xcb_request_check(connection(),
-                                                                            xcb_change_window_attributes_checked(connection(),
-                                                                                                                 rootWindow(),
+        ScopedCPointer<xcb_generic_error_t> redirectCheck(xcb_request_check(kwinApp()->x11Connection(),
+                                                                            xcb_change_window_attributes_checked(kwinApp()->x11Connection(),
+                                                                                                                 kwinApp()->x11RootWindow(),
                                                                                                                  XCB_CW_EVENT_MASK,
                                                                                                                  maskValues)));
         if (!redirectCheck.isNull()) {

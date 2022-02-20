@@ -17,16 +17,16 @@
 #include "client_machine.h"
 #include "composite.h"
 #include "effects.h"
+#include "platform.h"
 #include "screens.h"
 #include "shadow.h"
 #include "shadowitem.h"
 #include "surfaceitem_x11.h"
+#include "virtualdesktops.h"
 #include "windowitem.h"
 #include "workspace.h"
 
-#if HAVE_WAYLAND
 #include <KWaylandServer/surface_interface.h>
-#endif
 
 #include <QDebug>
 
@@ -44,12 +44,10 @@ Toplevel::Toplevel()
     , effect_window(nullptr)
     , m_clientMachine(new ClientMachine(this))
     , m_wmClientLeader(XCB_WINDOW_NONE)
-    , m_screen(0)
     , m_skipCloseAnimation(false)
 {
-    connect(screens(), &Screens::changed, this, &Toplevel::checkScreen);
-    connect(screens(), &Screens::countChanged, this, &Toplevel::checkScreen);
-    setupCheckScreenConnection();
+    connect(screens(), &Screens::changed, this, &Toplevel::screenChanged);
+    setupCheckOutputConnection();
     connect(this, &Toplevel::bufferGeometryChanged, this, &Toplevel::inputTransformationChanged);
 
     // Only for compatibility reasons, drop in the next major release.
@@ -120,17 +118,24 @@ void Toplevel::copyToDeleted(Toplevel* c)
     effect_window = c->effect_window;
     if (effect_window != nullptr)
         effect_window->setWindow(this);
+    m_shadow = c->m_shadow;
+    if (m_shadow) {
+        m_shadow->setToplevel(this);
+    }
     resource_name = c->resourceName();
     resource_class = c->resourceClass();
     m_clientMachine = c->m_clientMachine;
     m_clientMachine->setParent(this);
     m_wmClientLeader = c->wmClientLeader();
     opaque_region = c->opaqueRegion();
-    m_screen = c->m_screen;
+    m_output = c->m_output;
     m_skipCloseAnimation = c->m_skipCloseAnimation;
     m_internalFBO = c->m_internalFBO;
     m_internalImage = c->m_internalImage;
     m_opacity = c->m_opacity;
+    m_shapeRegionIsValid = c->m_shapeRegionIsValid;
+    m_shapeRegion = c->m_shapeRegion;
+    m_stackingOrder = c->m_stackingOrder;
 }
 
 // before being deleted, remove references to everything that's now
@@ -270,6 +275,7 @@ bool Toplevel::setupCompositing()
         return false;
 
     effect_window = new EffectWindowImpl(this);
+    updateShadow();
     Compositor::self()->scene()->addToplevel(this);
 
     connect(windowItem(), &WindowItem::positionChanged, this, &Toplevel::visibleGeometryChanged);
@@ -285,6 +291,9 @@ void Toplevel::finishCompositing(ReleaseReason releaseReason)
         if (SurfaceItemX11 *item = qobject_cast<SurfaceItemX11 *>(surfaceItem())) {
             item->destroyDamage();
         }
+    }
+    if (m_shadow && m_shadow->toplevel() == this) { // otherwise it's already passed to Deleted, don't free data
+        deleteShadow();
     }
     if (effect_window && effect_window->window() == this) { // otherwise it's already passed to Deleted, don't free data
         deleteEffectWindow();
@@ -335,15 +344,15 @@ void Toplevel::addWorkspaceRepaint(int x, int y, int w, int h)
 
 void Toplevel::addWorkspaceRepaint(const QRect& r2)
 {
-    if (!Compositor::compositing())
-        return;
-    Compositor::self()->addRepaint(r2);
+    if (Compositor::compositing()) {
+        Compositor::self()->scene()->addRepaint(r2);
+    }
 }
 
 void Toplevel::addWorkspaceRepaint(const QRegion &region)
 {
     if (Compositor::compositing()) {
-        Compositor::self()->addRepaint(region);
+        Compositor::self()->scene()->addRepaint(region);
     }
 }
 
@@ -358,71 +367,55 @@ void Toplevel::setReadyForPainting()
     }
 }
 
+void Toplevel::deleteShadow()
+{
+    delete m_shadow;
+    m_shadow = nullptr;
+}
+
 void Toplevel::deleteEffectWindow()
 {
     delete effect_window;
     effect_window = nullptr;
 }
 
-void Toplevel::checkScreen()
+void Toplevel::checkOutput()
 {
-    if (screens()->count() == 1) {
-        if (m_screen != 0) {
-            m_screen = 0;
-            Q_EMIT screenChanged();
-        }
-    } else {
-        const int s = screens()->number(frameGeometry().center());
-        if (s != m_screen) {
-            m_screen = s;
-            Q_EMIT screenChanged();
-        }
-    }
-    qreal newScale = screens()->scale(m_screen);
-    if (newScale != m_screenScale) {
-        m_screenScale = newScale;
-        Q_EMIT screenScaleChanged();
-    }
+    setOutput(kwinApp()->platform()->outputAt(frameGeometry().center()));
 }
 
-void Toplevel::setupCheckScreenConnection()
+void Toplevel::setupCheckOutputConnection()
 {
-    connect(this, &Toplevel::frameGeometryChanged, this, &Toplevel::checkScreen);
-    checkScreen();
+    connect(this, &Toplevel::frameGeometryChanged, this, &Toplevel::checkOutput);
+    checkOutput();
 }
 
-void Toplevel::removeCheckScreenConnection()
+void Toplevel::removeCheckOutputConnection()
 {
-    disconnect(this, &Toplevel::frameGeometryChanged, this, &Toplevel::checkScreen);
+    disconnect(this, &Toplevel::frameGeometryChanged, this, &Toplevel::checkOutput);
 }
 
 int Toplevel::screen() const
 {
-    return m_screen;
+    return kwinApp()->platform()->enabledOutputs().indexOf(m_output);
 }
 
-qreal Toplevel::screenScale() const
+AbstractOutput *Toplevel::output() const
 {
-    return m_screenScale;
+    return m_output;
 }
 
-qreal Toplevel::bufferScale() const
+void Toplevel::setOutput(AbstractOutput *output)
 {
-#if HAVE_WAYLAND
-    return surface() ? surface()->bufferScale() : 1;
-#else
-    return 1;
-#endif
+    if (m_output != output) {
+        m_output = output;
+        Q_EMIT screenChanged();
+    }
 }
 
-bool Toplevel::isOnScreen(int screen) const
+bool Toplevel::isOnActiveOutput() const
 {
-    return screens()->geometry(screen).intersects(frameGeometry());
-}
-
-bool Toplevel::isOnActiveScreen() const
-{
-    return isOnScreen(screens()->current());
+    return isOnOutput(workspace()->activeOutput());
 }
 
 bool Toplevel::isOnOutput(AbstractOutput *output) const
@@ -430,21 +423,24 @@ bool Toplevel::isOnOutput(AbstractOutput *output) const
     return output->geometry().intersects(frameGeometry());
 }
 
+Shadow *Toplevel::shadow() const
+{
+    return m_shadow;
+}
+
 void Toplevel::updateShadow()
 {
-    WindowItem *windowItem = this->windowItem();
-    if (!windowItem) {
+    if (!Compositor::compositing()) {
         return;
     }
-    if (auto shadowItem = windowItem->shadowItem()) {
-        if (!shadowItem->shadow()->updateShadow()) {
-            windowItem->setShadow(nullptr);
+    if (m_shadow) {
+        if (!m_shadow->updateShadow()) {
+            deleteShadow();
         }
         Q_EMIT shadowChanged();
     } else {
-        Shadow *shadow = Shadow::createShadow(this);
-        if (shadow) {
-            windowItem->setShadow(shadow);
+        m_shadow = Shadow::createShadow(this);
+        if (m_shadow) {
             Q_EMIT shadowChanged();
         }
     }
@@ -495,8 +491,8 @@ QRegion Toplevel::shapeRegion() const
     const QRect bufferGeometry = this->bufferGeometry();
 
     if (shape()) {
-        auto cookie = xcb_shape_get_rectangles_unchecked(connection(), frameId(), XCB_SHAPE_SK_BOUNDING);
-        ScopedCPointer<xcb_shape_get_rectangles_reply_t> reply(xcb_shape_get_rectangles_reply(connection(), cookie, nullptr));
+        auto cookie = xcb_shape_get_rectangles_unchecked(kwinApp()->x11Connection(), frameId(), XCB_SHAPE_SK_BOUNDING);
+        ScopedCPointer<xcb_shape_get_rectangles_reply_t> reply(xcb_shape_get_rectangles_reply(kwinApp()->x11Connection(), cookie, nullptr));
         if (!reply.isNull()) {
             m_shapeRegion = QRegion();
             const xcb_rectangle_t *rects = xcb_shape_get_rectangles_rectangles(reply.data());
@@ -597,21 +593,33 @@ void Toplevel::setSkipCloseAnimation(bool set)
     Q_EMIT skipCloseAnimationChanged();
 }
 
-#if HAVE_WAYLAND
+KWaylandServer::SurfaceInterface *Toplevel::surface() const
+{
+    return m_surface;
+}
+
 void Toplevel::setSurface(KWaylandServer::SurfaceInterface *surface)
 {
     if (m_surface == surface) {
         return;
     }
     m_surface = surface;
-    connect(m_surface, &KWaylandServer::SurfaceInterface::destroyed, this, [this]() {
-        m_surface = nullptr;
-        m_surfaceId = 0;
-    });
-    m_surfaceId = surface->id();
+    m_pendingSurfaceId = 0;
     Q_EMIT surfaceChanged();
 }
-#endif
+
+int Toplevel::stackingOrder() const
+{
+    return m_stackingOrder;
+}
+
+void Toplevel::setStackingOrder(int order)
+{
+    if (m_stackingOrder != order) {
+        m_stackingOrder = order;
+        Q_EMIT stackingOrderChanged();
+    }
+}
 
 QByteArray Toplevel::windowRole() const
 {
@@ -636,11 +644,7 @@ void Toplevel::setDepth(int depth)
 QRegion Toplevel::inputShape() const
 {
     if (m_surface) {
-#if HAVE_WAYLAND
         return m_surface->input();
-#else
-        Q_UNREACHABLE();
-#endif
     } else {
         // TODO: maybe also for X11?
         return QRegion();
@@ -656,11 +660,9 @@ QMatrix4x4 Toplevel::inputTransformation() const
 
 bool Toplevel::hitTest(const QPoint &point) const
 {
-#if HAVE_WAYLAND
     if (m_surface && m_surface->isMapped()) {
         return m_surface->inputSurfaceAt(mapToLocal(point));
     }
-#endif
     return inputGeometry().contains(point);
 }
 
@@ -700,6 +702,21 @@ bool Toplevel::isLocalhost() const
 QMargins Toplevel::frameMargins() const
 {
     return QMargins();
+}
+
+bool Toplevel::isOnDesktop(VirtualDesktop *desktop) const
+{
+    return isOnAllDesktops() || desktops().contains(desktop);
+}
+
+bool Toplevel::isOnDesktop(int d) const
+{
+    return isOnDesktop(VirtualDesktopManager::self()->desktopForX11Id(d));
+}
+
+bool Toplevel::isOnCurrentDesktop() const
+{
+    return isOnDesktop(VirtualDesktopManager::self()->currentDesktop());
 }
 
 } // namespace

@@ -59,7 +59,7 @@ ScrollViewKCM {
             Kirigami.PlaceholderMessage {
                 id: hintArea
                 anchors.centerIn: parent
-                width: parent.width - (units.largeSpacing * 4)
+                width: parent.width - (Kirigami.Units.largeSpacing * 4)
                 text: i18n("No window properties changed")
                 explanation: xi18nc("@info", "Click the <interface>Add Property...</interface> button below to add some window properties that will be affected by the rule")
             }
@@ -83,7 +83,7 @@ ScrollViewKCM {
     footer:  RowLayout {
         QQC2.Button {
             text: checked ? i18n("Close") : i18n("Add Property...")
-            icon.name: checked ? "dialog-close" : "list-add-symbolic"
+            icon.name: checked ? "dialog-close" : "list-add"
             checkable: true
             checked: propertySheet.sheetOpen
             onToggled: {
@@ -107,7 +107,7 @@ ScrollViewKCM {
         QQC2.SpinBox {
             id: delaySpin
             enabled: detectButton.enabled
-            Layout.preferredWidth: Math.max(metricsInstant.advanceWidth, metricsAfter.advanceWidth) + Kirigami.Units.gridUnit * 2
+            Layout.preferredWidth: Math.max(metricsInstant.advanceWidth, metricsAfter.advanceWidth) + Kirigami.Units.gridUnit * 4
             from: 0
             to: 30
             textFromValue: (value, locale) => {
@@ -173,7 +173,10 @@ ScrollViewKCM {
 
             section {
                 property: "section"
-                delegate: Kirigami.ListSectionHeader { label: section }
+                delegate: Kirigami.ListSectionHeader {
+                    label: section
+                    height: implicitHeight
+                }
             }
 
             delegate: Kirigami.AbstractListItem {
@@ -214,7 +217,7 @@ ScrollViewKCM {
                         }
                     }
                     QQC2.ToolButton {
-                        icon.name: (model.enabled) ? "dialog-ok-apply" : "list-add-symbolic"
+                        icon.name: (model.enabled) ? "dialog-ok-apply" : "list-add"
                         opacity: propertyDelegate.hovered ? 1 : 0
                         onClicked: propertyDelegate.clicked()
                         Layout.preferredWidth: implicitWidth
@@ -240,7 +243,6 @@ ScrollViewKCM {
         onSheetOpenChanged: {
             searchField.text = "";
             if (sheetOpen) {
-                overlayModel.ready = true;
                 searchField.forceActiveFocus();
             } else {
                 overlayModel.onlySuggestions = false;
@@ -290,19 +292,8 @@ ScrollViewKCM {
             invalidateFilter();
         }
 
-        // Delay the model filtering until `ready` is set
-        // FIXME: Workaround https://bugs.kde.org/show_bug.cgi?id=422289
-        property bool ready: false
-        onReadyChanged: {
-            invalidateFilter();
-        }
-
         filterString: searchField.text.trim().toLowerCase()
         filterRowCallback: (source_row, source_parent) => {
-            if (!ready) {
-                return false;
-            }
-
             var index = sourceModel.index(source_row, 0, source_parent);
 
             var hasSuggestion = sourceModel.data(index, RulesModel.SuggestedValueRole) != null;

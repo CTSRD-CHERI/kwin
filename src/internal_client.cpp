@@ -58,7 +58,6 @@ InternalClient::InternalClient(QWindow *window)
     commitGeometry(m_internalWindow->geometry());
     updateDecoration(true);
     moveResize(clientRectToFrameRect(m_internalWindow->geometry()));
-    setGeometryRestore(moveResizeGeometry());
     blockGeometryUpdates(false);
 
     m_internalWindow->installEventFilter(this);
@@ -87,6 +86,22 @@ bool InternalClient::hitTest(const QPoint &point) const
     }
 
     return true;
+}
+
+void InternalClient::pointerEnterEvent(const QPoint &globalPos)
+{
+    AbstractClient::pointerEnterEvent(globalPos);
+
+    QEnterEvent enterEvent(pos(), pos(), globalPos);
+    QCoreApplication::sendEvent(m_internalWindow, &enterEvent);
+}
+
+void InternalClient::pointerLeaveEvent()
+{
+    AbstractClient::pointerLeaveEvent();
+
+    QEvent event(QEvent::Leave);
+    QCoreApplication::sendEvent(m_internalWindow, &event);
 }
 
 bool InternalClient::eventFilter(QObject *watched, QEvent *event)
@@ -133,11 +148,6 @@ QSize InternalClient::minSize() const
 QSize InternalClient::maxSize() const
 {
     return m_internalWindow->maximumSize();
-}
-
-QRect InternalClient::transparentRect() const
-{
-    return QRect();
 }
 
 NET::WindowType InternalClient::windowType(bool direct, int supported_types) const
@@ -233,10 +243,8 @@ bool InternalClient::isOutline() const
     return false;
 }
 
-bool InternalClient::isShown(bool shaded_is_shown) const
+bool InternalClient::isShown() const
 {
-    Q_UNUSED(shaded_is_shown)
-
     return readyForPainting();
 }
 
@@ -245,9 +253,12 @@ bool InternalClient::isHiddenInternal() const
     return false;
 }
 
-void InternalClient::hideClient(bool hide)
+void InternalClient::hideClient()
 {
-    Q_UNUSED(hide)
+}
+
+void InternalClient::showClient()
+{
 }
 
 void InternalClient::resizeWithChecks(const QSize &size)
@@ -297,23 +308,36 @@ void InternalClient::setNoBorder(bool set)
     updateDecoration(true);
 }
 
+void InternalClient::createDecoration(const QRect &oldGeometry)
+{
+    setDecoration(QSharedPointer<KDecoration2::Decoration>(Decoration::DecorationBridge::self()->createDecoration(this)));
+    moveResize(oldGeometry);
+
+    Q_EMIT geometryShapeChanged(this, oldGeometry);
+}
+
+void InternalClient::destroyDecoration()
+{
+    const QSize clientSize = frameSizeToClientSize(moveResizeGeometry().size());
+    setDecoration(nullptr);
+    resize(clientSize);
+}
+
 void InternalClient::updateDecoration(bool check_workspace_pos, bool force)
 {
     if (!force && isDecorated() == !noBorder()) {
         return;
     }
 
-    const QRect oldFrameGeometry = frameGeometry();
-    const QRect oldClientGeometry = oldFrameGeometry - frameMargins();
-
     GeometryUpdatesBlocker blocker(this);
 
+    const QRect oldFrameGeometry = frameGeometry();
     if (force) {
         destroyDecoration();
     }
 
     if (!noBorder()) {
-        createDecoration(oldClientGeometry);
+        createDecoration(oldFrameGeometry);
     } else {
         destroyDecoration();
     }
@@ -321,8 +345,13 @@ void InternalClient::updateDecoration(bool check_workspace_pos, bool force)
     updateShadow();
 
     if (check_workspace_pos) {
-        checkWorkspacePosition(oldFrameGeometry, -2, oldClientGeometry);
+        checkWorkspacePosition(oldFrameGeometry);
     }
+}
+
+void InternalClient::invalidateDecoration()
+{
+    updateDecoration(true, true);
 }
 
 void InternalClient::destroyClient()
@@ -358,7 +387,6 @@ void InternalClient::popupDone()
     m_internalWindow->hide();
 }
 
-#if QT_CONFIG(opengl)
 void InternalClient::present(const QSharedPointer<QOpenGLFramebufferObject> fbo)
 {
     Q_ASSERT(m_internalImage.isNull());
@@ -372,12 +400,7 @@ void InternalClient::present(const QSharedPointer<QOpenGLFramebufferObject> fbo)
 
     setDepth(32);
     surfaceItem()->addDamage(surfaceItem()->rect());
-
-    if (isInteractiveResize()) {
-        performInteractiveMoveResize();
-    }
 }
-#endif
 
 void InternalClient::present(const QImage &image, const QRegion &damage)
 {
@@ -392,10 +415,6 @@ void InternalClient::present(const QImage &image, const QRegion &damage)
 
     setDepth(32);
     surfaceItem()->addDamage(damage);
-
-    if (isInteractiveResize()) {
-        performInteractiveMoveResize();
-    }
 }
 
 QWindow *InternalClient::internalWindow() const

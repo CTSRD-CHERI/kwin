@@ -48,9 +48,7 @@ ApplicationMenu::ApplicationMenu(QObject *parent)
                 Q_EMIT applicationMenuEnabledChanged(false);
             });
 
-    if (auto *sessionInterface = QDBusConnection::sessionBus().interface()) {
-        m_applicationMenuEnabled = sessionInterface->isServiceRegistered(QStringLiteral("org.kde.kappmenu"));
-    }
+    m_applicationMenuEnabled = QDBusConnection::sessionBus().interface()->isServiceRegistered(QStringLiteral("org.kde.kappmenu"));
 }
 
 ApplicationMenu::~ApplicationMenu()
@@ -65,13 +63,12 @@ bool ApplicationMenu::applicationMenuEnabled() const
 
 void ApplicationMenu::setViewEnabled(bool enabled)
 {
-    auto *sessionInterface = QDBusConnection::sessionBus().interface();
-    if (!sessionInterface)
-        return;
     if (enabled) {
-        sessionInterface->registerService(s_viewService, QDBusConnectionInterface::QueueService, QDBusConnectionInterface::DontAllowReplacement);
+        QDBusConnection::sessionBus().interface()->registerService(s_viewService,
+                    QDBusConnectionInterface::QueueService,
+                    QDBusConnectionInterface::DontAllowReplacement);
     } else {
-        sessionInterface->unregisterService(s_viewService);
+        QDBusConnection::sessionBus().interface()->unregisterService(s_viewService);
     }
 }
 
@@ -79,7 +76,7 @@ void ApplicationMenu::slotShowRequest(const QString &serviceName, const QDBusObj
 {
     // Ignore show request when user has not configured the application menu title bar button
     auto decorationSettings = Decoration::DecorationBridge::self()->settings();
-    if (!decorationSettings->decorationButtonsLeft().contains(KDecoration2::DecorationButtonType::ApplicationMenu)
+    if (decorationSettings && !decorationSettings->decorationButtonsLeft().contains(KDecoration2::DecorationButtonType::ApplicationMenu)
             && !decorationSettings->decorationButtonsRight().contains(KDecoration2::DecorationButtonType::ApplicationMenu)) {
         return;
     }

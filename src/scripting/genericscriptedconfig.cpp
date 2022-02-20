@@ -29,10 +29,23 @@ QObject *GenericScriptedConfigFactory::create(const char *iface, QWidget *parent
 {
     Q_UNUSED(iface)
     Q_UNUSED(parent)
-    if (keyword.startsWith(QLatin1String("kwin4_effect_"))) {
-        return new ScriptedEffectConfig(keyword, parentWidget, args);
+    Q_UNUSED(keyword)
+
+    // the plugin id is in the args when created by desktop effects kcm or EffectsModel in general
+    QString pluginId = args.isEmpty() ? QString() : args.first().toString();
+
+    // If we do not get the id of the effect we want to load from the args, we have to check our metadata.
+    // This can be the case if the factory gets loaded from a KPluginSelector
+    // the plugin id is in plugin factory metadata when created by scripts kcm
+    // (because it uses kpluginselector, which doesn't pass the plugin id as the first arg),
+    // can be dropped once the scripts kcm is ported to qtquick (because then we could pass the plugin id via the args)
+    if (pluginId.isEmpty()) {
+        pluginId = metaData().pluginId();
+    }
+    if (pluginId.startsWith(QLatin1String("kwin4_effect_"))) {
+        return new ScriptedEffectConfig(pluginId, parentWidget, args);
     } else {
-        return new ScriptingConfig(keyword, parentWidget, args);
+        return new ScriptingConfig(pluginId, parentWidget, args);
     }
 }
 
@@ -78,8 +91,8 @@ void GenericScriptedConfig::createUi()
     loader->setLanguageChangeEnabled(true);
     QFile uiFile(uiPath);
     // try getting a translation domain
-    const QString metaDataPath = QStandardPaths::locate(QStandardPaths::GenericDataLocation,
-                                                        QStringLiteral(KWIN_NAME"/%1/%2/metadata.desktop").arg(typeName()).arg(m_packageName));
+    const QString metaDataPath =
+        QStandardPaths::locate(QStandardPaths::GenericDataLocation, QStringLiteral(KWIN_NAME "/%1/%2/metadata.desktop").arg(typeName(), m_packageName));
     if (!metaDataPath.isNull()) {
         KDesktopFile metaData(metaDataPath);
         m_translator->setTranslationDomain(metaData.desktopGroup().readEntry("X-KWin-Config-TranslationDomain", QString()));

@@ -183,10 +183,13 @@ void Monitor::selectEdgeItem(int edge, int index)
 
 int Monitor::selectedEdgeItem(int edge) const
 {
-    Q_FOREACH (QAction * act, popup_actions[ edge ])
-    if (act->isChecked())
-        return popup_actions[ edge ].indexOf(act);
-    abort();
+    const auto actions = popup_actions[edge];
+    for (QAction * act : actions) {
+        if (act->isChecked()) {
+            return actions.indexOf(act);
+        }
+    }
+    Q_UNREACHABLE();
 }
 
 void Monitor::popup(Corner* c, QPoint pos)
@@ -206,7 +209,7 @@ void Monitor::popup(Corner* c, QPoint pos)
             return;
         }
     }
-    abort();
+    Q_UNREACHABLE();
 }
 
 void Monitor::flip(Corner* c, QPoint pos)
@@ -222,7 +225,7 @@ void Monitor::flip(Corner* c, QPoint pos)
             return;
         }
     }
-    abort();
+    Q_UNREACHABLE();
 }
 
 Monitor::Corner::Corner(Monitor* m)

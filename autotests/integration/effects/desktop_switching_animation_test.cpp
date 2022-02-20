@@ -14,11 +14,10 @@
 #include "effectloader.h"
 #include "effects.h"
 #include "platform.h"
-#include "scene.h"
+#include "renderbackend.h"
+#include "virtualdesktops.h"
 #include "wayland_server.h"
 #include "workspace.h"
-
-#include "effect_builtins.h"
 
 #include <KWayland/Client/surface.h>
 
@@ -51,8 +50,7 @@ void DesktopSwitchingAnimationTest::initTestCase()
 
     auto config = KSharedConfig::openConfig(QString(), KConfig::SimpleConfig);
     KConfigGroup plugins(config, QStringLiteral("Plugins"));
-    ScriptedEffectLoader loader;
-    const auto builtinNames = BuiltInEffects::availableEffectNames() << loader.listOfKnownEffects();
+    const auto builtinNames = EffectLoader().listOfKnownEffects();
     for (const QString &name : builtinNames) {
         plugins.writeEntry(name + QStringLiteral("Enabled"), false);
     }
@@ -66,9 +64,7 @@ void DesktopSwitchingAnimationTest::initTestCase()
     QVERIFY(applicationStartedSpy.wait());
     Test::initWaylandWorkspace();
 
-    auto scene = Compositor::self()->scene();
-    QVERIFY(scene);
-    QCOMPARE(scene->compositingType(), OpenGLCompositing);
+    QCOMPARE(Compositor::self()->backend()->compositingType(), KWin::OpenGLCompositing);
 }
 
 void DesktopSwitchingAnimationTest::init()
@@ -109,7 +105,7 @@ void DesktopSwitchingAnimationTest::testSwitchDesktops()
     // The Fade Desktop effect will do nothing if there are no clients to fade,
     // so we have to create a dummy test client.
     using namespace KWayland::Client;
-    QScopedPointer<Surface> surface(Test::createSurface());
+    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
     QVERIFY(!surface.isNull());
     QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
     QVERIFY(!shellSurface.isNull());

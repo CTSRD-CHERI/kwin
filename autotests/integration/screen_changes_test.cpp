@@ -7,10 +7,12 @@
     SPDX-License-Identifier: GPL-2.0-or-later
 */
 #include "kwin_wayland_test.h"
+#include "abstract_output.h"
 #include "cursor.h"
 #include "platform.h"
 #include "screens.h"
 #include "wayland_server.h"
+#include "workspace.h"
 
 #include <KWayland/Client/output.h>
 #include <KWayland/Client/xdgoutput.h>
@@ -49,7 +51,7 @@ void ScreenChangesTest::init()
 {
     QVERIFY(Test::setupWaylandConnection());
 
-    screens()->setCurrent(0);
+    workspace()->setActiveOutput(QPoint(640, 512));
     KWin::Cursors::self()->mouse()->setPos(QPoint(640, 512));
 }
 
@@ -94,9 +96,10 @@ void ScreenChangesTest::testScreenAddRemove()
                               Q_ARG(QVector<QRect>, geometries));
     QVERIFY(screensChangedSpy.wait());
     QCOMPARE(screensChangedSpy.count(), 2);
-    QCOMPARE(screens()->count(), 2);
-    QCOMPARE(screens()->geometry(0), geometries.at(0));
-    QCOMPARE(screens()->geometry(1), geometries.at(1));
+    const auto outputs = kwinApp()->platform()->enabledOutputs();
+    QCOMPARE(outputs.count(), 2);
+    QCOMPARE(outputs[0]->geometry(), geometries[0]);
+    QCOMPARE(outputs[1]->geometry(), geometries[1]);
 
     // this should result in it getting announced, two new outputs are added...
     QVERIFY(outputAnnouncedSpy.wait());

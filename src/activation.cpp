@@ -19,10 +19,12 @@
 #include "cursor.h"
 #include "focuschain.h"
 #include "netinfo.h"
+#include "platform.h"
 #include "workspace.h"
 #ifdef KWIN_BUILD_ACTIVITIES
 #include "activities.h"
 #endif
+#include "virtualdesktops.h"
 
 #include <kstartupinfo.h>
 #include <kstringhandler.h>
@@ -243,7 +245,7 @@ void Workspace::setActiveClient(AbstractClient* c)
         // activating a client can cause a non active fullscreen window to loose the ActiveLayer status on > 1 screens
         if (screens()->count() > 1) {
             for (auto it = m_allClients.begin(); it != m_allClients.end(); ++it) {
-                if (*it != active_client && (*it)->layer() == ActiveLayer && (*it)->screen() == active_client->screen()) {
+                if (*it != active_client && (*it)->layer() == ActiveLayer && (*it)->output() == active_client->output()) {
                     (*it)->updateLayer();
                 }
             }
@@ -288,7 +290,7 @@ void Workspace::activateClient(AbstractClient* c, bool force)
     raiseClient(c);
     if (!c->isOnCurrentDesktop()) {
         ++block_focus;
-        VirtualDesktopManager::self()->setCurrent(c->desktop());
+        VirtualDesktopManager::self()->setCurrent(c->desktops().constLast());
         --block_focus;
     }
 #ifdef KWIN_BUILD_ACTIVITIES
@@ -303,7 +305,7 @@ void Workspace::activateClient(AbstractClient* c, bool force)
         c->unminimize();
 
     // ensure the window is really visible - could eg. be a hidden utility window, see bug #348083
-    c->hideClient(false);
+    c->showClient();
 
 // TODO force should perhaps allow this only if the window already contains the mouse
     if (options->focusPolicyIsReasonable() || force)
@@ -348,9 +350,10 @@ bool Workspace::takeActivity(AbstractClient* c, ActivityFlags flags)
     if (flags & ActivityFocus) {
         AbstractClient* modal = c->findModal();
         if (modal != nullptr && modal != c) {
-            if (!modal->isOnDesktop(c->desktop()))
-                modal->setDesktop(c->desktop());
-            if (!modal->isShown(true) && !modal->isMinimized())  // forced desktop or utility window
+            if (modal->desktops() != c->desktops()) {
+                modal->setDesktops(c->desktops());
+            }
+            if (!modal->isShown() && !modal->isMinimized())  // forced desktop or utility window
                 activateClient(modal);   // activating a minimized blocked window will unminimize its modal implicitly
             // if the click was inside the window (i.e. handled is set),
             // but it has a modal, there's no need to use handled mode, because
@@ -377,7 +380,7 @@ bool Workspace::takeActivity(AbstractClient* c, ActivityFlags flags)
         }
         flags &= ~ActivityFocus;
     }
-    if (!c->isShown(true)) {  // shouldn't happen, call activateClient() if needed
+    if (!c->isShown()) {  // shouldn't happen, call activateClient() if needed
         qCWarning(KWIN_CORE) << "takeActivity: not shown" ;
         return false;
     }
@@ -389,8 +392,9 @@ bool Workspace::takeActivity(AbstractClient* c, ActivityFlags flags)
     if (flags & ActivityRaise)
         workspace()->raiseClient(c);
 
-    if (!c->isOnActiveScreen())
-        screens()->setCurrent(c->screen());
+    if (!c->isOnActiveOutput()) {
+        setActiveOutput(c->output());
+    }
 
     return ret;
 }
@@ -404,11 +408,11 @@ bool Workspace::takeActivity(AbstractClient* c, ActivityFlags flags)
  */
 void Workspace::clientHidden(AbstractClient* c)
 {
-    Q_ASSERT(!c->isShown(true) || !c->isOnCurrentDesktop() || !c->isOnCurrentActivity());
+    Q_ASSERT(!c->isShown() || !c->isOnCurrentDesktop() || !c->isOnCurrentActivity());
     activateNextClient(c);
 }
 
-AbstractClient *Workspace::clientUnderMouse(int screen) const
+AbstractClient *Workspace::clientUnderMouse(AbstractOutput *output) const
 {
     auto it = stackingOrder().constEnd();
     while (it != stackingOrder().constBegin()) {
@@ -419,8 +423,8 @@ AbstractClient *Workspace::clientUnderMouse(int screen) const
 
         // rule out clients which are not really visible.
         // the screen test is rather superfluous for xrandr & twinview since the geometry would differ -> TODO: might be dropped
-        if (!(client->isShown(false) && client->isOnCurrentDesktop() &&
-                client->isOnCurrentActivity() && client->isOnScreen(screen)))
+        if (!(client->isShown() && client->isOnCurrentDesktop() &&
+                client->isOnCurrentActivity() && client->isOnOutput(output) && !client->isShade()))
             continue;
 
         if (client->frameGeometry().contains(Cursors::self()->mouse()->pos())) {
@@ -457,13 +461,13 @@ bool Workspace::activateNextClient(AbstractClient* c)
 
     AbstractClient* get_focus = nullptr;
 
-    const int desktop = VirtualDesktopManager::self()->current();
+    VirtualDesktop *desktop = VirtualDesktopManager::self()->currentDesktop();
 
     if (!get_focus && showingDesktop())
         get_focus = findDesktop(true, desktop); // to not break the state
 
     if (!get_focus && options->isNextFocusPrefersMouse()) {
-        get_focus = clientUnderMouse(c ? c->screen() : screens()->current());
+        get_focus = clientUnderMouse(c ? c->output() : workspace()->activeOutput());
         if (get_focus && (get_focus == c || get_focus->isDesktop())) {
             // should rather not happen, but it cannot get the focus. rest of usability is tested above
             get_focus = nullptr;
@@ -497,20 +501,18 @@ bool Workspace::activateNextClient(AbstractClient* c)
 
 }
 
-void Workspace::setCurrentScreen(int new_screen)
+void Workspace::switchToOutput(AbstractOutput *output)
 {
-    if (new_screen < 0 || new_screen >= screens()->count())
-        return;
     if (!options->focusPolicyIsReasonable())
         return;
     closeActivePopup();
-    const int desktop = VirtualDesktopManager::self()->current();
-    AbstractClient *get_focus = FocusChain::self()->getForActivation(desktop, new_screen);
+    VirtualDesktop *desktop = VirtualDesktopManager::self()->currentDesktop();
+    AbstractClient *get_focus = FocusChain::self()->getForActivation(desktop, output);
     if (get_focus == nullptr)
         get_focus = findDesktop(true, desktop);
     if (get_focus != nullptr && get_focus != mostRecentlyActivatedClient())
         requestFocus(get_focus);
-    screens()->setCurrent(new_screen);
+    setActiveOutput(output);
 }
 
 void Workspace::gotFocusIn(const AbstractClient* c)
@@ -828,8 +830,12 @@ void X11Client::startupIdChanged()
         desktop = asn_data.desktop();
     if (!isOnAllDesktops())
         workspace()->sendClientToDesktop(this, desktop, true);
-    if (asn_data.xinerama() != -1)
-        workspace()->sendClientToScreen(this, asn_data.xinerama());
+    if (asn_data.xinerama() != -1) {
+        AbstractOutput *output = kwinApp()->platform()->findOutput(asn_data.xinerama());
+        if (output) {
+            workspace()->sendClientToOutput(this, output);
+        }
+    }
     const xcb_timestamp_t timestamp = asn_id.timestamp();
     if (timestamp != 0) {
         bool activate = workspace()->allowClientActivation(this, timestamp);

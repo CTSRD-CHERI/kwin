@@ -11,7 +11,6 @@
 
 #include "x11client.h"
 
-#if HAVE_WAYLAND
 namespace KWin
 {
 
@@ -33,5 +32,3 @@ private:
 };
 
 } // namespace KWin
-
-#endif

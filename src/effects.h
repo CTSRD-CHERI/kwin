@@ -20,6 +20,9 @@
 
 #include <memory>
 
+class QMouseEvent;
+class QWheelEvent;
+
 namespace Plasma {
 class Theme;
 }
@@ -43,6 +46,9 @@ class Group;
 class Toplevel;
 class Unmanaged;
 class WindowPropertyNotifyX11Filter;
+class TabletEvent;
+class TabletPadId;
+class TabletToolId;
 
 class KWIN_EXPORT EffectsHandlerImpl : public EffectsHandler
 {
@@ -74,7 +80,7 @@ public:
     EffectWindow* activeWindow() const override;
     void moveWindow(EffectWindow* w, const QPoint& pos, bool snap = false, double snapAdjust = 1.0) override;
     void windowToDesktop(EffectWindow* w, int desktop) override;
-    void windowToScreen(EffectWindow* w, int screen) override;
+    void windowToScreen(EffectWindow* w, EffectScreen *screen) override;
     void setShowingDesktop(bool showing) override;
 
     QString currentActivity() const override;
@@ -107,14 +113,13 @@ public:
     void registerGlobalShortcut(const QKeySequence &shortcut, QAction *action) override;
     void registerPointerShortcut(Qt::KeyboardModifiers modifiers, Qt::MouseButton pointerButtons, QAction *action) override;
     void registerAxisShortcut(Qt::KeyboardModifiers modifiers, PointerAxisDirection axis, QAction *action) override;
+    void registerRealtimeTouchpadSwipeShortcut(SwipeDirection dir, QAction* onUp, std::function<void(qreal)> progressCallback) override;
     void registerTouchpadSwipeShortcut(SwipeDirection direction, QAction *action) override;
     void* getProxy(QString name) override;
     void startMousePolling() override;
     void stopMousePolling() override;
     EffectWindow* findWindow(WId id) const override;
-#if HAVE_WAYLAND
     EffectWindow* findWindow(KWaylandServer::SurfaceInterface *surf) const override;
-#endif
     EffectWindow *findWindow(QWindow *w) const override;
     EffectWindow *findWindow(const QUuid &id) const override;
     EffectWindowList stackingOrder() const override;
@@ -138,10 +143,8 @@ public:
     void addRepaint(const QRect& r) override;
     void addRepaint(const QRegion& r) override;
     void addRepaint(int x, int y, int w, int h) override;
-    int activeScreen() const override;
-    int numScreens() const override;
-    int screenNumber(const QPoint& pos) const override;
-    QRect clientArea(clientAreaOption, int screen, int desktop) const override;
+    EffectScreen *activeScreen() const override;
+    QRect clientArea(clientAreaOption, const EffectScreen *screen, int desktop) const override;
     QRect clientArea(clientAreaOption, const EffectWindow* c) const override;
     QRect clientArea(clientAreaOption, const QPoint& p, int desktop) const override;
     QSize virtualScreenSize() const override;
@@ -186,7 +189,6 @@ public:
     void startPaint();
     void grabbedKeyboardEvent(QKeyEvent* e);
     bool hasKeyboardGrab() const;
-    void desktopResized(const QSize &size);
 
     void reloadEffect(Effect *effect) override;
     QStringList loadedEffects() const;
@@ -240,6 +242,12 @@ public:
     bool touchMotion(qint32 id, const QPointF &pos, quint32 time);
     bool touchUp(qint32 id, quint32 time);
 
+    bool tabletToolEvent(KWin::TabletEvent *event);
+    bool tabletToolButtonEvent(uint button, bool pressed, const KWin::TabletToolId &tabletToolId);
+    bool tabletPadButtonEvent(uint button, bool pressed, const KWin::TabletPadId &tabletPadId);
+    bool tabletPadStripEvent(int number, int position, bool isFinger, const KWin::TabletPadId &tabletPadId);
+    bool tabletPadRingEvent(int number, int position, bool isFinger, const KWin::TabletPadId &tabletPadId);
+
     void highlightWindows(const QVector<EffectWindow *> &windows);
 
     bool isPropertyTypeRegistered(xcb_atom_t atom) const {
@@ -257,13 +265,17 @@ public:
      */
     Effect *findEffect(const QString &name) const;
 
-    void renderEffectQuickView(EffectQuickView *effectQuickView) const override;
+    void renderOffscreenQuickView(OffscreenQuickView *effectQuickView) const override;
 
     SessionState sessionState() const override;
     QList<EffectScreen *> screens() const override;
     EffectScreen *screenAt(const QPoint &point) const override;
     EffectScreen *findScreen(const QString &name) const override;
     EffectScreen *findScreen(int screenId) const override;
+    void renderScreen(EffectScreen *screen) override;
+    bool isCursorHidden() const override;
+    QRect renderTargetRect() const override;
+    qreal renderTargetScale() const override;
 
 public Q_SLOTS:
     void slotCurrentTabAboutToChange(EffectWindow* from, EffectWindow* to);
@@ -362,12 +374,16 @@ class EffectScreenImpl : public EffectScreen
 
 public:
     explicit EffectScreenImpl(AbstractOutput *output, QObject *parent = nullptr);
+    ~EffectScreenImpl() override;
 
     AbstractOutput *platformOutput() const;
 
     QString name() const override;
     qreal devicePixelRatio() const override;
     QRect geometry() const override;
+    Transform transform() const override;
+
+    static EffectScreenImpl *get(AbstractOutput *output);
 
 private:
     AbstractOutput *m_platformOutput;
@@ -417,7 +433,7 @@ public:
     QString caption() const override;
 
     QRect expandedGeometry() const override;
-    int screen() const override;
+    EffectScreen *screen() const override;
     QPoint pos() const override;
     QSize size() const override;
     QRect rect() const override;
@@ -476,6 +492,7 @@ public:
     qlonglong windowId() const override;
 
     QRect decorationInnerRect() const override;
+    KDecoration2::Decoration *decoration() const override;
     QByteArray readProperty(long atom, long type, int format) const override;
     void deleteProperty(long atom) const override;
 
@@ -550,13 +567,13 @@ public:
     void setText(const QString& text) override;
     EffectFrameStyle style() const override {
         return m_style;
-    };
+    }
     Plasma::FrameSvg& frame() {
         return m_frame;
     }
     bool isStatic() const {
         return m_static;
-    };
+    }
     void finalRender(QRegion region, double opacity, double frameOpacity) const;
     void setShader(GLShader* shader) override {
         m_shader = shader;
@@ -618,13 +635,13 @@ QList<EffectWindow*> EffectsHandlerImpl::elevatedWindows() const
 inline
 xcb_window_t EffectsHandlerImpl::x11RootWindow() const
 {
-    return rootWindow();
+    return kwinApp()->x11RootWindow();
 }
 
 inline
 xcb_connection_t *EffectsHandlerImpl::xcbConnection() const
 {
-    return connection();
+    return kwinApp()->x11Connection();
 }
 
 inline

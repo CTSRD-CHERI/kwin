@@ -5,15 +5,19 @@
 */
 
 #include "shadowitem.h"
+#include "deleted.h"
 #include "shadow.h"
 
 namespace KWin
 {
 
-ShadowItem::ShadowItem(Shadow *shadow, Scene::Window *window, Item *parent)
-    : Item(window, parent)
+ShadowItem::ShadowItem(Shadow *shadow, Toplevel *window, Item *parent)
+    : Item(parent)
+    , m_window(window)
     , m_shadow(shadow)
 {
+    connect(window, &Toplevel::windowClosed, this, &ShadowItem::handleWindowClosed);
+
     connect(shadow, &Shadow::offsetChanged, this, &ShadowItem::updateGeometry);
     connect(shadow, &Shadow::rectChanged, this, &ShadowItem::updateGeometry);
     connect(shadow, &Shadow::textureChanged, this, &ShadowItem::handleTextureChanged);
@@ -28,7 +32,7 @@ ShadowItem::~ShadowItem()
 
 Shadow *ShadowItem::shadow() const
 {
-    return m_shadow.data();
+    return m_shadow;
 }
 
 void ShadowItem::updateGeometry()
@@ -44,6 +48,12 @@ void ShadowItem::handleTextureChanged()
 {
     scheduleRepaint(rect());
     discardQuads();
+}
+
+void ShadowItem::handleWindowClosed(Toplevel *original, Deleted *deleted)
+{
+    Q_UNUSED(original)
+    m_window = deleted;
 }
 
 static inline void distributeHorizontally(QRectF &leftRect, QRectF &rightRect)
@@ -70,10 +80,8 @@ static inline void distributeVertically(QRectF &topRect, QRectF &bottomRect)
 
 WindowQuadList ShadowItem::buildQuads() const
 {
-    const Toplevel *toplevel = window()->window();
-
     // Do not draw shadows if window width or window height is less than 5 px. 5 is an arbitrary choice.
-    if (!toplevel->wantsShadowToBeRendered() || toplevel->width() < 5 || toplevel->height() < 5) {
+    if (!m_window->wantsShadowToBeRendered() || m_window->width() < 5 || m_window->height() < 5) {
         return WindowQuadList();
     }
 
@@ -156,8 +164,8 @@ WindowQuadList ShadowItem::buildQuads() const
     if (topLeftRect.isValid()) {
         tx1 = 0.0;
         ty1 = 0.0;
-        tx2 = topLeftRect.width() / width;
-        ty2 = topLeftRect.height() / height;
+        tx2 = topLeftRect.width();
+        ty2 = topLeftRect.height();
         WindowQuad topLeftQuad;
         topLeftQuad[0] = WindowVertex(topLeftRect.left(),  topLeftRect.top(),    tx1, ty1);
         topLeftQuad[1] = WindowVertex(topLeftRect.right(), topLeftRect.top(),    tx2, ty1);
@@ -167,10 +175,10 @@ WindowQuadList ShadowItem::buildQuads() const
     }
 
     if (topRightRect.isValid()) {
-        tx1 = 1.0 - topRightRect.width() / width;
+        tx1 = width - topRightRect.width();
         ty1 = 0.0;
-        tx2 = 1.0;
-        ty2 = topRightRect.height() / height;
+        tx2 = width;
+        ty2 = topRightRect.height();
         WindowQuad topRightQuad;
         topRightQuad[0] = WindowVertex(topRightRect.left(),  topRightRect.top(),    tx1, ty1);
         topRightQuad[1] = WindowVertex(topRightRect.right(), topRightRect.top(),    tx2, ty1);
@@ -180,10 +188,10 @@ WindowQuadList ShadowItem::buildQuads() const
     }
 
     if (bottomRightRect.isValid()) {
-        tx1 = 1.0 - bottomRightRect.width() / width;
-        tx2 = 1.0;
-        ty1 = 1.0 - bottomRightRect.height() / height;
-        ty2 = 1.0;
+        tx1 = width - bottomRightRect.width();
+        tx2 = width;
+        ty1 = height - bottomRightRect.height();
+        ty2 = height;
         WindowQuad bottomRightQuad;
         bottomRightQuad[0] = WindowVertex(bottomRightRect.left(),  bottomRightRect.top(),    tx1, ty1);
         bottomRightQuad[1] = WindowVertex(bottomRightRect.right(), bottomRightRect.top(),    tx2, ty1);
@@ -194,9 +202,9 @@ WindowQuadList ShadowItem::buildQuads() const
 
     if (bottomLeftRect.isValid()) {
         tx1 = 0.0;
-        tx2 = bottomLeftRect.width() / width;
-        ty1 = 1.0 - bottomLeftRect.height() / height;
-        ty2 = 1.0;
+        tx2 = bottomLeftRect.width();
+        ty1 = height - bottomLeftRect.height();
+        ty2 = height;
         WindowQuad bottomLeftQuad;
         bottomLeftQuad[0] = WindowVertex(bottomLeftRect.left(),  bottomLeftRect.top(),    tx1, ty1);
         bottomLeftQuad[1] = WindowVertex(bottomLeftRect.right(), bottomLeftRect.top(),    tx2, ty1);
@@ -226,10 +234,10 @@ WindowQuadList ShadowItem::buildQuads() const
     distributeVertically(topRect, bottomRect);
 
     if (topRect.isValid()) {
-        tx1 = shadowMargins.left() / width;
+        tx1 = shadowMargins.left();
         ty1 = 0.0;
-        tx2 = tx1 + top.width() / width;
-        ty2 = topRect.height() / height;
+        tx2 = tx1 + top.width();
+        ty2 = topRect.height();
         WindowQuad topQuad;
         topQuad[0] = WindowVertex(topRect.left(),  topRect.top(),    tx1, ty1);
         topQuad[1] = WindowVertex(topRect.right(), topRect.top(),    tx2, ty1);
@@ -239,10 +247,10 @@ WindowQuadList ShadowItem::buildQuads() const
     }
 
     if (rightRect.isValid()) {
-        tx1 = 1.0 - rightRect.width() / width;
-        ty1 = shadowMargins.top() / height;
-        tx2 = 1.0;
-        ty2 = ty1 + right.height() / height;
+        tx1 = width - rightRect.width();
+        ty1 = shadowMargins.top();
+        tx2 = width;
+        ty2 = ty1 + right.height();
         WindowQuad rightQuad;
         rightQuad[0] = WindowVertex(rightRect.left(),  rightRect.top(),    tx1, ty1);
         rightQuad[1] = WindowVertex(rightRect.right(), rightRect.top(),    tx2, ty1);
@@ -252,10 +260,10 @@ WindowQuadList ShadowItem::buildQuads() const
     }
 
     if (bottomRect.isValid()) {
-        tx1 = shadowMargins.left() / width;
-        ty1 = 1.0 - bottomRect.height() / height;
-        tx2 = tx1 + bottom.width() / width;
-        ty2 = 1.0;
+        tx1 = shadowMargins.left();
+        ty1 = height - bottomRect.height();
+        tx2 = tx1 + bottom.width();
+        ty2 = height;
         WindowQuad bottomQuad;
         bottomQuad[0] = WindowVertex(bottomRect.left(),  bottomRect.top(),    tx1, ty1);
         bottomQuad[1] = WindowVertex(bottomRect.right(), bottomRect.top(),    tx2, ty1);
@@ -266,9 +274,9 @@ WindowQuadList ShadowItem::buildQuads() const
 
     if (leftRect.isValid()) {
         tx1 = 0.0;
-        ty1 = shadowMargins.top() / height;
-        tx2 = leftRect.width() / width;
-        ty2 = ty1 + left.height() / height;
+        ty1 = shadowMargins.top();
+        tx2 = leftRect.width();
+        ty2 = ty1 + left.height();
         WindowQuad leftQuad;
         leftQuad[0] = WindowVertex(leftRect.left(),  leftRect.top(),    tx1, ty1);
         leftQuad[1] = WindowVertex(leftRect.right(), leftRect.top(),    tx2, ty1);

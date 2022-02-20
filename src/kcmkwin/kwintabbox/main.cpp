@@ -8,7 +8,6 @@
     SPDX-License-Identifier: GPL-2.0-or-later
 */
 #include "main.h"
-#include <effect_builtins.h>
 #include <kwin_effects_interface.h>
 
 // Qt
@@ -28,7 +27,7 @@
 #include <KLocalizedString>
 #include <KPluginFactory>
 #include <KTitleWidget>
-#include <KNewStuff3/KNS3/QtQuickDialogWrapper>
+#include <KNS3/Button>
 // Plasma
 #include <KPackage/Package>
 #include <KPackage/PackageLoader>
@@ -59,8 +58,12 @@ KWinTabBoxConfig::KWinTabBoxConfig(QWidget* parent, const QVariantList& args)
     tabWidget->addTab(m_primaryTabBoxUi, i18n("Main"));
     tabWidget->addTab(m_alternativeTabBoxUi, i18n("Alternative"));
 
-    QPushButton* ghnsButton = new QPushButton(QIcon::fromTheme(QStringLiteral("get-hot-new-stuff")), i18n("Get New Task Switchers..."));
-    connect(ghnsButton, &QAbstractButton::clicked, this, &KWinTabBoxConfig::slotGHNS);
+    KNS3::Button *ghnsButton = new KNS3::Button(i18n("Get New Task Switchers..."), QStringLiteral("kwinswitcher.knsrc"), this);
+    connect(ghnsButton, &KNS3::Button::dialogFinished, this, [this] (auto changedEntries) {
+        if (!changedEntries.isEmpty()) {
+            initLayoutLists();
+        }
+    });
 
     QHBoxLayout* buttonBar = new QHBoxLayout();
     QSpacerItem* buttonBarSpacer = new QSpacerItem(40, 20, QSizePolicy::Expanding, QSizePolicy::Minimum);
@@ -374,68 +377,9 @@ void KWinTabBoxConfig::configureEffectClicked()
 
     if (form->effectComboCurrentData(KWinTabBoxConfigForm::AddonEffect).toBool()) {
         // Show the preview for addon effect
-        new LayoutPreview(form->effectComboCurrentData(KWinTabBoxConfigForm::LayoutPath).toString(), this);
-    } else {
-        // For builtin effect, display a configuration dialog
-        QPointer<QDialog> configDialog = new QDialog(this);
-        configDialog->setLayout(new QVBoxLayout);
-        configDialog->setWindowTitle(form->effectComboCurrentData(Qt::DisplayRole).toString());
-        QDialogButtonBox* buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok|QDialogButtonBox::Cancel|QDialogButtonBox::RestoreDefaults, configDialog);
-        connect(buttonBox, &QDialogButtonBox::accepted, configDialog.data(), &QDialog::accept);
-        connect(buttonBox, &QDialogButtonBox::rejected, configDialog.data(), &QDialog::reject);
-
-        const QString name = form->effectComboCurrentData().toString();
-
-        auto filter = [name](const KPluginMetaData &md) -> bool
-        {
-            const QStringList parentComponents = KPluginMetaData::readStringList(md.rawData(), QStringLiteral("X-KDE-ParentComponents"));
-            return parentComponents.contains(name);
-        };
-
-        const QVector<KPluginMetaData> plugins = KPluginLoader::findPlugins(QStringLiteral("kwin/effects/configs/"), filter);
-
-        if (plugins.isEmpty()) {
-            delete configDialog;
-            return;
-        }
-
-        KCModule *kcm = nullptr;
-
-        KPluginLoader loader(plugins.first().fileName());
-        KPluginFactory *factory = loader.factory();
-        if (!factory) {
-            qWarning() << "Error loading plugin:" << loader.errorString();
-        } else {
-            kcm = factory->create<KCModule>(configDialog);
-        }
-
-        if (!kcm) {
-            delete configDialog;
-            return;
-        }
-
-        connect(buttonBox->button(QDialogButtonBox::RestoreDefaults), &QPushButton::clicked, kcm, &KCModule::defaults);
-
-        QWidget *showWidget = new QWidget(configDialog);
-        QVBoxLayout *layout = new QVBoxLayout;
-        showWidget->setLayout(layout);
-        layout->addWidget(kcm);
-        configDialog->layout()->addWidget(showWidget);
-        configDialog->layout()->addWidget(buttonBox);
-
-        if (configDialog->exec() == QDialog::Accepted) {
-            kcm->save();
-        } else {
-            kcm->load();
-        }
-        delete configDialog;
-    }
-}
-
-void KWinTabBoxConfig::slotGHNS()
-{
-    if (!KNS3::QtQuickDialogWrapper("kwinswitcher.knsrc").exec().isEmpty()) {
-        initLayoutLists();
+        new LayoutPreview(form->effectComboCurrentData(KWinTabBoxConfigForm::LayoutPath).toString(),
+                          form->showDesktopMode(),
+                          this);
     }
 }
 

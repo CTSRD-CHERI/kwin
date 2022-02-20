@@ -166,9 +166,7 @@ public:
     QRect rect() const;
 
     void updateCursor(const QImage &image, const QPoint &hotspot);
-    void markAsRendered() {
-        Q_EMIT rendered(geometry());
-    }
+    void markAsRendered(std::chrono::milliseconds timestamp);
 
 Q_SIGNALS:
     void posChanged(const QPoint& pos);
@@ -185,22 +183,9 @@ Q_SIGNALS:
      */
     void cursorChanged();
     void themeChanged();
-
-    void rendered(const QRect &geometry);
+    void rendered(std::chrono::milliseconds timestamp);
 
 protected:
-    /**
-     * Called from x11Cursor to actually retrieve the X11 cursor. Base implementation returns
-     * a null cursor, an implementing subclass should implement this method if it can provide X11
-     * mouse cursors.
-     */
-    virtual xcb_cursor_t getX11Cursor(CursorShape shape);
-    /**
-     * Called from x11Cursor to actually retrieve the X11 cursor. Base implementation returns
-     * a null cursor, an implementing subclass should implement this method if it can provide X11
-     * mouse cursors.
-     */
-    virtual xcb_cursor_t getX11Cursor(const QByteArray &name);
     /**
      * Performs the actual warping of the cursor.
      */
@@ -251,6 +236,7 @@ private Q_SLOTS:
 private:
     void updateTheme(const QString &name, int size);
     void loadThemeFromKConfig();
+    QHash<QByteArray, xcb_cursor_t > m_cursors;
     QPoint m_pos;
     QPoint m_hotspot;
     QImage m_image;
@@ -286,11 +272,15 @@ public:
         return m_currentCursor;
     }
 
+    void hideCursor();
+    void showCursor();
+    bool isCursorHidden() const;
+
     static Cursors* self();
 
 Q_SIGNALS:
     void currentCursorChanged(Cursor* cursor);
-    void currentCursorRendered(const QRect &geometry);
+    void hiddenChanged();
     void positionChanged(Cursor* cursor, const QPoint &position);
 
 private:
@@ -301,6 +291,7 @@ private:
     Cursor* m_currentCursor = nullptr;
     Cursor* m_mouse = nullptr;
     QVector<Cursor*> m_cursors;
+    int m_cursorHideCounter = 0;
 };
 
 class InputConfig

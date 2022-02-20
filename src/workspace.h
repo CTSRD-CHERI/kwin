@@ -16,7 +16,7 @@
 // kwin
 #include "options.h"
 #include "sm.h"
-#include "utils.h"
+#include "utils/common.h"
 // Qt
 #include <QTimer>
 #include <QVector>
@@ -52,6 +52,7 @@ class ShortcutDialog;
 class Toplevel;
 class Unmanaged;
 class UserActionsMenu;
+class VirtualDesktop;
 class X11Client;
 class X11EventFilter;
 enum class Predicate;
@@ -70,7 +71,6 @@ public:
     bool workspaceEvent(xcb_generic_event_t*);
     bool workspaceEvent(QEvent*);
 
-    bool hasClient(const X11Client *);
     bool hasClient(const AbstractClient*);
 
     /**
@@ -139,14 +139,24 @@ public:
      */
     Toplevel *findInternal(QWindow *w) const;
 
+    QRect clientArea(clientAreaOption, const AbstractOutput *output, const VirtualDesktop *desktop) const;
     QRect clientArea(clientAreaOption, const QPoint& p, int desktop) const;
-    QRect clientArea(clientAreaOption, const AbstractClient* c) const;
+    QRect clientArea(clientAreaOption, const Toplevel *window) const;
+    QRect clientArea(clientAreaOption, const Toplevel *window, const AbstractOutput *output) const;
+    QRect clientArea(clientAreaOption, const Toplevel *window, const QPoint &pos) const;
     QRect clientArea(clientAreaOption, int screen, int desktop) const;
-    QRect clientArea(clientAreaOption, const AbstractOutput *output, int desktop) const;
 
-    QRegion restrictedMoveArea(int desktop, StrutAreas areas = StrutAreaAll) const;
+    /**
+     * Returns the geometry of this Workspace, i.e. the bounding rectangle of all outputs.
+     */
+    QRect geometry() const;
+    QRegion restrictedMoveArea(const VirtualDesktop *desktop, StrutAreas areas = StrutAreaAll) const;
 
     bool initializing() const;
+
+    AbstractOutput *activeOutput() const;
+    void setActiveOutput(AbstractOutput *output);
+    void setActiveOutput(const QPoint &pos);
 
     /**
      * Returns the active client, i.e. the client that has the focus (or None
@@ -160,7 +170,7 @@ public:
      */
     AbstractClient* mostRecentlyActivatedClient() const;
 
-    AbstractClient* clientUnderMouse(int screen) const;
+    AbstractClient *clientUnderMouse(AbstractOutput *output) const;
 
     void activateClient(AbstractClient*, bool force = false);
     bool requestFocus(AbstractClient* c, bool force = false);
@@ -188,7 +198,7 @@ public:
 
     QRect adjustClientArea(AbstractClient *client, const QRect &area) const;
     QPoint adjustClientPosition(AbstractClient* c, QPoint pos, bool unrestricted, double snapAdjust = 1.0);
-    QRect adjustClientSize(AbstractClient* c, QRect moveResizeGeom, int mode);
+    QRect adjustClientSize(AbstractClient* c, QRect moveResizeGeom, Gravity gravity);
     void raiseClient(AbstractClient* c, bool nogroup = false);
     void lowerClient(AbstractClient* c, bool nogroup = false);
     void raiseClientRequest(AbstractClient* c, NET::RequestSource src = NET::FromApplication, xcb_timestamp_t timestamp = 0);
@@ -248,7 +258,6 @@ public:
     QPoint cascadeOffset(const AbstractClient *c) const;
 
 private:
-    Compositor *m_compositor;
     QTimer *m_quickTileCombineTimer;
     QuickTileMode m_lastTilingMode;
 
@@ -260,8 +269,8 @@ public:
     // True when performing Workspace::updateClientArea().
     // The calls below are valid only in that case.
     bool inUpdateClientArea() const;
-    QRegion previousRestrictedMoveArea(int desktop, StrutAreas areas = StrutAreaAll) const;
-    QVector< QRect > previousScreenSizes() const;
+    QRegion previousRestrictedMoveArea(const VirtualDesktop *desktop, StrutAreas areas = StrutAreaAll) const;
+    QHash<const AbstractOutput *, QRect> previousScreenSizes() const;
     int oldDisplayWidth() const;
     int oldDisplayHeight() const;
 
@@ -274,13 +283,13 @@ public:
     QList<X11Client *> ensureStackingOrder(const QList<X11Client *> &clients) const;
     QList<AbstractClient*> ensureStackingOrder(const QList<AbstractClient*> &clients) const;
 
-    AbstractClient* topClientOnDesktop(int desktop, int screen, bool unconstrained = false,
-                               bool only_normal = true) const;
-    AbstractClient* findDesktop(bool topmost, int desktop) const;
+    AbstractClient *topClientOnDesktop(VirtualDesktop *desktop, AbstractOutput *output = nullptr, bool unconstrained = false,
+                                       bool only_normal = true) const;
+    AbstractClient *findDesktop(bool topmost, VirtualDesktop *desktop) const;
     void sendClientToDesktop(AbstractClient* c, int desktop, bool dont_activate);
     void windowToPreviousDesktop(AbstractClient* c);
     void windowToNextDesktop(AbstractClient* c);
-    void sendClientToScreen(AbstractClient* c, int screen);
+    void sendClientToOutput(AbstractClient *client, AbstractOutput *output);
 
     void addManualOverlay(xcb_window_t id) {
         manual_overlays << id;
@@ -314,7 +323,9 @@ public:
     // D-Bus interface
     QString supportInformation() const;
 
-    void setCurrentScreen(int new_screen);
+    AbstractOutput *nextOutput(AbstractOutput *reference) const;
+    AbstractOutput *previousOutput(AbstractOutput *reference) const;
+    void switchToOutput(AbstractOutput *output);
 
     void setShowingDesktop(bool showing);
     bool showingDesktop() const;
@@ -409,7 +420,7 @@ public Q_SLOTS:
     void performWindowOperation(KWin::AbstractClient* c, Options::WindowOperation op);
     // Keybindings
     //void slotSwitchToWindow( int );
-    void slotWindowToDesktop(uint i);
+    void slotWindowToDesktop(VirtualDesktop *desktop);
 
     //void slotWindowToListPosition( int );
     void slotSwitchToScreen();
@@ -429,12 +440,15 @@ public Q_SLOTS:
     void slotWindowLower();
     void slotWindowRaiseOrLower();
     void slotActivateAttentionWindow();
-    void slotWindowPackLeft();
-    void slotWindowPackRight();
-    void slotWindowPackUp();
-    void slotWindowPackDown();
-    void slotWindowGrowHorizontal();
-    void slotWindowGrowVertical();
+
+    void slotWindowCenter();
+
+    void slotWindowMoveLeft();
+    void slotWindowMoveRight();
+    void slotWindowMoveUp();
+    void slotWindowMoveDown();
+    void slotWindowExpandHorizontal();
+    void slotWindowExpandVertical();
     void slotWindowShrinkHorizontal();
     void slotWindowShrinkVertical();
 
@@ -476,8 +490,11 @@ private Q_SLOTS:
     void slotReloadConfig();
     void updateCurrentActivity(const QString &new_activity);
     // virtual desktop handling
-    void slotDesktopCountChanged(uint previousCount, uint newCount);
     void slotCurrentDesktopChanged(uint oldDesktop, uint newDesktop);
+    void slotDesktopAdded(VirtualDesktop *desktop);
+    void slotDesktopRemoved(VirtualDesktop *desktop);
+    void slotOutputEnabled(AbstractOutput *output);
+    void slotOutputDisabled(AbstractOutput *output);
 
 Q_SIGNALS:
     /**
@@ -485,9 +502,11 @@ Q_SIGNALS:
      * This can be used to connect to for performing post-workspace initialization.
      */
     void workspaceInitialized();
+    void geometryChanged();
 
     //Signals required for the scripting interface
     void desktopPresenceChanged(KWin::AbstractClient*, int);
+    void currentActivityChanged();
     void currentDesktopChanged(int, KWin::AbstractClient*);
     void clientAdded(KWin::AbstractClient *);
     void clientRemoved(KWin::AbstractClient*);
@@ -527,7 +546,7 @@ private:
     template <typename T, typename Slot>
     void initShortcut(const QString &actionName, const QString &description, const QKeySequence &shortcut, T *receiver, Slot slot, const QVariant &data = QVariant());
     void setupWindowShortcut(AbstractClient* c);
-    bool switchWindow(AbstractClient *c, Direction direction, QPoint curPos, int desktop);
+    bool switchWindow(AbstractClient *c, Direction direction, QPoint curPos, VirtualDesktop *desktop);
 
     void propagateClients(bool propagate_new_clients);   // Called only from updateStackingOrder
     QList<Toplevel *> constrainedStackingOrder();
@@ -555,11 +574,9 @@ private:
     //---------------------------------------------------------------------
 
     void closeActivePopup();
-    void updateClientArea(bool force);
-    void resetClientAreas(uint desktopCount);
-    void updateClientVisibilityOnDesktopChange(uint newDesktop);
-    void activateClientOnNewDesktop(uint desktop);
-    AbstractClient *findClientToActivateOnDesktop(uint desktop);
+    void updateClientVisibilityOnDesktopChange(VirtualDesktop *newDesktop);
+    void activateClientOnNewDesktop(VirtualDesktop *desktop);
+    AbstractClient *findClientToActivateOnDesktop(VirtualDesktop *desktop);
     void removeAbstractClient(AbstractClient *client);
 
     struct Constraint
@@ -587,6 +604,7 @@ private:
     void updateXStackingOrder();
     void updateTabbox();
 
+    AbstractOutput *m_activeOutput = nullptr;
     AbstractClient* active_client;
     AbstractClient* last_active_client;
     AbstractClient* movingClient;
@@ -648,14 +666,15 @@ private:
     QScopedPointer<KStartupInfo> m_startup;
     QScopedPointer<ColorMapper> m_colorMapper;
 
-    QVector<QRect> workarea; // Array of workareas for virtual desktops
-    // Array of restricted areas that window cannot be moved into
-    QVector<StrutRects> restrictedmovearea;
-    // Array of the previous restricted areas that window cannot be moved into
-    QVector<StrutRects> oldrestrictedmovearea;
-    QVector< QVector<QRect> > screenarea; // Array of workareas per xinerama screen for all virtual desktops
-    QVector< QRect > oldscreensizes; // array of previous sizes of xinerama screens
+    QHash<const VirtualDesktop *, QRect> m_workAreas;
+    QHash<const VirtualDesktop *, StrutRects> m_restrictedAreas;
+    QHash<const VirtualDesktop *, QHash<const AbstractOutput *, QRect>> m_screenAreas;
+    QRect m_geometry;
+
+    QHash<const AbstractOutput *, QRect> m_oldScreenGeometries;
     QSize olddisplaysize; // previous sizes od displayWidth()/displayHeight()
+    QHash<const VirtualDesktop *, StrutRects> m_oldRestrictedAreas;
+    bool m_inUpdateClientArea = false;
 
     int set_active_client_recursion;
     int block_stacking_updates; // When > 0, stacking updates are temporarily disabled
@@ -785,13 +804,6 @@ inline
 void Workspace::forEachUnmanaged(std::function< void (Unmanaged*) > func)
 {
     std::for_each(m_unmanaged.constBegin(), m_unmanaged.constEnd(), func);
-}
-
-inline bool Workspace::hasClient(const X11Client *c)
-{
-    return findClient([c](const X11Client *test) {
-        return test == c;
-    });
 }
 
 inline Workspace *workspace()

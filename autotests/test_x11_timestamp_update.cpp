@@ -10,11 +10,10 @@
 #include <QTest>
 #include <QX11Info>
 
-#include <KPluginLoader>
 #include <KPluginMetaData>
 
 #include "main.h"
-#include "utils.h"
+#include "utils/common.h"
 
 namespace KWin
 {
@@ -37,7 +36,7 @@ X11TestApplication::X11TestApplication(int &argc, char **argv)
     setX11Connection(QX11Info::connection());
     setX11RootWindow(QX11Info::appRootWindow());
 
-    // move directory containing executable to front, so that KPluginLoader prefers the plugins in
+    // move directory containing executable to front, so that KPluginMetaData::findPluginById prefers the plugins in
     // the build dir over system installed ones
     const auto ownPath = libraryPaths().last();
     removeLibraryPath(ownPath);
