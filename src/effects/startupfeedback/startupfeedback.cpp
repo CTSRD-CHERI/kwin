@@ -111,7 +111,8 @@ StartupFeedbackEffect::StartupFeedbackEffect()
     });
     reconfigure(ReconfigureAll);
 
-    m_splashVisible = QDBusConnection::sessionBus().interface()->isServiceRegistered(QStringLiteral("org.kde.KSplash"));
+    m_splashVisible =
+        QDBusConnection::sessionBus().interface() && QDBusConnection::sessionBus().interface()->isServiceRegistered(QStringLiteral("org.kde.KSplash"));
     auto serviceWatcher = new QDBusServiceWatcher(QStringLiteral("org.kde.KSplash"), QDBusConnection::sessionBus(), QDBusServiceWatcher::WatchForOwnerChange, this);
     connect(serviceWatcher, &QDBusServiceWatcher::serviceRegistered, this, [this] {
         m_splashVisible = true;

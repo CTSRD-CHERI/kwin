@@ -44,6 +44,9 @@ void ScreenLockerWatcher::initialize()
     m_serviceWatcher->setWatchMode(QDBusServiceWatcher::WatchForOwnerChange);
     m_serviceWatcher->addWatchedService(SCREEN_LOCKER_SERVICE_NAME);
     // check whether service is registered
+    if (!QDBusConnection::sessionBus().interface()) {
+        return; // Avoid crashing if DBus is not running
+    }
     QFutureWatcher<QDBusReply<bool> > *watcher = new QFutureWatcher<QDBusReply<bool> >(this);
     connect(watcher, &QFutureWatcher<QDBusReply<bool>>::finished,
             this, &ScreenLockerWatcher::serviceRegisteredQueried);

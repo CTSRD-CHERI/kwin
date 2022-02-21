@@ -48,7 +48,8 @@ ApplicationMenu::ApplicationMenu(QObject *parent)
                 Q_EMIT applicationMenuEnabledChanged(false);
             });
 
-    m_applicationMenuEnabled = QDBusConnection::sessionBus().interface()->isServiceRegistered(QStringLiteral("org.kde.kappmenu"));
+    m_applicationMenuEnabled =
+        QDBusConnection::sessionBus().interface() && QDBusConnection::sessionBus().interface()->isServiceRegistered(QStringLiteral("org.kde.kappmenu"));
 }
 
 ApplicationMenu::~ApplicationMenu()
@@ -63,6 +64,8 @@ bool ApplicationMenu::applicationMenuEnabled() const
 
 void ApplicationMenu::setViewEnabled(bool enabled)
 {
+    if (!QDBusConnection::sessionBus().interface())
+        return;
     if (enabled) {
         QDBusConnection::sessionBus().interface()->registerService(s_viewService,
                     QDBusConnectionInterface::QueueService,
