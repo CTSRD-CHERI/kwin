@@ -41,6 +41,7 @@ class DrmPipeline;
 class DrmAbstractOutput;
 class DrmVirtualOutput;
 class DrmLeaseOutput;
+class DrmRenderBackend;
 
 class DrmGpu : public QObject
 {
@@ -58,7 +59,6 @@ public:
     bool isNVidia() const;
     gbm_device *gbmDevice() const;
     EGLDisplay eglDisplay() const;
-    EglGbmBackend *eglBackend() const;
     DrmBackend *platform() const;
     /**
      * Returns the clock from which presentation timestamps are sourced. The returned value
@@ -71,7 +71,6 @@ public:
     const QVector<DrmPipeline*> pipelines() const;
 
     void setEglDisplay(EGLDisplay display);
-    void setEglBackend(EglGbmBackend *eglBackend);
 
     bool updateOutputs();
 
@@ -86,6 +85,8 @@ public:
     bool testPendingConfiguration(TestMode mode = TestMode::TestWithCrtcReallocation);
     bool needsModeset() const;
     bool maybeModeset();
+
+    void recreateSurfaces();
 
 Q_SIGNALS:
     void outputAdded(DrmAbstractOutput *output);
@@ -120,7 +121,6 @@ private:
     clockid_t m_presentationClock;
     gbm_device* m_gbmDevice;
     EGLDisplay m_eglDisplay = EGL_NO_DISPLAY;
-    QPointer<EglGbmBackend> m_eglBackend;
     DrmBackend* const m_platform;
 
     QVector<DrmPlane*> m_planes;

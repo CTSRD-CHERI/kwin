@@ -10,6 +10,7 @@
 #ifndef KWIN_SCENE_H
 #define KWIN_SCENE_H
 
+#include "renderlayerdelegate.h"
 #include "toplevel.h"
 #include "utils/common.h"
 #include "kwineffects.h"
@@ -33,6 +34,7 @@ class EffectWindowImpl;
 class GLTexture;
 class Item;
 class RenderLoop;
+class Scene;
 class Shadow;
 class ShadowItem;
 class SurfaceItem;
@@ -42,13 +44,32 @@ class SurfacePixmapX11;
 class SurfaceTexture;
 class WindowItem;
 
-// The base class for compositing backends.
+class SceneDelegate : public RenderLayerDelegate
+{
+    Q_OBJECT
+
+public:
+    explicit SceneDelegate(Scene *scene, QObject *parent = nullptr);
+    explicit SceneDelegate(Scene *scene, AbstractOutput *output, QObject *parent = nullptr);
+    ~SceneDelegate() override;
+
+    SurfaceItem *scanoutCandidate() const override;
+    void prePaint() override;
+    void postPaint() override;
+    void paint(const QRegion &damage, const QRegion &repaint, QRegion &update, QRegion &valid) override;
+
+private:
+    Scene *m_scene;
+    AbstractOutput *m_output = nullptr;
+};
+
 class KWIN_EXPORT Scene : public QObject
 {
     Q_OBJECT
+
 public:
     explicit Scene(QObject *parent = nullptr);
-    ~Scene() override = 0;
+    ~Scene() override;
     class EffectFrame;
     class Window;
 
@@ -65,24 +86,17 @@ public:
     QRect geometry() const;
     void setGeometry(const QRect &rect);
 
-    /**
-     * Returns the repaints region for output with the specified @a output.
-     */
-    QRegion repaints(AbstractOutput *output) const;
-    void resetRepaints(AbstractOutput *output);
+    QList<SceneDelegate *> delegates() const;
+    void addDelegate(SceneDelegate *delegate);
+    void removeDelegate(SceneDelegate *delegate);
 
     // Returns true if the ctor failed to properly initialize.
     virtual bool initFailed() const = 0;
 
-    // Repaints the given screen areas, windows provides the stacking order.
-    // The entry point for the main part of the painting pass.
-    // returns the time since the last vblank signal - if there's one
-    // ie. "what of this frame is lost to painting"
-    virtual void paint(AbstractOutput *output, const QRegion &damage, const QList<Toplevel *> &windows,
-                       RenderLoop *renderLoop) = 0;
-
-
-    void paintScreen(AbstractOutput *output, const QList<Toplevel *> &toplevels);
+    SurfaceItem *scanoutCandidate() const;
+    void prePaint(AbstractOutput *output);
+    void postPaint();
+    virtual void paint(const QRegion &damage, const QRegion &repaint, QRegion &update, QRegion &valid) = 0;
 
     /**
      * Adds the Toplevel to the Scene.
@@ -205,13 +219,11 @@ public Q_SLOTS:
     void windowClosed(KWin::Toplevel* c, KWin::Deleted* deleted);
 protected:
     virtual Window *createWindow(Toplevel *toplevel) = 0;
-    void createStackingOrder(const QList<Toplevel *> &toplevels);
+    void createStackingOrder();
     void clearStackingOrder();
     // shared implementation, starts painting the screen
     void paintScreen(const QRegion &damage, const QRegion &repaint,
                      QRegion *updateRegion, QRegion *validRegion);
-    // Render cursor texture in case hardware cursor is disabled/non-applicable
-    virtual void paintCursor(AbstractOutput *output, const QRegion &region) = 0;
     friend class EffectsHandlerImpl;
     // called after all effects had their paintScreen() called
     void finalPaintScreen(int mask, const QRegion &region, ScreenPaintData& data);
@@ -264,19 +276,15 @@ protected:
     // windows in their stacking order
     QVector< Window* > stacking_order;
 private:
-    void removeRepaints(AbstractOutput *output);
-    void addCursorRepaints();
-
     std::chrono::milliseconds m_expectedPresentTimestamp = std::chrono::milliseconds::zero();
+    QList<SceneDelegate *> m_delegates;
     QHash< Toplevel*, Window* > m_windows;
-    QMap<AbstractOutput *, QRegion> m_repaints;
     QRect m_geometry;
     QMatrix4x4 m_renderTargetProjectionMatrix;
     QRect m_renderTargetRect;
     qreal m_renderTargetScale = 1;
     // how many times finalPaintScreen() has been called
     int m_paintScreenCount = 0;
-    QRect m_lastCursorGeometry;
 };
 
 // The base class for windows representations in composite backends

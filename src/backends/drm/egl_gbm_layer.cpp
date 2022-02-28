@@ -19,6 +19,8 @@
 #include "egl_dmabuf.h"
 #include "surfaceitem_wayland.h"
 #include "kwineglimagetexture.h"
+#include "drm_backend.h"
+#include "kwineglutils_p.h"
 
 #include "KWaylandServer/surface_interface.h"
 #include "KWaylandServer/linuxdmabufv1clientbuffer.h"
@@ -32,24 +34,36 @@
 namespace KWin
 {
 
-EglGbmLayer::EglGbmLayer(DrmGpu *renderGpu, DrmAbstractOutput *output)
-    : m_output(output)
-    , m_renderGpu(renderGpu)
+EglGbmLayer::EglGbmLayer(EglGbmBackend *eglBackend, DrmDisplayDevice *displayDevice)
+    : DrmLayer(displayDevice)
+    , m_eglBackend(eglBackend)
 {
+    connect(eglBackend, &EglGbmBackend::aboutToBeDestroyed, this, &EglGbmLayer::destroyResources);
 }
 
 EglGbmLayer::~EglGbmLayer()
 {
-    if (m_gbmSurface && m_shadowBuffer && m_gbmSurface->makeContextCurrent()) {
-        m_shadowBuffer.reset();
+    destroyResources();
+}
+
+void EglGbmLayer::destroyResources()
+{
+    if (m_shadowBuffer || m_oldShadowBuffer) {
+        if (m_gbmSurface) {
+            m_gbmSurface->makeContextCurrent();
+        } else if (m_oldGbmSurface) {
+            m_oldGbmSurface->makeContextCurrent();
+        }
     }
-    if (m_oldGbmSurface && m_oldShadowBuffer && m_oldGbmSurface->makeContextCurrent()) {
-        m_oldShadowBuffer.reset();
-    }
+    m_shadowBuffer.reset();
+    m_oldShadowBuffer.reset();
+    m_gbmSurface.reset();
+    m_oldGbmSurface.reset();
 }
 
 std::optional<QRegion> EglGbmLayer::startRendering()
 {
+    m_scanoutBuffer.reset();
     // dmabuf feedback
     if (!m_scanoutCandidate.attemptedThisFrame && m_scanoutCandidate.surface) {
         if (const auto feedback = m_scanoutCandidate.surface->dmabufFeedbackV1()) {
@@ -76,7 +90,7 @@ std::optional<QRegion> EglGbmLayer::startRendering()
     if (!m_gbmSurface->makeContextCurrent()) {
         return std::optional<QRegion>();
     }
-    auto repaintRegion = m_gbmSurface->repaintRegion(m_output->geometry());
+    auto repaintRegion = m_gbmSurface->repaintRegion(m_displayDevice->renderGeometry());
 
     // shadow buffer
     if (doesShadowBufferFit(m_shadowBuffer.data())) {
@@ -85,9 +99,9 @@ std::optional<QRegion> EglGbmLayer::startRendering()
         if (doesShadowBufferFit(m_oldShadowBuffer.data())) {
             m_shadowBuffer = m_oldShadowBuffer;
         } else {
-            if (m_output->needsSoftwareTransformation()) {
-                const auto format = m_renderGpu->eglBackend()->gbmFormatForDrmFormat(m_gbmSurface->format());
-                m_shadowBuffer = QSharedPointer<ShadowBuffer>::create(m_output->sourceSize(), format);
+            if (m_displayDevice->softwareTransforms() != DrmPlane::Transformations(DrmPlane::Transformation::Rotate0)) {
+                const auto format = m_eglBackend->gbmFormatForDrmFormat(m_gbmSurface->format());
+                m_shadowBuffer = QSharedPointer<ShadowBuffer>::create(m_displayDevice->sourceSize(), format);
                 if (!m_shadowBuffer->isComplete()) {
                     return std::optional<QRegion>();
                 }
@@ -111,19 +125,33 @@ bool EglGbmLayer::endRendering(const QRegion &damagedRegion)
 {
     if (m_shadowBuffer) {
         GLRenderTarget::popRenderTarget();
-        m_shadowBuffer->render(m_output);
+        m_shadowBuffer->render(m_displayDevice);
     }
     GLRenderTarget::popRenderTarget();
-    const auto buffer = m_gbmSurface->swapBuffersForDrm(damagedRegion.intersected(m_output->geometry()));
+    const auto buffer = m_gbmSurface->swapBuffersForDrm(damagedRegion);
     if (buffer) {
         m_currentBuffer = buffer;
+        m_currentDamage = damagedRegion;
     }
     return buffer;
+}
+
+QRegion EglGbmLayer::currentDamage() const
+{
+    return m_currentDamage;
 }
 
 QSharedPointer<DrmBuffer> EglGbmLayer::testBuffer()
 {
     if (!m_currentBuffer || !doesGbmSurfaceFit(m_gbmSurface.data())) {
+        if (doesGbmSurfaceFit(m_oldGbmSurface.data())) {
+            // re-use old surface and buffer without rendering
+            m_gbmSurface = m_oldGbmSurface;
+            if (m_gbmSurface->currentBuffer()) {
+                m_currentBuffer = m_gbmSurface->currentDrmBuffer();
+                return m_currentBuffer;
+            }
+        }
         if (!renderTestBuffer() && m_importMode == MultiGpuImportMode::DumbBufferXrgb8888) {
             // try multi-gpu import again, this time with DRM_FORMAT_XRGB8888
             renderTestBuffer();
@@ -138,7 +166,7 @@ bool EglGbmLayer::renderTestBuffer()
         return false;
     }
     glClear(GL_COLOR_BUFFER_BIT);
-    if (!endRendering(m_output->geometry())) {
+    if (!endRendering(m_displayDevice->renderGeometry())) {
         return false;
     }
     return true;
@@ -149,37 +177,37 @@ bool EglGbmLayer::createGbmSurface()
     static bool modifiersEnvSet = false;
     static const bool modifiersEnv = qEnvironmentVariableIntValue("KWIN_DRM_USE_MODIFIERS", &modifiersEnvSet) != 0;
 
-    auto format = m_renderGpu->eglBackend()->chooseFormat(m_output);
+    auto format = m_eglBackend->chooseFormat(m_displayDevice);
     if (!format || m_importMode == MultiGpuImportMode::DumbBufferXrgb8888) {
         format = DRM_FORMAT_XRGB8888;
     }
-    const auto modifiers = m_output->supportedModifiers(format.value());
-    const auto size = m_output->bufferSize();
-    const auto config = m_renderGpu->eglBackend()->config(format.value());
-    const bool allowModifiers = m_renderGpu->addFB2ModifiersSupported() && m_output->gpu()->addFB2ModifiersSupported()
-                                && ((m_renderGpu->isNVidia() && !modifiersEnvSet) || (modifiersEnvSet && modifiersEnv));
+    const auto modifiers = m_displayDevice->supportedModifiers(format.value());
+    const auto size = m_displayDevice->bufferSize();
+    const auto config = m_eglBackend->config(format.value());
+    const bool allowModifiers = m_eglBackend->gpu()->addFB2ModifiersSupported() && m_displayDevice->gpu()->addFB2ModifiersSupported()
+                                && ((m_eglBackend->gpu()->isNVidia() && !modifiersEnvSet) || (modifiersEnvSet && modifiersEnv));
 
     QSharedPointer<GbmSurface> gbmSurface;
 #if HAVE_GBM_BO_GET_FD_FOR_PLANE
     if (!allowModifiers) {
 #else
     // modifiers have to be disabled with multi-gpu if gbm_bo_get_fd_for_plane is not available
-    if (!allowModifiers || m_output->gpu() != m_renderGpu) {
+    if (!allowModifiers || m_displayDevice->gpu() != m_eglBackend->gpu()) {
 #endif
         int flags = GBM_BO_USE_RENDERING;
-        if (m_output->gpu() == m_renderGpu) {
+        if (m_displayDevice->gpu() == m_eglBackend->gpu()) {
             flags |= GBM_BO_USE_SCANOUT;
         } else {
             flags |= GBM_BO_USE_LINEAR;
         }
-        gbmSurface = QSharedPointer<GbmSurface>::create(m_renderGpu, size, format.value(), flags, config);
+        gbmSurface = QSharedPointer<GbmSurface>::create(m_eglBackend->gpu(), size, format.value(), flags, config);
     } else {
-        gbmSurface = QSharedPointer<GbmSurface>::create(m_renderGpu, size, format.value(), modifiers, config);
+        gbmSurface = QSharedPointer<GbmSurface>::create(m_eglBackend->gpu(), size, format.value(), modifiers, config);
         if (!gbmSurface->isValid()) {
             // the egl / gbm implementation may reject the modifier list from another gpu
             // as a fallback use linear, to at least make CPU copy more efficient
             const QVector<uint64_t> linear = {DRM_FORMAT_MOD_LINEAR};
-            gbmSurface = QSharedPointer<GbmSurface>::create(m_renderGpu, size, format.value(), linear, config);
+            gbmSurface = QSharedPointer<GbmSurface>::create(m_eglBackend->gpu(), size, format.value(), linear, config);
         }
     }
     if (!gbmSurface->isValid()) {
@@ -192,16 +220,16 @@ bool EglGbmLayer::createGbmSurface()
 
 bool EglGbmLayer::doesGbmSurfaceFit(GbmSurface *surf) const
 {
-    return surf && surf->size() == m_output->bufferSize()
-        && m_output->isFormatSupported(surf->format())
+    return surf && surf->size() == m_displayDevice->bufferSize()
+        && m_displayDevice->isFormatSupported(surf->format())
         && (m_importMode != MultiGpuImportMode::DumbBufferXrgb8888 || surf->format() == DRM_FORMAT_XRGB8888)
-        && (surf->modifiers().isEmpty() || m_output->supportedModifiers(surf->format()) == surf->modifiers());
+        && (surf->modifiers().isEmpty() || m_displayDevice->supportedModifiers(surf->format()) == surf->modifiers());
 }
 
 bool EglGbmLayer::doesShadowBufferFit(ShadowBuffer *buffer) const
 {
-    if (m_output->needsSoftwareTransformation()) {
-        return buffer && buffer->texture()->size() == m_output->sourceSize() && buffer->drmFormat() == m_gbmSurface->format();
+    if (m_displayDevice->softwareTransforms() != DrmPlane::Transformations(DrmPlane::Transformation::Rotate0)) {
+        return buffer && buffer->texture()->size() == m_displayDevice->sourceSize() && buffer->drmFormat() == m_gbmSurface->format();
     } else {
         return buffer == nullptr;
     }
@@ -209,25 +237,31 @@ bool EglGbmLayer::doesShadowBufferFit(ShadowBuffer *buffer) const
 
 bool EglGbmLayer::doesSwapchainFit(DumbSwapchain *swapchain) const
 {
-    return swapchain && swapchain->size() == m_output->sourceSize() && swapchain->drmFormat() == m_gbmSurface->format();
+    return swapchain && swapchain->size() == m_displayDevice->sourceSize() && swapchain->drmFormat() == m_gbmSurface->format();
 }
 
 QSharedPointer<GLTexture> EglGbmLayer::texture() const
 {
+    const auto createImage = [this](GbmBuffer *gbmBuffer) {
+        EGLImageKHR image = eglCreateImageKHR(m_eglBackend->eglDisplay(), nullptr, EGL_NATIVE_PIXMAP_KHR, gbmBuffer->getBo(), nullptr);
+        if (image == EGL_NO_IMAGE_KHR) {
+            qCWarning(KWIN_DRM) << "Failed to record frame: Error creating EGLImageKHR - " << getEglErrorString();
+            return QSharedPointer<EGLImageTexture>(nullptr);
+        }
+        return QSharedPointer<EGLImageTexture>::create(m_eglBackend->eglDisplay(), image, GL_RGBA8, m_displayDevice->sourceSize());
+    };
+    if (m_scanoutBuffer) {
+        return createImage(dynamic_cast<GbmBuffer*>(m_scanoutBuffer.data()));
+    }
     if (m_shadowBuffer) {
         return m_shadowBuffer->texture();
     }
-    GbmBuffer *gbmBuffer = m_gbmSurface->currentBuffer().get();
+    GbmBuffer *gbmBuffer = m_gbmSurface->currentBuffer().data();
     if (!gbmBuffer) {
         qCWarning(KWIN_DRM) << "Failed to record frame: No gbm buffer!";
         return nullptr;
     }
-    EGLImageKHR image = eglCreateImageKHR(m_renderGpu->eglDisplay(), nullptr, EGL_NATIVE_PIXMAP_KHR, gbmBuffer->getBo(), nullptr);
-    if (image == EGL_NO_IMAGE_KHR) {
-        qCWarning(KWIN_DRM) << "Failed to record frame: Error creating EGLImageKHR - " << glGetError();
-        return nullptr;
-    }
-    return QSharedPointer<EGLImageTexture>::create(m_renderGpu->eglDisplay(), image, GL_RGBA8, m_output->modeSize());
+    return createImage(gbmBuffer);
 }
 
 QSharedPointer<DrmBuffer> EglGbmLayer::importBuffer()
@@ -281,7 +315,7 @@ QSharedPointer<DrmBuffer> EglGbmLayer::importDmabuf()
             data.strides[i] = gbm_bo_get_stride_for_plane(bo, i);
             data.offsets[i] = gbm_bo_get_offset(bo, i);
         }
-        importedBuffer = gbm_bo_import(m_output->gpu()->gbmDevice(), GBM_BO_IMPORT_FD_MODIFIER, &data, GBM_BO_USE_SCANOUT);
+        importedBuffer = gbm_bo_import(m_displayDevice->gpu()->gbmDevice(), GBM_BO_IMPORT_FD_MODIFIER, &data, GBM_BO_USE_SCANOUT);
     } else {
 #endif
         gbm_import_fd_data data = {
@@ -295,7 +329,7 @@ QSharedPointer<DrmBuffer> EglGbmLayer::importDmabuf()
             qCWarning(KWIN_DRM, "failed to export gbm_bo as dma-buf: %s", strerror(errno));
             return nullptr;
         }
-        importedBuffer = gbm_bo_import(m_output->gpu()->gbmDevice(), GBM_BO_IMPORT_FD_MODIFIER, &data, GBM_BO_USE_SCANOUT);
+        importedBuffer = gbm_bo_import(m_displayDevice->gpu()->gbmDevice(), GBM_BO_IMPORT_FD_MODIFIER, &data, GBM_BO_USE_SCANOUT);
 #if HAVE_GBM_BO_GET_FD_FOR_PLANE
     }
 #endif
@@ -303,7 +337,7 @@ QSharedPointer<DrmBuffer> EglGbmLayer::importDmabuf()
         qCWarning(KWIN_DRM, "failed to import gbm_bo for multi-gpu usage: %s", strerror(errno));
         return nullptr;
     }
-    const auto buffer = QSharedPointer<DrmGbmBuffer>::create(m_output->gpu(), importedBuffer, nullptr);
+    const auto buffer = QSharedPointer<DrmGbmBuffer>::create(m_displayDevice->gpu(), importedBuffer, nullptr);
     return buffer->bufferId() ? buffer : nullptr;
 }
 
@@ -315,7 +349,7 @@ QSharedPointer<DrmBuffer> EglGbmLayer::importWithCpu()
         if (doesSwapchainFit(m_oldImportSwapchain.data())) {
             m_importSwapchain = m_oldImportSwapchain;
         } else {
-            const auto swapchain = QSharedPointer<DumbSwapchain>::create(m_output->gpu(), m_output->sourceSize(), m_gbmSurface->format());
+            const auto swapchain = QSharedPointer<DumbSwapchain>::create(m_displayDevice->gpu(), m_displayDevice->sourceSize(), m_gbmSurface->format());
             if (swapchain->isEmpty()) {
                 return nullptr;
             }
@@ -352,7 +386,7 @@ bool EglGbmLayer::scanout(SurfaceItem *surfaceItem)
         return false;
     }
     const auto buffer = qobject_cast<KWaylandServer::LinuxDmaBufV1ClientBuffer *>(item->surface()->buffer());
-    if (!buffer || buffer->planes().isEmpty() || buffer->size() != m_output->sourceSize()) {
+    if (!buffer || buffer->planes().isEmpty() || buffer->size() != m_displayDevice->sourceSize()) {
         return false;
     }
 
@@ -362,14 +396,14 @@ bool EglGbmLayer::scanout(SurfaceItem *surfaceItem)
     m_scanoutCandidate.surface = item->surface();
     m_scanoutCandidate.attemptedThisFrame = true;
 
-    if (!m_output->isFormatSupported(buffer->format())) {
+    if (!m_displayDevice->isFormatSupported(buffer->format())) {
         sendDmabufFeedback(buffer);
         return false;
     }
     const auto planes = buffer->planes();
     gbm_bo *importedBuffer;
     if (planes.first().modifier != DRM_FORMAT_MOD_INVALID || planes.first().offset > 0 || planes.count() > 1) {
-        if (!m_output->gpu()->addFB2ModifiersSupported() || !m_output->supportedModifiers(buffer->format()).contains(planes.first().modifier)) {
+        if (!m_displayDevice->gpu()->addFB2ModifiersSupported() || !m_displayDevice->supportedModifiers(buffer->format()).contains(planes.first().modifier)) {
             return false;
         }
         gbm_import_fd_modifier_data data = {};
@@ -383,7 +417,7 @@ bool EglGbmLayer::scanout(SurfaceItem *surfaceItem)
             data.offsets[i] = planes[i].offset;
             data.strides[i] = planes[i].stride;
         }
-        importedBuffer = gbm_bo_import(m_output->gpu()->gbmDevice(), GBM_BO_IMPORT_FD_MODIFIER, &data, GBM_BO_USE_SCANOUT);
+        importedBuffer = gbm_bo_import(m_displayDevice->gpu()->gbmDevice(), GBM_BO_IMPORT_FD_MODIFIER, &data, GBM_BO_USE_SCANOUT);
     } else {
         const auto &plane = planes.first();
         gbm_import_fd_data data = {};
@@ -392,7 +426,7 @@ bool EglGbmLayer::scanout(SurfaceItem *surfaceItem)
         data.height = (uint32_t) buffer->size().height();
         data.stride = plane.stride;
         data.format = buffer->format();
-        importedBuffer = gbm_bo_import(m_output->gpu()->gbmDevice(), GBM_BO_IMPORT_FD, &data, GBM_BO_USE_SCANOUT);
+        importedBuffer = gbm_bo_import(m_displayDevice->gpu()->gbmDevice(), GBM_BO_IMPORT_FD, &data, GBM_BO_USE_SCANOUT);
     }
     if (!importedBuffer) {
         sendDmabufFeedback(buffer);
@@ -401,10 +435,11 @@ bool EglGbmLayer::scanout(SurfaceItem *surfaceItem)
         }
         return false;
     }
-    const auto bo = QSharedPointer<DrmGbmBuffer>::create(m_output->gpu(), importedBuffer, buffer);
-    if (!bo->bufferId()) {
+    m_scanoutBuffer = QSharedPointer<DrmGbmBuffer>::create(m_displayDevice->gpu(), importedBuffer, buffer);
+    if (!m_scanoutBuffer->bufferId()) {
         // buffer can't actually be scanned out. Mesa is supposed to prevent this from happening
         // in gbm_bo_import but apparently that doesn't always work
+        m_scanoutBuffer.reset();
         sendDmabufFeedback(buffer);
         return false;
     }
@@ -415,16 +450,18 @@ bool EglGbmLayer::scanout(SurfaceItem *surfaceItem)
         surfaceItem->resetDamage();
         for (const auto &rect : trackedDamage) {
             auto damageRect = QRect(rect);
-            damageRect.translate(m_output->geometry().topLeft());
+            damageRect.translate(m_displayDevice->renderGeometry().topLeft());
             damage |= damageRect;
         }
     } else {
-        damage = m_output->geometry();
+        damage = m_displayDevice->renderGeometry();
     }
-    if (m_output->present(bo, damage)) {
-        m_currentBuffer = bo;
+    if (m_displayDevice->testScanout()) {
+        m_currentBuffer = m_scanoutBuffer;
+        m_currentDamage = damage;
         return true;
     } else {
+        m_scanoutBuffer.reset();
         return false;
     }
 }
@@ -434,10 +471,10 @@ void EglGbmLayer::sendDmabufFeedback(KWaylandServer::LinuxDmaBufV1ClientBuffer *
     if (!m_scanoutCandidate.attemptedFormats[failedBuffer->format()].contains(failedBuffer->planes().first().modifier)) {
         m_scanoutCandidate.attemptedFormats[failedBuffer->format()] << failedBuffer->planes().first().modifier;
     }
-    if (const auto &drmOutput = qobject_cast<DrmOutput *>(m_output); drmOutput && m_scanoutCandidate.surface->dmabufFeedbackV1()) {
+    if (const auto &drmOutput = dynamic_cast<DrmOutput *>(m_displayDevice); drmOutput && m_scanoutCandidate.surface->dmabufFeedbackV1()) {
         QVector<KWaylandServer::LinuxDmaBufV1Feedback::Tranche> scanoutTranches;
         const auto &drmFormats = drmOutput->pipeline()->supportedFormats();
-        const auto tranches = m_renderGpu->eglBackend()->dmabuf()->tranches();
+        const auto tranches = m_eglBackend->dmabuf()->tranches();
         for (const auto &tranche : tranches) {
             KWaylandServer::LinuxDmaBufV1Feedback::Tranche scanoutTranche;
             for (auto it = tranche.formatTable.constBegin(); it != tranche.formatTable.constEnd(); it++) {
@@ -451,7 +488,7 @@ void EglGbmLayer::sendDmabufFeedback(KWaylandServer::LinuxDmaBufV1ClientBuffer *
                 }
             }
             if (!scanoutTranche.formatTable.isEmpty()) {
-                scanoutTranche.device = m_output->gpu()->deviceId();
+                scanoutTranche.device = m_displayDevice->gpu()->deviceId();
                 scanoutTranche.flags = KWaylandServer::LinuxDmaBufV1Feedback::TrancheFlag::Scanout;
                 scanoutTranches << scanoutTranche;
             }
@@ -462,12 +499,7 @@ void EglGbmLayer::sendDmabufFeedback(KWaylandServer::LinuxDmaBufV1ClientBuffer *
 
 QSharedPointer<DrmBuffer> EglGbmLayer::currentBuffer() const
 {
-    return m_currentBuffer;
-}
-
-DrmAbstractOutput *EglGbmLayer::output() const
-{
-    return m_output;
+    return m_scanoutBuffer ? m_scanoutBuffer : m_currentBuffer;
 }
 
 int EglGbmLayer::bufferAge() const
@@ -478,6 +510,11 @@ int EglGbmLayer::bufferAge() const
 EGLSurface EglGbmLayer::eglSurface() const
 {
     return m_gbmSurface ? m_gbmSurface->eglSurface() : EGL_NO_SURFACE;
+}
+
+bool EglGbmLayer::hasDirectScanoutBuffer() const
+{
+    return m_scanoutBuffer != nullptr;
 }
 
 }

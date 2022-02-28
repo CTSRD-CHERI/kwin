@@ -6,9 +6,9 @@
 
     SPDX-License-Identifier: GPL-2.0-or-later
 */
-#ifndef KWIN_EGL_GBM_BACKEND_H
-#define KWIN_EGL_GBM_BACKEND_H
+#pragma once
 #include "abstract_egl_backend.h"
+#include "drm_render_backend.h"
 
 #include <kwinglutils.h>
 
@@ -38,6 +38,7 @@ class ShadowBuffer;
 class DrmBackend;
 class DrmGpu;
 class EglGbmLayer;
+class DrmDisplayDevice;
 
 struct GbmFormat {
     uint32_t drmFormat = 0;
@@ -51,7 +52,7 @@ bool operator==(const GbmFormat &lhs, const GbmFormat &rhs);
 /**
  * @brief OpenGL Backend using Egl on a GBM surface.
  */
-class EglGbmBackend : public AbstractEglBackend
+class EglGbmBackend : public AbstractEglBackend, public DrmRenderBackend
 {
     Q_OBJECT
 public:
@@ -66,28 +67,27 @@ public:
     void init() override;
     bool scanout(AbstractOutput *output, SurfaceItem *surfaceItem) override;
     bool prefer10bpc() const override;
+    QSharedPointer<DrmLayer> createLayer(DrmDisplayDevice *displayDevice) override;
 
     QSharedPointer<GLTexture> textureForOutput(AbstractOutput *requestedOutput) const override;
-
-    bool directScanoutAllowed(AbstractOutput *output) const override;
 
     QSharedPointer<DrmBuffer> testBuffer(DrmAbstractOutput *output);
     EGLConfig config(uint32_t format) const;
     GbmFormat gbmFormatForDrmFormat(uint32_t format) const;
-    std::optional<uint32_t> chooseFormat(DrmAbstractOutput *output) const;
+    std::optional<uint32_t> chooseFormat(DrmDisplayDevice *displyDevice) const;
+    DrmGpu *gpu() const;
+
+Q_SIGNALS:
+    void aboutToBeDestroyed();
 
 protected:
-    void cleanupSurfaces() override;
     void aboutToStartPainting(AbstractOutput *output, const QRegion &damage) override;
 
 private:
     bool initializeEgl();
     bool initBufferConfigs();
     bool initRenderingContext();
-    void addOutput(AbstractOutput *output);
-    void removeOutput(AbstractOutput *output);
 
-    QMap<AbstractOutput *, QSharedPointer<EglGbmLayer>> m_surfaces;
     DrmBackend *m_backend;
     QVector<GbmFormat> m_formats;
     QMap<uint32_t, EGLConfig> m_configs;
@@ -96,5 +96,3 @@ private:
 };
 
 } // namespace
-
-#endif

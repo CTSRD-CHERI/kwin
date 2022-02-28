@@ -9,7 +9,6 @@
 
 #include "showpaint_config.h"
 
-#include <KAboutData>
 #include <KActionCollection>
 #include <KGlobalAccel>
 #include <KLocalizedString>
@@ -45,8 +44,6 @@ ShowPaintEffectConfig::ShowPaintEffectConfig(QWidget *parent, const QVariantList
 
     connect(m_ui->shortcutsEditor, &KShortcutsEditor::keyChange,
             this, &ShowPaintEffectConfig::markAsChanged);
-
-    load();
 }
 
 ShowPaintEffectConfig::~ShowPaintEffectConfig()

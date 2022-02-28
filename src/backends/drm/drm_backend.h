@@ -11,6 +11,7 @@
 #include "platform.h"
 
 #include "dpmsinputeventfilter.h"
+#include "placeholderinputeventfilter.h"
 
 #include <QPointer>
 #include <QSize>
@@ -29,6 +30,7 @@ class DrmAbstractOutput;
 class Cursor;
 class DrmGpu;
 class DrmVirtualOutput;
+class DrmRenderBackend;
 
 class KWIN_EXPORT DrmBackend : public Platform
 {
@@ -65,6 +67,9 @@ public:
     DrmGpu *findGpuByFd(int fd) const;
 
     bool isActive() const;
+
+    void setRenderBackend(DrmRenderBackend *backend);
+    DrmRenderBackend *renderBackend() const;
 
 public Q_SLOTS:
     void turnOutputsOn();
@@ -103,6 +108,8 @@ private:
     const QStringList m_explicitGpus;
     QVector<DrmGpu*> m_gpus;
     QScopedPointer<DpmsInputEventFilter> m_dpmsFilter;
+    QScopedPointer<PlaceholderInputEventFilter> m_placeholderFilter;
+    DrmRenderBackend *m_renderBackend = nullptr;
 };
 
 

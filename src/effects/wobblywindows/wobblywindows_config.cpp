@@ -15,7 +15,6 @@
 #include <kwineffects_interface.h>
 
 #include <KLocalizedString>
-#include <KAboutData>
 #include <kconfiggroup.h>
 #include <KPluginFactory>
 
@@ -75,8 +74,6 @@ WobblyWindowsEffectConfig::WobblyWindowsEffectConfig(QWidget* parent, const QVar
 
     addConfig(WobblyWindowsConfig::self(), this);
     connect(m_ui.kcfg_WobblynessLevel, &QSlider::valueChanged, this, &WobblyWindowsEffectConfig::wobblinessChanged);
-
-    load();
 }
 
 WobblyWindowsEffectConfig::~WobblyWindowsEffectConfig()

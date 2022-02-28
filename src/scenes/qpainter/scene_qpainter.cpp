@@ -68,34 +68,15 @@ void SceneQPainter::paintGenericScreen(int mask, const ScreenPaintData &data)
     m_painter->restore();
 }
 
-void SceneQPainter::paint(AbstractOutput *output, const QRegion &damage, const QList<Toplevel *> &toplevels,
-                          RenderLoop *renderLoop)
+void SceneQPainter::paint(const QRegion &damage, const QRegion &repaint, QRegion &update, QRegion &valid)
 {
-    Q_ASSERT(kwinApp()->platform()->isPerScreenRenderingEnabled());
-    painted_screen = output;
-
-    createStackingOrder(toplevels);
-
-    const QRegion repaint = m_backend->beginFrame(output);
-    const QRect geometry = output->geometry();
-
-    QImage *buffer = m_backend->bufferForScreen(output);
+    QImage *buffer = m_backend->bufferForScreen(painted_screen);
     if (buffer && !buffer->isNull()) {
-        renderLoop->beginFrame();
         m_painter->begin(buffer);
-        m_painter->setWindow(geometry);
-
-        QRegion updateRegion, validRegion;
-        paintScreen(damage, repaint, &updateRegion, &validRegion);
-        paintCursor(output, updateRegion);
-
+        m_painter->setWindow(painted_screen->geometry());
+        paintScreen(damage, repaint, &update, &valid);
         m_painter->end();
-        renderLoop->endFrame();
-        m_backend->endFrame(output, validRegion, updateRegion);
     }
-
-    // do cleanup
-    clearStackingOrder();
 }
 
 void SceneQPainter::paintBackground(const QRegion &region)
@@ -103,24 +84,6 @@ void SceneQPainter::paintBackground(const QRegion &region)
     for (const QRect &rect : region) {
         m_painter->fillRect(rect, Qt::black);
     }
-}
-
-void SceneQPainter::paintCursor(AbstractOutput *output, const QRegion &rendered)
-{
-    if (!output || !output->usesSoftwareCursor() || Cursors::self()->isCursorHidden()) {
-        return;
-    }
-
-    Cursor* cursor = Cursors::self()->currentCursor();
-    const QImage img = cursor->image();
-    if (img.isNull()) {
-        return;
-    }
-
-    m_painter->save();
-    m_painter->setClipRegion(rendered.intersected(cursor->geometry()));
-    m_painter->drawImage(cursor->geometry(), img);
-    m_painter->restore();
 }
 
 void SceneQPainter::paintOffscreenQuickView(OffscreenQuickView *w)

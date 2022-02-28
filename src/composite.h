@@ -20,7 +20,9 @@ namespace KWin
 
 class AbstractOutput;
 class CompositorSelectionOwner;
+class CursorView;
 class RenderBackend;
+class RenderLayer;
 class RenderLoop;
 class Scene;
 class Toplevel;
@@ -84,7 +86,6 @@ public:
     // for delayed supportproperty management of effects
     void keepSupportProperty(xcb_atom_t atom);
     void removeSupportProperty(xcb_atom_t atom);
-    QList<Toplevel *> windowsToRender() const;
 
 Q_SIGNALS:
     void compositingToggled(bool active);
@@ -119,8 +120,6 @@ protected Q_SLOTS:
 
 private Q_SLOTS:
     void handleFrameRequested(RenderLoop *renderLoop);
-    void handleOutputEnabled(AbstractOutput *output);
-    void handleOutputDisabled(AbstractOutput *output);
 
 private:
     void initializeX11();
@@ -129,13 +128,20 @@ private:
     void releaseCompositorSelection();
     void deleteUnusedSupportProperties();
 
-    void registerRenderLoop(RenderLoop *renderLoop, AbstractOutput *output);
-    void unregisterRenderLoop(RenderLoop *renderLoop);
-
     bool attemptOpenGLCompositing();
     bool attemptQPainterCompositing();
 
     AbstractOutput *findOutput(RenderLoop *loop) const;
+    void addOutput(AbstractOutput *output);
+    void removeOutput(AbstractOutput *output);
+
+    void addSuperLayer(RenderLayer *layer);
+    void removeSuperLayer(RenderLayer *layer);
+
+    void prePaintPass(RenderLayer *layer);
+    void postPaintPass(RenderLayer *layer);
+    void preparePaintPass(RenderLayer *layer, QRegion *repaint);
+    void paintPass(RenderLayer *layer, const QRegion &repaint, const QRegion &repair, QRegion *surfaceDamage, QRegion *bufferDamage);
 
     State m_state = State::Off;
     CompositorSelectionOwner *m_selectionOwner = nullptr;
@@ -143,8 +149,9 @@ private:
     QList<xcb_atom_t> m_unusedSupportProperties;
     QTimer m_unusedSupportPropertyTimer;
     Scene *m_scene = nullptr;
+    CursorView *m_cursorView = nullptr;
     RenderBackend *m_backend = nullptr;
-    QMap<RenderLoop *, AbstractOutput *> m_renderLoops;
+    QHash<RenderLoop *, RenderLayer *> m_superlayers;
 };
 
 class KWIN_EXPORT WaylandCompositor final : public Compositor

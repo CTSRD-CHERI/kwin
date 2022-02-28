@@ -250,6 +250,7 @@ bool DrmGpu::updateOutputs()
         const uint32_t currentConnector = resources->connectors[i];
         auto it = std::find_if(m_connectors.constBegin(), m_connectors.constEnd(), [currentConnector] (DrmConnector *c) { return c->id() == currentConnector; });
         DrmConnector *conn = it == m_connectors.constEnd() ? nullptr : *it;
+        bool updateSuccess = true;
         if (!conn) {
             conn = new DrmConnector(this, currentConnector);
             if (!conn->init()) {
@@ -258,14 +259,13 @@ bool DrmGpu::updateOutputs()
             }
             m_connectors << conn;
             m_allObjects << conn;
-        } else {
+        } else if (conn->updateProperties()) {
             removedConnectors.removeOne(conn);
-            conn->updateProperties();
+        } else {
+            updateSuccess = false;
         }
-        if (conn->isConnected()) {
-            if (auto output = findOutput(conn->id())) {
-                output->updateModes();
-            } else if (!findLeaseOutput(conn->id())) {
+        if (conn->isConnected() && updateSuccess) {
+            if (conn->isNonDesktop() ? !findLeaseOutput(conn->id()) : !findOutput(conn->id())) {
                 qCDebug(KWIN_DRM, "New %soutput on GPU %s: %s", conn->isNonDesktop() ? "non-desktop " : "", qPrintable(m_devNode), qPrintable(conn->modelName()));
                 m_pipelines << conn->pipeline();
                 if (conn->isNonDesktop()) {
@@ -309,9 +309,9 @@ bool DrmGpu::updateOutputs()
     if (testPendingConfiguration()) {
         for (const auto &pipeline : qAsConst(m_pipelines)) {
             pipeline->applyPendingChanges();
-            if (!pipeline->pending.crtc && pipeline->output()) {
+            if (const auto drmOutput = dynamic_cast<DrmAbstractOutput*>(pipeline->displayDevice()); drmOutput && !pipeline->pending.crtc) {
                 pipeline->pending.enabled = false;
-                pipeline->output()->setEnabled(false);
+                drmOutput->setEnabled(false);
             }
         }
     } else {
@@ -421,6 +421,9 @@ bool DrmGpu::testPipelines()
     // pipelines that are enabled but not active need to be activated for the test
     QVector<DrmPipeline*> inactivePipelines;
     for (const auto &pipeline : qAsConst(m_pipelines)) {
+        if (!pipeline->pending.layer) {
+            pipeline->pending.layer = m_platform->renderBackend()->createLayer(pipeline->displayDevice());
+        }
         if (!pipeline->pending.active) {
             pipeline->pending.active = true;
             inactivePipelines << pipeline;
@@ -553,19 +556,10 @@ void DrmGpu::removeOutput(DrmOutput *output)
     qCDebug(KWIN_DRM) << "Removing output" << output;
     m_drmOutputs.removeOne(output);
     m_pipelines.removeOne(output->pipeline());
+    output->pipeline()->pending.layer.reset();
     m_outputs.removeOne(output);
     Q_EMIT outputRemoved(output);
     delete output;
-}
-
-EglGbmBackend *DrmGpu::eglBackend() const
-{
-    return m_eglBackend;
-}
-
-void DrmGpu::setEglBackend(EglGbmBackend *eglBackend)
-{
-    m_eglBackend = eglBackend;
 }
 
 DrmBackend *DrmGpu::platform() const {
@@ -661,6 +655,7 @@ void DrmGpu::removeLeaseOutput(DrmLeaseOutput *output)
     qCDebug(KWIN_DRM) << "Removing leased output" << output;
     m_leaseOutputs.removeOne(output);
     m_pipelines.removeOne(output->pipeline());
+    output->pipeline()->pending.layer.reset();
     delete output;
 }
 
@@ -740,10 +735,10 @@ bool DrmGpu::maybeModeset()
     }
     const bool ok = DrmPipeline::commitPipelines(pipelines, DrmPipeline::CommitMode::CommitModeset, unusedObjects());
     for (DrmPipeline *pipeline : qAsConst(pipelines)) {
-        if (pipeline->modesetPresentPending() && pipeline->output()) {
+        if (pipeline->modesetPresentPending()) {
             pipeline->resetModesetPresentPending();
             if (!ok) {
-                pipeline->output()->presentFailed();
+                pipeline->displayDevice()->frameFailed();
             }
         }
     }
@@ -770,6 +765,18 @@ QVector<DrmObject*> DrmGpu::unusedObjects() const
 QSize DrmGpu::cursorSize() const
 {
     return m_cursorSize;
+}
+
+void DrmGpu::recreateSurfaces()
+{
+    for (const auto &pipeline : qAsConst(m_pipelines)) {
+        pipeline->pending.layer = m_platform->renderBackend()->createLayer(pipeline->displayDevice());
+    }
+    for (const auto &output : qAsConst(m_outputs)) {
+        if (const auto virtualOutput = qobject_cast<DrmVirtualOutput*>(output)) {
+            virtualOutput->recreateSurface();
+        }
+    }
 }
 
 }

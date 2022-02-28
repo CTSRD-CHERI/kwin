@@ -86,12 +86,10 @@ find_package(KF5 ${KF5_MIN_VERSION} REQUIRED COMPONENTS
 )
 # required frameworks by config modules
 find_package(KF5 ${KF5_MIN_VERSION} REQUIRED COMPONENTS
-    Completion
     Declarative
     KCMUtils
     NewStuff
     Service
-    TextWidgets
     XmlGui
 )
 
@@ -137,12 +135,6 @@ set_package_properties(KF5Kirigami2 PROPERTIES
 )
 
 find_package(KDecoration2 ${PROJECT_VERSION} CONFIG REQUIRED)
-
-find_package(KScreenLocker CONFIG REQUIRED)
-set_package_properties(KScreenLocker PROPERTIES
-    TYPE REQUIRED
-    PURPOSE "For screenlocker integration in kwin_wayland"
-)
 
 find_package(KWaylandServer ${PROJECT_VERSION} CONFIG REQUIRED)
 set_package_properties(KWaylandServer PROPERTIES
@@ -348,6 +340,7 @@ include(CMakeDependentOption)
 
 option(KWIN_BUILD_DECORATIONS "Enable building of KWin decorations." ON)
 option(KWIN_BUILD_KCMS "Enable building of KWin configuration modules." ON)
+option(KWIN_BUILD_SCREENLOCKER "Enable building of KWin lockscreen functionality" ON)
 option(KWIN_BUILD_TABBOX "Enable building of KWin Tabbox functionality" ON)
 cmake_dependent_option(KWIN_BUILD_ACTIVITIES "Enable building of KWin with kactivities support" ON "KF5Activities_FOUND" OFF)
 cmake_dependent_option(KWIN_BUILD_RUNNERS "Enable building of KWin with krunner support" ON "KF5Runner_FOUND" OFF)
@@ -402,6 +395,14 @@ add_feature_info("SCHED_RESET_ON_FORK"
 
 pkg_check_modules(PipeWire IMPORTED_TARGET libpipewire-0.3>=0.3.29)
 add_feature_info(PipeWire PipeWire_FOUND "Required for Wayland screencasting")
+
+if (KWIN_BUILD_SCREENLOCKER)
+    find_package(KScreenLocker CONFIG REQUIRED)
+    set_package_properties(KScreenLocker PROPERTIES
+        TYPE REQUIRED
+        PURPOSE "For screenlocker integration in kwin_wayland"
+    )
+endif()
 
 ########### global ###############
 

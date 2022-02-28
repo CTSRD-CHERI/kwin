@@ -28,6 +28,7 @@
 #include "waylandoutputconfig.h"
 #include "egl_gbm_backend.h"
 #include "gbm_dmabuf.h"
+#include "drm_render_backend.h"
 // KF5
 #include <KCoreAddons>
 #include <KLocalizedString>
@@ -62,7 +63,6 @@ DrmBackend::DrmBackend(QObject *parent)
 {
     setSupportsPointerWarping(true);
     setSupportsGammaControl(true);
-    setPerScreenRenderingEnabled(true);
     supportsOutputChanges();
 }
 
@@ -505,6 +505,7 @@ void DrmBackend::enableOutput(DrmAbstractOutput *output, bool enable)
             qCDebug(KWIN_DRM) << "removing placeholder output";
             primaryGpu()->removeVirtualOutput(m_placeHolderOutput);
             m_placeHolderOutput = nullptr;
+            m_placeholderFilter.reset();
         }
     } else {
         if (m_enabledOutputs.count() == 1 && m_outputs.count() > 1) {
@@ -524,6 +525,8 @@ void DrmBackend::enableOutput(DrmAbstractOutput *output, bool enable)
             m_placeHolderOutput = primaryGpu()->createVirtualOutput({}, m_enabledOutputs.constFirst()->pixelSize(), 1, DrmGpu::Placeholder);
             // placeholder doesn't actually need to render anything
             m_placeHolderOutput->renderLoop()->inhibit();
+            m_placeholderFilter.reset(new PlaceholderInputEventFilter());
+            input()->prependInputEventFilter(m_placeholderFilter.data());
         }
         m_enabledOutputs.removeOne(output);
         Q_EMIT output->gpu()->outputDisabled(output);
@@ -548,7 +551,13 @@ OpenGLBackend *DrmBackend::createOpenGLBackend()
 
 void DrmBackend::sceneInitialized()
 {
-    updateOutputs();
+    if (m_outputs.isEmpty()) {
+        updateOutputs();
+    } else {
+        for (const auto &gpu : qAsConst(m_gpus)) {
+            gpu->recreateSurfaces();
+        }
+    }
 }
 
 QVector<CompositingType> DrmBackend::supportedCompositors() const
@@ -591,8 +600,8 @@ void DrmBackend::removeVirtualOutput(AbstractOutput *output)
 
 DmaBufTexture *DrmBackend::createDmaBufTexture(const QSize &size)
 {
-    if (primaryGpu()->eglBackend() && primaryGpu()->gbmDevice()) {
-        primaryGpu()->eglBackend()->makeCurrent();
+    if (const auto eglBackend = dynamic_cast<EglGbmBackend*>(m_renderBackend); eglBackend && primaryGpu()->gbmDevice()) {
+        eglBackend->makeCurrent();
         return GbmDmaBuf::createBuffer(size, primaryGpu()->gbmDevice());
     } else {
         return nullptr;
@@ -660,6 +669,16 @@ bool DrmBackend::applyOutputChanges(const WaylandOutputConfig &config)
         Compositor::self()->scene()->addRepaintFull();
     }
     return true;
+}
+
+void DrmBackend::setRenderBackend(DrmRenderBackend *backend)
+{
+    m_renderBackend = backend;
+}
+
+DrmRenderBackend *DrmBackend::renderBackend() const
+{
+    return m_renderBackend;
 }
 
 }

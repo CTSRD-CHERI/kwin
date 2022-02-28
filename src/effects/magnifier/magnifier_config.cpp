@@ -19,7 +19,6 @@
 #include <KLocalizedString>
 #include <kconfiggroup.h>
 #include <KActionCollection>
-#include <KAboutData>
 #include <KPluginFactory>
 
 #include <QDebug>
@@ -74,8 +73,6 @@ MagnifierEffectConfig::MagnifierEffectConfig(QWidget* parent, const QVariantList
     KGlobalAccel::self()->setShortcut(a, QList<QKeySequence>() << Qt::META + Qt::Key_0);
 
     m_ui->editor->addCollection(m_actionCollection);
-
-    load();
 }
 
 MagnifierEffectConfig::~MagnifierEffectConfig()

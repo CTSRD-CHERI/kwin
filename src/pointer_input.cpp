@@ -8,6 +8,7 @@
 
     SPDX-License-Identifier: GPL-2.0-or-later
 */
+#include <config-kwin.h>
 #include "pointer_input.h"
 #include "abstract_output.h"
 #include "platform.h"
@@ -31,7 +32,9 @@
 #include <KWaylandServer/seat_interface.h>
 #include <KWaylandServer/surface_interface.h>
 // screenlocker
+#ifdef KWIN_BUILD_SCREENLOCKER
 #include <KScreenLocker/KsldApp>
+#endif
 
 #include <KLocalizedString>
 
@@ -140,6 +143,7 @@ void PointerInputRedirection::init()
     Q_EMIT m_cursor->changed();
 
     connect(screens(), &Screens::changed, this, &PointerInputRedirection::updateAfterScreenChange);
+#ifdef KWIN_BUILD_SCREENLOCKER
     if (waylandServer()->hasScreenLockerIntegration()) {
         connect(ScreenLocker::KSldApp::self(), &ScreenLocker::KSldApp::lockStateChanged, this,
             [this] {
@@ -151,6 +155,7 @@ void PointerInputRedirection::init()
             }
         );
     }
+#endif
     connect(workspace(), &QObject::destroyed, this, [this] { setInited(false); });
     connect(waylandServer(), &QObject::destroyed, this, [this] { setInited(false); });
     connect(waylandServer()->seat(), &KWaylandServer::SeatInterface::dragEnded, this,
@@ -548,6 +553,8 @@ void PointerInputRedirection::cleanupDecoration(Decoration::DecoratedClientImpl 
     m_decorationDestroyedConnection = connect(now, &QObject::destroyed, this, &PointerInputRedirection::update, Qt::QueuedConnection);
 }
 
+static bool s_cursorUpdateBlocking = false;
+
 void PointerInputRedirection::focusUpdate(Toplevel *focusOld, Toplevel *focusNow)
 {
     if (AbstractClient *ac = qobject_cast<AbstractClient*>(focusOld)) {
@@ -567,6 +574,11 @@ void PointerInputRedirection::focusUpdate(Toplevel *focusOld, Toplevel *focusNow
         seat->setFocusedPointerSurface(nullptr);
         return;
     }
+
+    // prevent updating cursor and sending motion event outside the previously focused surface
+    s_cursorUpdateBlocking = true;
+    seat->setFocusedPointerSurface(nullptr);
+    s_cursorUpdateBlocking = false;
 
     seat->notifyPointerMotion(m_pos.toPoint());
     seat->setFocusedPointerSurface(focusNow->surface(), focusNow->inputTransformation());
@@ -948,9 +960,11 @@ CursorImage::CursorImage(PointerInputRedirection *parent)
             reevaluteSource();
         }
     );
+#ifdef KWIN_BUILD_SCREENLOCKER
     if (waylandServer()->hasScreenLockerIntegration()) {
         connect(ScreenLocker::KSldApp::self(), &ScreenLocker::KSldApp::lockStateChanged, this, &CursorImage::reevaluteSource);
     }
+#endif
     connect(m_pointer, &PointerInputRedirection::decorationChanged, this, &CursorImage::updateDecoration);
     // connect the move resize of all window
     auto setupMoveResizeConnection = [this] (AbstractClient *c) {
@@ -1014,6 +1028,10 @@ void CursorImage::handlePointerChanged()
 
 void CursorImage::handleFocusedSurfaceChanged()
 {
+    if (s_cursorUpdateBlocking) {
+        return;
+    }
+
     KWaylandServer::PointerInterface *pointer = waylandServer()->seat()->pointer();
     disconnect(m_serverCursor.connection);
 

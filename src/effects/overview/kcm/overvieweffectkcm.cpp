@@ -10,7 +10,6 @@
 #include <config-kwin.h>
 #include <kwineffects_interface.h>
 
-#include <KAboutData>
 #include <KActionCollection>
 #include <KGlobalAccel>
 #include <KLocalizedString>
@@ -45,8 +44,6 @@ OverviewEffectConfig::OverviewEffectConfig(QWidget *parent, const QVariantList &
 
     ui.shortcutsEditor->addCollection(actionCollection);
     connect(ui.shortcutsEditor, &KShortcutsEditor::keyChange, this, &OverviewEffectConfig::markAsChanged);
-
-    load();
 }
 
 OverviewEffectConfig::~OverviewEffectConfig()

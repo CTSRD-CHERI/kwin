@@ -97,160 +97,16 @@ bool SceneOpenGL::initFailed() const
     return !init_ok;
 }
 
-/**
- * Render cursor texture in case hardware cursor is disabled.
- * Useful for screen recording apps or backends that can't do planes.
- */
-void SceneOpenGL::paintCursor(AbstractOutput *output, const QRegion &rendered)
-{
-    Cursor* cursor = Cursors::self()->currentCursor();
-
-    // don't paint if we use hardware cursor or the cursor is hidden
-    if (!output || !output->usesSoftwareCursor()
-        || Cursors::self()->isCursorHidden()
-        || cursor->image().isNull()) {
-        return;
-    }
-
-    // figure out which part of the cursor needs to be repainted
-    const QPoint cursorPos = cursor->pos() - cursor->hotspot();
-    const QRect cursorRect = cursor->rect();
-    QRegion region;
-    for (const QRect &rect : rendered) {
-        region |= rect.translated(-cursorPos).intersected(cursorRect);
-    }
-    if (region.isEmpty()) {
-        return;
-    }
-
-    auto newTexture = [this] {
-        const QImage img = Cursors::self()->currentCursor()->image();
-        if (img.isNull()) {
-            m_cursorTextureDirty = false;
-            return;
-        }
-        m_cursorTexture.reset(new GLTexture(img));
-        m_cursorTexture->setWrapMode(GL_CLAMP_TO_EDGE);
-        m_cursorTextureDirty = false;
-    };
-
-    // lazy init texture cursor only in case we need software rendering
-    if (!m_cursorTexture) {
-        newTexture();
-
-        // handle shape update on case cursor image changed
-        connect(Cursors::self(), &Cursors::currentCursorChanged, this, [this] {
-            m_cursorTextureDirty = true;
-        });
-    } else if (m_cursorTextureDirty) {
-        const QImage image = Cursors::self()->currentCursor()->image();
-        if (image.size() == m_cursorTexture->size()) {
-            m_cursorTexture->update(image);
-            m_cursorTextureDirty = false;
-        } else {
-            newTexture();
-        }
-    }
-
-    // get cursor position in projection coordinates
-    QMatrix4x4 mvp = renderTargetProjectionMatrix();
-    mvp.translate(cursorPos.x(), cursorPos.y());
-
-    // handle transparence
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-    // paint texture in cursor offset
-    m_cursorTexture->bind();
-    ShaderBinder binder(ShaderTrait::MapTexture);
-    binder.shader()->setUniform(GLShader::ModelViewProjectionMatrix, mvp);
-    m_cursorTexture->render(cursorRect);
-    m_cursorTexture->unbind();
-    glDisable(GL_BLEND);
-}
-
 void SceneOpenGL::aboutToStartPainting(AbstractOutput *output, const QRegion &damage)
 {
     m_backend->aboutToStartPainting(output, damage);
 }
 
-static SurfaceItem *findTopMostSurface(SurfaceItem *item)
+void SceneOpenGL::paint(const QRegion &damage, const QRegion &repaint, QRegion &update, QRegion &valid)
 {
-    const QList<Item *> children = item->childItems();
-    if (children.isEmpty()) {
-        return item;
-    } else {
-        return findTopMostSurface(static_cast<SurfaceItem *>(children.constLast()));
-    }
-}
-
-void SceneOpenGL::paint(AbstractOutput *output, const QRegion &damage, const QList<Toplevel *> &toplevels,
-                        RenderLoop *renderLoop)
-{
-    painted_screen = output;
-    // actually paint the frame, flushed with the NEXT frame
-    createStackingOrder(toplevels);
-
-    QRegion update;
-    QRegion valid;
-    QRegion repaint;
-
-    renderLoop->beginFrame();
-
-    SurfaceItem *fullscreenSurface = nullptr;
-    for (int i = stacking_order.count() - 1; i >=0; i--) {
-        Window *window = stacking_order[i];
-        Toplevel *toplevel = window->window();
-        if (output && toplevel->isOnOutput(output) && window->isVisible() && toplevel->opacity() > 0) {
-            AbstractClient *c = dynamic_cast<AbstractClient*>(toplevel);
-            if (!c || !c->isFullScreen()) {
-                break;
-            }
-            if (!window->surfaceItem()) {
-                break;
-            }
-            SurfaceItem *topMost = findTopMostSurface(window->surfaceItem());
-            auto pixmap = topMost->pixmap();
-            if (!pixmap) {
-                break;
-            }
-            pixmap->update();
-            // the subsurface has to be able to cover the whole window
-            if (topMost->position() != QPoint(0, 0)) {
-                break;
-            }
-            // and it has to be completely opaque
-            if (!window->isOpaque() && !topMost->opaque().contains(QRect(0, 0, window->width(), window->height()))) {
-                break;
-            }
-            fullscreenSurface = topMost;
-            break;
-        }
-    }
-    renderLoop->setFullscreenSurface(fullscreenSurface);
-
-    bool directScanout = false;
-    if (m_backend->directScanoutAllowed(output) && !static_cast<EffectsHandlerImpl*>(effects)->blocksDirectScanout()) {
-        directScanout = m_backend->scanout(output, fullscreenSurface);
-    }
-    if (directScanout) {
-        renderLoop->endFrame();
-    } else {
-        // prepare rendering makescontext current on the output
-        repaint = m_backend->beginFrame(output);
-        GLVertexBuffer::streamingBuffer()->beginFrame();
-
-        paintScreen(damage, repaint, &update, &valid);
-        paintCursor(output, valid);
-
-        renderLoop->endFrame();
-
-        GLVertexBuffer::streamingBuffer()->endOfFrame();
-        m_backend->endFrame(output, valid, update);
-    }
-
-    // do cleanup
-    clearStackingOrder();
+    GLVertexBuffer::streamingBuffer()->beginFrame();
+    paintScreen(damage, repaint, &update, &valid);
+    GLVertexBuffer::streamingBuffer()->endOfFrame();
 }
 
 QMatrix4x4 SceneOpenGL::transformation(int mask, const ScreenPaintData &data) const

@@ -36,7 +36,6 @@
 #include <QCommandLineParser>
 #include <QFileInfo>
 #include <QProcess>
-#include <QStyle>
 #include <QDebug>
 #include <QWindow>
 #include <QDBusInterface>
@@ -130,9 +129,6 @@ ApplicationWayland::~ApplicationWayland()
     m_xwayland = nullptr;
     destroyWorkspace();
 
-    if (QStyle *s = style()) {
-        s->unpolish(this);
-    }
     destroyInputMethod();
     destroyCompositor();
     destroyInput();
@@ -510,6 +506,7 @@ int main(int argc, char * argv[])
                                            i18n("List all available backends and quit."));
     parser.addOption(listBackendsOption);
 
+#ifdef KWIN_BUILD_SCREENLOCKER
     QCommandLineOption screenLockerOption(QStringLiteral("lockscreen"),
                                           i18n("Starts the session in locked mode."));
     parser.addOption(screenLockerOption);
@@ -517,6 +514,7 @@ int main(int argc, char * argv[])
     QCommandLineOption noScreenLockerOption(QStringLiteral("no-lockscreen"),
                                             i18n("Starts the session without lock screen support."));
     parser.addOption(noScreenLockerOption);
+#endif
 
     QCommandLineOption noGlobalShortcutsOption(QStringLiteral("no-global-shortcuts"),
                                                i18n("Starts the session without global shortcuts support."));
@@ -638,11 +636,13 @@ int main(int argc, char * argv[])
     KWin::WaylandServer *server = KWin::WaylandServer::create(&a);
 
     KWin::WaylandServer::InitializationFlags flags;
+#ifdef KWIN_BUILD_SCREENLOCKER
     if (parser.isSet(screenLockerOption)) {
         flags = KWin::WaylandServer::InitializationFlag::LockScreen;
     } else if (parser.isSet(noScreenLockerOption)) {
         flags = KWin::WaylandServer::InitializationFlag::NoLockScreenIntegration;
     }
+#endif
     if (parser.isSet(noGlobalShortcutsOption)) {
         flags |= KWin::WaylandServer::InitializationFlag::NoGlobalShortcuts;
     }

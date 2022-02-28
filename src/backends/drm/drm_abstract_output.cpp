@@ -9,25 +9,36 @@
 #include "drm_abstract_output.h"
 #include "drm_gpu.h"
 #include "drm_backend.h"
+#include "renderloop_p.h"
 
 namespace KWin
 {
 
 DrmAbstractOutput::DrmAbstractOutput(DrmGpu *gpu)
     : AbstractWaylandOutput(gpu->platform())
+    , DrmDisplayDevice(gpu)
     , m_renderLoop(new RenderLoop(this))
-    , m_gpu(gpu)
 {
-}
-
-DrmGpu *DrmAbstractOutput::gpu() const
-{
-    return m_gpu;
 }
 
 RenderLoop *DrmAbstractOutput::renderLoop() const
 {
     return m_renderLoop;
+}
+
+QRect DrmAbstractOutput::renderGeometry() const
+{
+    return geometry();
+}
+
+void DrmAbstractOutput::frameFailed() const
+{
+    RenderLoopPrivate::get(m_renderLoop)->notifyFrameFailed();
+}
+
+void DrmAbstractOutput::pageFlipped(std::chrono::nanoseconds timestamp) const
+{
+    RenderLoopPrivate::get(m_renderLoop)->notifyFrameCompleted(timestamp);
 }
 
 }

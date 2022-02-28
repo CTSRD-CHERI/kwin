@@ -33,8 +33,7 @@ public:
     explicit SceneOpenGL(OpenGLBackend *backend, QObject *parent = nullptr);
     ~SceneOpenGL() override;
     bool initFailed() const override;
-    void paint(AbstractOutput *output, const QRegion &damage, const QList<Toplevel *> &windows,
-               RenderLoop *renderLoop) override;
+    void paint(const QRegion &damage, const QRegion &repaint, QRegion &update, QRegion &valid) override;
     Scene::EffectFrame *createEffectFrame(EffectFrameImpl *frame) override;
     Shadow *createShadow(Toplevel *toplevel) override;
     bool makeOpenGLContextCurrent() override;
@@ -70,7 +69,6 @@ protected:
     void paintGenericScreen(int mask, const ScreenPaintData &data) override;
     Scene::Window *createWindow(Toplevel *t) override;
     void finalDrawWindow(EffectWindowImpl* w, int mask, const QRegion &region, WindowPaintData& data) override;
-    void paintCursor(AbstractOutput *output, const QRegion &region) override;
 
 private:
     void doPaintBackground(const QVector< float >& vertices);
@@ -79,8 +77,6 @@ private:
     bool init_ok = true;
     OpenGLBackend *m_backend;
     LanczosFilter *m_lanczosFilter = nullptr;
-    QScopedPointer<GLTexture> m_cursorTexture;
-    bool m_cursorTextureDirty = false;
     QMatrix4x4 m_screenProjectionMatrix;
     GLuint vao = 0;
 };

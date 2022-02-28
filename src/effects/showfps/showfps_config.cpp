@@ -15,7 +15,6 @@
 #include <kwineffects_interface.h>
 
 #include <KLocalizedString>
-#include <KAboutData>
 #include <KPluginFactory>
 
 K_PLUGIN_CLASS(KWin::ShowFpsEffectConfig)
@@ -31,8 +30,6 @@ ShowFpsEffectConfig::ShowFpsEffectConfig(QWidget* parent, const QVariantList& ar
 
     ShowFpsConfig::instance(KWIN_CONFIG);
     addConfig(ShowFpsConfig::self(), this);
-
-    load();
 }
 
 ShowFpsEffectConfig::~ShowFpsEffectConfig()

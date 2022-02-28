@@ -8,6 +8,8 @@
 */
 #include "composite.h"
 #include "abstract_output.h"
+#include "cursorview_opengl.h"
+#include "cursorview_qpainter.h"
 #include "dbusinterface.h"
 #include "x11client.h"
 #include "decorations/decoratedclient.h"
@@ -16,9 +18,11 @@
 #include "ftrace.h"
 #include "internal_client.h"
 #include "openglbackend.h"
+#include "outputlayer.h"
 #include "overlaywindow.h"
 #include "platform.h"
 #include "qpainterbackend.h"
+#include "renderlayer.h"
 #include "renderloop.h"
 #include "scene.h"
 #include "scenes/opengl/scene_opengl.h"
@@ -189,6 +193,7 @@ bool Compositor::attemptOpenGLCompositing()
 
     m_backend = backend.take();
     m_scene = scene.take();
+    m_cursorView = new OpenGLCursorView();
 
     // set strict binding
     if (options->isGlStrictBindingFollowsDriver()) {
@@ -213,6 +218,7 @@ bool Compositor::attemptQPainterCompositing()
 
     m_backend = backend.take();
     m_scene = scene.take();
+    m_cursorView = new QPainterCursorView();
 
     qCDebug(KWIN_CORE) << "QPainter compositing has been successfully initialized";
     return true;
@@ -352,16 +358,20 @@ void Compositor::startupWithWorkspace()
     m_scene->initialize();
 
     const QVector<AbstractOutput *> outputs = kwinApp()->platform()->enabledOutputs();
-    if (kwinApp()->platform()->isPerScreenRenderingEnabled()) {
-        for (AbstractOutput *output : outputs) {
-            registerRenderLoop(output->renderLoop(), output);
-        }
-        connect(kwinApp()->platform(), &Platform::outputEnabled,
-                this, &Compositor::handleOutputEnabled);
-        connect(kwinApp()->platform(), &Platform::outputDisabled,
-                this, &Compositor::handleOutputDisabled);
+    if (kwinApp()->operationMode() == Application::OperationModeX11) {
+        auto workspaceLayer = new RenderLayer(outputs.constFirst()->renderLoop());
+        workspaceLayer->setDelegate(new SceneDelegate(m_scene));
+        workspaceLayer->setGeometry(workspace()->geometry());
+        connect(workspace(), &Workspace::geometryChanged, this, [workspaceLayer]() {
+            workspaceLayer->setGeometry(workspace()->geometry());
+        });
+        addSuperLayer(workspaceLayer);
     } else {
-        registerRenderLoop(outputs.constFirst()->renderLoop(), nullptr);
+        for (AbstractOutput *output : outputs) {
+            addOutput(output);
+        }
+        connect(kwinApp()->platform(), &Platform::outputEnabled, this, &Compositor::addOutput);
+        connect(kwinApp()->platform(), &Platform::outputDisabled, this, &Compositor::removeOutput);
     }
 
     m_state = State::On;
@@ -391,9 +401,6 @@ void Compositor::startupWithWorkspace()
     if (m_releaseSelectionTimer.isActive()) {
         m_releaseSelectionTimer.stop();
     }
-
-    // Render at least once.
-    m_scene->addRepaintFull();
 }
 
 AbstractOutput *Compositor::findOutput(RenderLoop *loop) const
@@ -407,33 +414,59 @@ AbstractOutput *Compositor::findOutput(RenderLoop *loop) const
     return nullptr;
 }
 
-void Compositor::registerRenderLoop(RenderLoop *renderLoop, AbstractOutput *output)
+void Compositor::addOutput(AbstractOutput *output)
 {
-    Q_ASSERT(!m_renderLoops.contains(renderLoop));
-    m_renderLoops.insert(renderLoop, output);
-    connect(renderLoop, &RenderLoop::frameRequested, this, &Compositor::handleFrameRequested);
+    Q_ASSERT(kwinApp()->operationMode() != Application::OperationModeX11);
+
+    auto workspaceLayer = new RenderLayer(output->renderLoop());
+    workspaceLayer->setDelegate(new SceneDelegate(m_scene, output));
+    workspaceLayer->setGeometry(output->geometry());
+    connect(output, &AbstractOutput::geometryChanged, this, [output, workspaceLayer]() {
+        workspaceLayer->setGeometry(output->geometry());
+    });
+
+    auto cursorLayer = new RenderLayer(output->renderLoop());
+    cursorLayer->setVisible(false);
+    cursorLayer->setDelegate(new CursorDelegate(output, m_cursorView));
+    cursorLayer->setParent(workspaceLayer);
+    cursorLayer->setSuperlayer(workspaceLayer);
+
+    auto updateCursorLayer = [output, workspaceLayer, cursorLayer]() {
+        const Cursor *cursor = Cursors::self()->currentCursor();
+        cursorLayer->setVisible(cursor->isOnOutput(output) && output->usesSoftwareCursor());
+        cursorLayer->setGeometry(workspaceLayer->mapFromGlobal(cursor->geometry()));
+        cursorLayer->addRepaintFull();
+    };
+    updateCursorLayer();
+    connect(output, &AbstractOutput::geometryChanged, cursorLayer, updateCursorLayer);
+    connect(Cursors::self(), &Cursors::currentCursorChanged, cursorLayer, updateCursorLayer);
+    connect(Cursors::self(), &Cursors::hiddenChanged, cursorLayer, updateCursorLayer);
+    connect(Cursors::self(), &Cursors::positionChanged, cursorLayer, updateCursorLayer);
+
+    addSuperLayer(workspaceLayer);
 }
 
-void Compositor::unregisterRenderLoop(RenderLoop *renderLoop)
+void Compositor::removeOutput(AbstractOutput *output)
 {
-    Q_ASSERT(m_renderLoops.contains(renderLoop));
-    m_renderLoops.remove(renderLoop);
-    disconnect(renderLoop, &RenderLoop::frameRequested, this, &Compositor::handleFrameRequested);
+    removeSuperLayer(m_superlayers[output->renderLoop()]);
 }
 
-void Compositor::handleOutputEnabled(AbstractOutput *output)
+void Compositor::addSuperLayer(RenderLayer *layer)
 {
-    registerRenderLoop(output->renderLoop(), output);
+    m_superlayers.insert(layer->loop(), layer);
+    connect(layer->loop(), &RenderLoop::frameRequested, this, &Compositor::handleFrameRequested);
 }
 
-void Compositor::handleOutputDisabled(AbstractOutput *output)
+void Compositor::removeSuperLayer(RenderLayer *layer)
 {
-    unregisterRenderLoop(output->renderLoop());
+    m_superlayers.remove(layer->loop());
+    disconnect(layer->loop(), &RenderLoop::frameRequested, this, &Compositor::handleFrameRequested);
+    delete layer;
 }
 
 void Compositor::scheduleRepaint()
 {
-    for (auto it = m_renderLoops.constBegin(); it != m_renderLoops.constEnd(); ++it) {
+    for (auto it = m_superlayers.constBegin(); it != m_superlayers.constEnd(); ++it) {
         it.key()->scheduleRepaint();
     }
 }
@@ -493,17 +526,19 @@ void Compositor::stop()
         }
     }
 
-    while (!m_renderLoops.isEmpty()) {
-        unregisterRenderLoop(m_renderLoops.firstKey());
+    const auto superlayers = m_superlayers;
+    for (auto it = superlayers.begin(); it != superlayers.end(); ++it) {
+        removeSuperLayer(*it);
     }
 
-    disconnect(kwinApp()->platform(), &Platform::outputEnabled,
-               this, &Compositor::handleOutputEnabled);
-    disconnect(kwinApp()->platform(), &Platform::outputDisabled,
-               this, &Compositor::handleOutputDisabled);
+    disconnect(kwinApp()->platform(), &Platform::outputEnabled, this, &Compositor::addOutput);
+    disconnect(kwinApp()->platform(), &Platform::outputDisabled, this, &Compositor::removeOutput);
 
     delete m_scene;
     m_scene = nullptr;
+
+    delete m_cursorView;
+    m_cursorView = nullptr;
 
     delete m_backend;
     m_backend = nullptr;
@@ -591,38 +626,6 @@ void Compositor::handleFrameRequested(RenderLoop *renderLoop)
     composite(renderLoop);
 }
 
-QList<Toplevel *> Compositor::windowsToRender() const
-{
-    // Create a list of all windows in the stacking order
-    QList<Toplevel *> windows = Workspace::self()->xStackingOrder();
-
-    // Move elevated windows to the top of the stacking order
-    const QList<EffectWindow *> elevatedList = static_cast<EffectsHandlerImpl *>(effects)->elevatedWindows();
-    for (EffectWindow *c : elevatedList) {
-        Toplevel *t = static_cast<EffectWindowImpl *>(c)->window();
-        windows.removeAll(t);
-        windows.append(t);
-    }
-
-    // Skip windows that are not yet ready for being painted and if screen is locked skip windows
-    // that are neither lockscreen nor inputmethod windows.
-    //
-    // TODO? This cannot be used so carelessly - needs protections against broken clients, the
-    // window should not get focus before it's displayed, handle unredirected windows properly and
-    // so on.
-    for (Toplevel *win : windows) {
-        if (!win->readyForPainting()) {
-            windows.removeAll(win);
-        }
-        if (waylandServer() && waylandServer()->isScreenLocked()) {
-            if(!win->isLockScreen() && !win->isInputMethod()) {
-                windows.removeAll(win);
-            }
-        }
-    }
-    return windows;
-}
-
 void Compositor::composite(RenderLoop *renderLoop)
 {
     if (m_backend->checkGraphicsReset()) {
@@ -633,39 +636,103 @@ void Compositor::composite(RenderLoop *renderLoop)
     }
 
     AbstractOutput *output = findOutput(renderLoop);
+    OutputLayer *outputLayer = output->layer();
     fTraceDuration("Paint (", output->name(), ")");
 
-    const auto windows = windowsToRender();
+    RenderLayer *superLayer = m_superlayers[renderLoop];
+    prePaintPass(superLayer);
+    superLayer->setOutputLayer(outputLayer);
 
-    const QRegion repaints = m_scene->repaints(output);
-    m_scene->resetRepaints(output);
+    SurfaceItem *scanoutCandidate = superLayer->delegate()->scanoutCandidate();
+    renderLoop->setFullscreenSurface(scanoutCandidate);
 
-    m_scene->paint(output, repaints, windows, renderLoop);
+    renderLoop->beginFrame();
+    bool directScanout = false;
+    if (scanoutCandidate) {
+        const auto sublayers = superLayer->sublayers();
+        const bool scanoutPossible = std::none_of(sublayers.begin(), sublayers.end(), [](RenderLayer *sublayer) {
+            return sublayer->isVisible();
+        });
+        if (scanoutPossible && !output->directScanoutInhibited()) {
+            directScanout = m_backend->scanout(output, scanoutCandidate);
+        }
+    }
 
+    if (directScanout) {
+        renderLoop->endFrame();
+    } else {
+        QRegion repaint = outputLayer->repaints();
+        outputLayer->resetRepaints();
+        preparePaintPass(superLayer, &repaint);
+
+        QRegion surfaceDamage;
+        QRegion bufferDamage;
+        const QRegion repair = m_backend->beginFrame(output);
+        paintPass(superLayer, repaint, repair, &surfaceDamage, &bufferDamage);
+        renderLoop->endFrame();
+        m_backend->endFrame(output, bufferDamage, surfaceDamage);
+    }
+
+    postPaintPass(superLayer);
+
+    // TODO: Put it inside the cursor layer once the cursor layer can be backed by a real output layer.
     if (waylandServer()) {
         const std::chrono::milliseconds frameTime =
-                std::chrono::duration_cast<std::chrono::milliseconds>(renderLoop->lastPresentationTimestamp());
+                std::chrono::duration_cast<std::chrono::milliseconds>(output->renderLoop()->lastPresentationTimestamp());
 
-        for (Toplevel *window : windows) {
-            if (!window->readyForPainting()) {
-                continue;
-            }
-            if (waylandServer()->isScreenLocked() &&
-                    !(window->isLockScreen() || window->isInputMethod())) {
-                continue;
-            }
-            if (!window->isOnOutput(output)) {
-                continue;
-            }
-            if (auto surface = window->surface()) {
-                surface->frameRendered(frameTime.count());
-            }
-        }
         if (!Cursors::self()->isCursorHidden()) {
             Cursor *cursor = Cursors::self()->currentCursor();
             if (cursor->geometry().intersects(output->geometry())) {
                 cursor->markAsRendered(frameTime);
             }
+        }
+    }
+}
+
+void Compositor::prePaintPass(RenderLayer *layer)
+{
+    layer->delegate()->prePaint();
+    const auto sublayers = layer->sublayers();
+    for (RenderLayer *sublayer : sublayers) {
+        prePaintPass(sublayer);
+    }
+}
+
+void Compositor::postPaintPass(RenderLayer *layer)
+{
+    layer->delegate()->postPaint();
+    const auto sublayers = layer->sublayers();
+    for (RenderLayer *sublayer : sublayers) {
+        postPaintPass(sublayer);
+    }
+}
+
+void Compositor::preparePaintPass(RenderLayer *layer, QRegion *repaint)
+{
+    // TODO: Cull opaque region.
+    *repaint += layer->mapToGlobal(layer->repaints());
+    layer->resetRepaints();
+    const auto sublayers = layer->sublayers();
+    for (RenderLayer *sublayer : sublayers) {
+        if (sublayer->isVisible()) {
+            preparePaintPass(sublayer, repaint);
+        }
+    }
+}
+
+void Compositor::paintPass(RenderLayer *layer, const QRegion &repaint, const QRegion &repair, QRegion *surfaceDamage, QRegion *bufferDamage)
+{
+    QRegion localSurfaceDamage;
+    QRegion localBufferDamage;
+
+    layer->delegate()->paint(repaint, repair, localSurfaceDamage, localBufferDamage);
+    *surfaceDamage += localSurfaceDamage;
+    *bufferDamage += localBufferDamage;
+
+    const auto sublayers = layer->sublayers();
+    for (RenderLayer *sublayer : sublayers) {
+        if (sublayer->isVisible()) {
+            paintPass(sublayer, repaint, repair, surfaceDamage, bufferDamage);
         }
     }
 }

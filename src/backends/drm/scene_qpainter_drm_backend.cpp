@@ -12,6 +12,7 @@
 #include "drm_gpu.h"
 #include "drm_buffer.h"
 #include "renderloop_p.h"
+#include "drm_qpainter_layer.h"
 
 #include <drm_fourcc.h>
 
@@ -22,33 +23,37 @@ DrmQPainterBackend::DrmQPainterBackend(DrmBackend *backend)
     : QPainterBackend()
     , m_backend(backend)
 {
-    connect(m_backend, &DrmBackend::outputDisabled, this, [this] (const auto output) {
-        m_swapchains.remove(output);
-    });
+    m_backend->setRenderBackend(this);
+}
+
+DrmQPainterBackend::~DrmQPainterBackend()
+{
+    m_backend->setRenderBackend(nullptr);
 }
 
 QImage *DrmQPainterBackend::bufferForScreen(AbstractOutput *output)
 {
-    return m_swapchains[output]->currentBuffer()->image();
+    const auto drmOutput = static_cast<DrmAbstractOutput*>(output);
+    return static_cast<DrmDumbBuffer*>(drmOutput->outputLayer()->currentBuffer().data())->image();
 }
 
 QRegion DrmQPainterBackend::beginFrame(AbstractOutput *output)
 {
     const auto drmOutput = static_cast<DrmAbstractOutput*>(output);
-    if (!m_swapchains[output] || m_swapchains[output]->size() != drmOutput->sourceSize()) {
-        m_swapchains[output] = QSharedPointer<DumbSwapchain>::create(drmOutput->gpu(), drmOutput->sourceSize(), DRM_FORMAT_XRGB8888);
-    }
-    QRegion needsRepainting;
-    m_swapchains[output]->acquireBuffer(output->geometry(), &needsRepainting);
-    return needsRepainting;
+    return drmOutput->outputLayer()->startRendering().value_or(QRegion());
 }
 
 void DrmQPainterBackend::endFrame(AbstractOutput *output, const QRegion &renderedRegion, const QRegion &damage)
 {
     Q_UNUSED(renderedRegion)
-    QSharedPointer<DrmDumbBuffer> back = m_swapchains[output]->currentBuffer();
-    m_swapchains[output]->releaseBuffer(back, damage);
-    static_cast<DrmAbstractOutput*>(output)->present(back, output->geometry());
+    const auto drmOutput = static_cast<DrmAbstractOutput*>(output);
+    drmOutput->outputLayer()->endRendering(damage);
+    static_cast<DrmAbstractOutput*>(output)->present();
+}
+
+QSharedPointer<DrmLayer> DrmQPainterBackend::createLayer(DrmDisplayDevice *displayDevice)
+{
+    return QSharedPointer<DrmQPainterLayer>::create(displayDevice);
 }
 
 }

@@ -11,7 +11,6 @@
 #include <config-kwin.h>
 
 #include <kwineffects_interface.h>
-#include <KAboutData>
 #include <KPluginFactory>
 
 K_PLUGIN_CLASS(KWin::GlideEffectConfig)
@@ -25,7 +24,6 @@ GlideEffectConfig::GlideEffectConfig(QWidget *parent, const QVariantList &args)
     ui.setupUi(this);
     GlideConfig::instance(KWIN_CONFIG);
     addConfig(GlideConfig::self(), this);
-    load();
 }
 
 GlideEffectConfig::~GlideEffectConfig()

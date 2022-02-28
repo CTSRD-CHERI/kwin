@@ -7,6 +7,7 @@
     SPDX-License-Identifier: GPL-2.0-or-later
 */
 #pragma once
+#include "drm_layer.h"
 
 #include <QSharedPointer>
 #include <QPointer>
@@ -27,41 +28,27 @@ namespace KWin
 class GbmSurface;
 class DumbSwapchain;
 class ShadowBuffer;
-class DrmAbstractOutput;
 class DrmBuffer;
 class DrmGpu;
 class SurfaceItem;
 class GLTexture;
+class EglGbmBackend;
 
-class EglGbmLayer {
+class EglGbmLayer : public DrmLayer
+{
 public:
-    EglGbmLayer(DrmGpu *renderGpu, DrmAbstractOutput *output);
+    EglGbmLayer(EglGbmBackend *eglBackend, DrmDisplayDevice *displayDevice);
     ~EglGbmLayer();
 
-    std::optional<QRegion> startRendering();
-    bool endRendering(const QRegion &damagedRegion);
-
-    /**
-     * attempts to directly scan out the current buffer of the surfaceItem
-     * @returns true if scanout was successful
-     *          false if rendering is required
-     */
-    bool scanout(SurfaceItem *surfaceItem);
-
-    /**
-     * @returns a buffer for atomic test commits
-     * If no fitting buffer is available, one is created
-     */
-    QSharedPointer<DrmBuffer> testBuffer();
-
-    /**
-     * only temporarily here, should be migrated out!
-     */
+    std::optional<QRegion> startRendering() override;
+    bool endRendering(const QRegion &damagedRegion) override;
+    bool scanout(SurfaceItem *surfaceItem) override;
+    QSharedPointer<DrmBuffer> testBuffer() override;
+    QSharedPointer<DrmBuffer> currentBuffer() const override;
+    bool hasDirectScanoutBuffer() const override;
+    QRegion currentDamage() const override;
     QSharedPointer<GLTexture> texture() const;
 
-    QSharedPointer<DrmBuffer> currentBuffer() const;
-
-    DrmAbstractOutput *output() const;
     int bufferAge() const;
     EGLSurface eglSurface() const;
 
@@ -72,6 +59,7 @@ private:
     bool doesSwapchainFit(DumbSwapchain *swapchain) const;
     void sendDmabufFeedback(KWaylandServer::LinuxDmaBufV1ClientBuffer *failedBuffer);
     bool renderTestBuffer();
+    void destroyResources();
 
     QSharedPointer<DrmBuffer> importBuffer();
     QSharedPointer<DrmBuffer> importDmabuf();
@@ -91,7 +79,9 @@ private:
         bool attemptedThisFrame = false;
     } m_scanoutCandidate;
 
+    QSharedPointer<DrmBuffer> m_scanoutBuffer;
     QSharedPointer<DrmBuffer> m_currentBuffer;
+    QRegion m_currentDamage;
     QSharedPointer<GbmSurface> m_gbmSurface;
     QSharedPointer<GbmSurface> m_oldGbmSurface;
     QSharedPointer<ShadowBuffer> m_shadowBuffer;
@@ -99,8 +89,7 @@ private:
     QSharedPointer<DumbSwapchain> m_importSwapchain;
     QSharedPointer<DumbSwapchain> m_oldImportSwapchain;
 
-    DrmAbstractOutput *const m_output;
-    DrmGpu *const m_renderGpu;
+    EglGbmBackend *const m_eglBackend;
 };
 
 }

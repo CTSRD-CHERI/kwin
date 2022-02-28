@@ -16,7 +16,6 @@
 #include <KLocalizedString>
 #include <KActionCollection>
 #include <KShortcutsEditor>
-#include <KAboutData>
 #include <KPluginFactory>
 
 #include <QVBoxLayout>
@@ -51,8 +50,6 @@ InvertEffectConfig::InvertEffectConfig(QWidget* parent, const QVariantList& args
                                            KShortcutsEditor::GlobalAction, KShortcutsEditor::LetterShortcutsDisallowed);
     connect(mShortcutEditor, &KShortcutsEditor::keyChange, this, &InvertEffectConfig::markAsChanged);
     layout->addWidget(mShortcutEditor);
-
-    load();
 }
 
 InvertEffectConfig::~InvertEffectConfig()
