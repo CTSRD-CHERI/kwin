@@ -41,10 +41,10 @@
 #include <QDBusInterface>
 
 // system
-#if HAVE_SYS_PRCTL_H
+#if __has_include(<sys/prctl.h>)
 #include <sys/prctl.h>
 #endif
-#if HAVE_SYS_PROCCTL_H
+#if __has_include(<sys/procctl.h>)
 #include <sys/procctl.h>
 #endif
 
