@@ -13,8 +13,6 @@
 #include <QVector>
 #include <KWaylandServer/drmleasedevice_v1_interface.h>
 
-#include "drm_display_device.h"
-
 namespace KWin
 {
 
@@ -26,7 +24,7 @@ class DrmPipeline;
  * that is not used directly by the compositor but is instead leased out to
  * applications (usually VR compositors) that drive the output themselves
  */
-class DrmLeaseOutput : public KWaylandServer::DrmLeaseConnectorV1Interface, public DrmDisplayDevice
+class DrmLeaseOutput : public KWaylandServer::DrmLeaseConnectorV1Interface
 {
     Q_OBJECT
 public:
@@ -39,19 +37,6 @@ public:
 
     KWaylandServer::DrmLeaseV1Interface *lease() const;
     DrmPipeline *pipeline() const;
-
-    bool present() override;
-    DrmPlane::Transformations softwareTransforms() const override;
-    QSize bufferSize() const override;
-    QSize sourceSize() const override;
-    bool isFormatSupported(uint32_t drmFormat) const override;
-    QVector<uint64_t> supportedModifiers(uint32_t drmFormat) const override;
-    int maxBpc() const override;
-    QRect renderGeometry() const override;
-    DrmLayer *outputLayer() const override;
-    bool testScanout() override;
-    void frameFailed() const override;
-    void pageFlipped(std::chrono::nanoseconds timestamp) const override;
 
 private:
     DrmPipeline *m_pipeline;

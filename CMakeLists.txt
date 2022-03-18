@@ -23,7 +23,6 @@ find_package(Qt5 ${QT_MIN_VERSION} CONFIG REQUIRED COMPONENTS
     Core
     DBus
     Quick
-    QuickWidgets
     UiTools
     Widgets
     X11Extras
@@ -78,7 +77,6 @@ find_package(KF5 ${KF5_MIN_VERSION} REQUIRED COMPONENTS
     GlobalAccel
     I18n
     IdleTime
-    Notifications
     Package
     Plasma
     WidgetsAddons
@@ -340,6 +338,7 @@ include(CMakeDependentOption)
 
 option(KWIN_BUILD_DECORATIONS "Enable building of KWin decorations." ON)
 option(KWIN_BUILD_KCMS "Enable building of KWin configuration modules." ON)
+option(KWIN_BUILD_NOTIFICATIONS "Enable building of KWin with knotifications support" ON)
 option(KWIN_BUILD_SCREENLOCKER "Enable building of KWin lockscreen functionality" ON)
 option(KWIN_BUILD_TABBOX "Enable building of KWin Tabbox functionality" ON)
 cmake_dependent_option(KWIN_BUILD_ACTIVITIES "Enable building of KWin with kactivities support" ON "KF5Activities_FOUND" OFF)
@@ -362,27 +361,6 @@ include(CheckIncludeFile)
 include(CheckIncludeFiles)
 include(CheckSymbolExists)
 
-check_symbol_exists(PR_SET_DUMPABLE "sys/prctl.h" HAVE_PR_SET_DUMPABLE)
-check_symbol_exists(PR_SET_PDEATHSIG "sys/prctl.h" HAVE_PR_SET_PDEATHSIG)
-check_symbol_exists(PROC_TRACE_CTL "sys/procctl.h" HAVE_PROC_TRACE_CTL)
-if (HAVE_PR_SET_DUMPABLE OR HAVE_PROC_TRACE_CTL)
-    set(CAN_DISABLE_PTRACE TRUE)
-endif()
-add_feature_info("prctl/procctl tracing control"
-                 CAN_DISABLE_PTRACE
-                 "Required for disallowing ptrace on kwin_wayland process")
-
-check_include_file("sys/sysmacros.h" HAVE_SYS_SYSMACROS_H)
-
-check_include_file("linux/vt.h" HAVE_LINUX_VT_H)
-add_feature_info("linux/vt.h"
-                 HAVE_LINUX_VT_H
-                 "Required for virtual terminal support under wayland")
-check_include_file("linux/fb.h"    HAVE_LINUX_FB_H)
-add_feature_info("linux/fb.h"
-                 HAVE_LINUX_FB_H
-                 "Required for the fbdev backend")
-
 check_symbol_exists(SCHED_RESET_ON_FORK "sched.h" HAVE_SCHED_RESET_ON_FORK)
 add_feature_info("SCHED_RESET_ON_FORK"
                  HAVE_SCHED_RESET_ON_FORK
@@ -391,6 +369,10 @@ add_feature_info("SCHED_RESET_ON_FORK"
 
 pkg_check_modules(PipeWire IMPORTED_TARGET libpipewire-0.3>=0.3.29)
 add_feature_info(PipeWire PipeWire_FOUND "Required for Wayland screencasting")
+
+if (KWIN_BUILD_NOTIFICATIONS)
+    find_package(KF5 ${KF5_MIN_VERSION} REQUIRED COMPONENTS Notifications)
+endif()
 
 if (KWIN_BUILD_SCREENLOCKER)
     find_package(KScreenLocker CONFIG REQUIRED)

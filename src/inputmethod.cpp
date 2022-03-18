@@ -98,16 +98,13 @@ void InputMethod::init()
         connect(textInputV2, &TextInputV2Interface::surroundingTextChanged, this, &InputMethod::surroundingTextChanged);
         connect(textInputV2, &TextInputV2Interface::contentTypeChanged, this, &InputMethod::contentTypeChanged);
         connect(textInputV2, &TextInputV2Interface::stateUpdated, this, &InputMethod::textInputInterfaceV2StateUpdated);
+        connect(textInputV2, &TextInputV2Interface::enabledChanged, this, &InputMethod::textInputInterfaceV2EnabledChanged);
 
         TextInputV3Interface *textInputV3 = waylandServer()->seat()->textInputV3();
         connect(textInputV3, &TextInputV3Interface::surroundingTextChanged, this, &InputMethod::surroundingTextChanged);
         connect(textInputV3, &TextInputV3Interface::contentTypeChanged, this, &InputMethod::contentTypeChanged);
         connect(textInputV3, &TextInputV3Interface::stateCommitted, this, &InputMethod::stateCommitted);
-
-        if (m_enabled) {
-            connect(textInputV2, &TextInputV2Interface::enabledChanged, this, &InputMethod::textInputInterfaceV2EnabledChanged);
-            connect(textInputV3, &TextInputV3Interface::enabledChanged, this, &InputMethod::textInputInterfaceV3EnabledChanged);
-        }
+        connect(textInputV3, &TextInputV3Interface::enabledChanged, this, &InputMethod::textInputInterfaceV3EnabledChanged);
 
         connect(input()->keyboard()->xkb(), &Xkb::modifierStateChanged, this, [this]() {
             m_hasPendingModifiers = true;
@@ -129,11 +126,6 @@ void InputMethod::hide()
         m_inputClient->hideClient();
         updateInputPanelState();
     }
-    auto inputContext = waylandServer()->inputMethod()->context();
-    if (!inputContext) {
-        return;
-    }
-    inputContext->sendReset();
 }
 
 bool InputMethod::shouldShowOnActive() const
@@ -167,6 +159,11 @@ void InputMethod::setActive(bool active)
     }
 }
 
+InputPanelV1Client *InputMethod::panel() const
+{
+    return m_inputClient;
+}
+
 void InputMethod::setPanel(InputPanelV1Client *client)
 {
     Q_ASSERT(client->isInputMethod());
@@ -190,6 +187,7 @@ void InputMethod::setPanel(InputPanelV1Client *client)
     connect(m_inputClient, &AbstractClient::windowClosed, this, &InputMethod::visibleChanged);
     Q_EMIT visibleChanged();
     updateInputPanelState();
+    Q_EMIT panelChanged();
 }
 
 void InputMethod::setTrackedClient(AbstractClient* trackedClient)
@@ -691,6 +689,10 @@ void InputMethod::startInputMethod()
     QProcessEnvironment environment = kwinApp()->processStartupEnvironment();
     environment.insert(QStringLiteral("WAYLAND_SOCKET"), QByteArray::number(socket));
     environment.insert(QStringLiteral("QT_QPA_PLATFORM"), QStringLiteral("wayland"));
+    // When we use Maliit as virtual keyboard, we want KWin to handle the animation
+    // since that works a lot better. So we need to tell Maliit to not do client side
+    // animation.
+    environment.insert(QStringLiteral("MALIIT_ENABLE_ANIMATIONS"), "0");
 
     m_inputMethodProcess = new QProcess(this);
     m_inputMethodProcess->setProcessChannelMode(QProcess::ForwardedErrorChannel);

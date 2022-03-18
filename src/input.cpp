@@ -946,6 +946,28 @@ public:
         input()->shortcuts()->processSwipeEnd();
         return false;
     }
+    bool pinchGestureBegin(int fingerCount, quint32 time) override {
+        Q_UNUSED(time);
+        if (fingerCount >= 3) {
+            input()->shortcuts()->processPinchStart(fingerCount);
+        }
+        return false;
+    }
+    bool pinchGestureUpdate(qreal scale, qreal angleDelta, const QSizeF &delta, quint32 time) override {
+        Q_UNUSED(time);
+        input()->shortcuts()->processPinchUpdate(scale, angleDelta, delta);
+        return false;
+    }
+    bool pinchGestureEnd(quint32 time) override {
+        Q_UNUSED(time);
+        input()->shortcuts()->processPinchEnd();
+        return false;
+    }
+    bool pinchGestureCancelled(quint32 time) override {
+        Q_UNUSED(time);
+        input()->shortcuts()->processPinchCancel();
+        return false;
+    }
 
 private:
     QTimer* m_powerDown = nullptr;
@@ -1006,7 +1028,7 @@ std::pair<bool, bool> performClientWheelAction(QWheelEvent *event, AbstractClien
         }
     }
     if (wasAction) {
-        return std::make_pair(wasAction, !c->performMouseCommand(command, event->globalPos()));
+        return std::make_pair(wasAction, !c->performMouseCommand(command, event->globalPosition().toPoint()));
     }
     return std::make_pair(wasAction, false);
 }
@@ -1032,15 +1054,15 @@ class InternalWindowEventFilter : public InputEventFilter {
             return false;
         }
         QWindow *internal = static_cast<InternalClient *>(input()->pointer()->focus())->internalWindow();
-        const QPointF localPos = event->globalPosF() - internal->position();
+        const QPointF localPos = event->globalPosition() - internal->position();
         const Qt::Orientation orientation = (event->angleDelta().x() != 0) ? Qt::Horizontal : Qt::Vertical;
         const int delta = event->angleDelta().x() != 0 ? event->angleDelta().x() : event->angleDelta().y();
-        QWheelEvent wheelEvent(localPos, event->globalPosF(), QPoint(),
+        QWheelEvent wheelEvent(localPos, event->globalPosition(), QPoint(),
                                event->angleDelta() * -1,
-                               delta * -1,
-                               orientation,
                                event->buttons(),
-                               event->modifiers());
+                               event->modifiers(),
+                               Qt::NoScrollPhase,
+                               false);
         QCoreApplication::sendEvent(internal, &wheelEvent);
         return wheelEvent.isAccepted();
     }
@@ -1228,15 +1250,15 @@ public:
                 return actionResult.second;
             }
         }
-        const QPointF localPos = event->globalPosF() - decoration->client()->pos();
+        const QPointF localPos = event->globalPosition() - decoration->client()->pos();
         const Qt::Orientation orientation = (event->angleDelta().x() != 0) ? Qt::Horizontal : Qt::Vertical;
         const int delta = event->angleDelta().x() != 0 ? event->angleDelta().x() : event->angleDelta().y();
-        QWheelEvent e(localPos, event->globalPosF(), QPoint(),
+        QWheelEvent e(localPos, event->globalPosition(), QPoint(),
                         event->angleDelta(),
-                        delta,
-                        orientation,
                         event->buttons(),
-                        event->modifiers());
+                        event->modifiers(),
+                        Qt::NoScrollPhase,
+                        false);
         e.setAccepted(false);
         QCoreApplication::sendEvent(decoration, &e);
         if (e.isAccepted()) {
@@ -1244,7 +1266,7 @@ public:
         }
         if ((orientation == Qt::Vertical) && decoration->client()->titlebarPositionUnderMouse()) {
             decoration->client()->performMouseCommand(options->operationTitlebarMouseWheel(delta * -1),
-                                                        event->globalPosF().toPoint());
+                                                        event->globalPosition().toPoint());
         }
         return true;
     }
@@ -2240,6 +2262,22 @@ public:
         }
         return true;
     }
+    bool keyEvent(QKeyEvent *event) override
+    {
+        if (event->key() != Qt::Key_Escape) {
+            return false;
+        }
+
+        auto seat = waylandServer()->seat();
+        if (!seat->isDrag()) {
+            return false;
+        }
+        seat->setTimestamp(event->timestamp());
+
+        seat->cancelDrag();
+
+        return true;
+    }
 private:
     void raiseDragTarget()
     {
@@ -2549,7 +2587,7 @@ void InputRedirection::updateLeds(LEDs leds)
     }
 }
 
-void InputRedirection::handleInputDeviceAdded(InputDevice *device)
+void InputRedirection::addInputDevice(InputDevice *device)
 {
     connect(device, &InputDevice::keyChanged, m_keyboard, &KeyboardInputRedirection::processKey);
 
@@ -2619,7 +2657,7 @@ void InputRedirection::handleInputDeviceAdded(InputDevice *device)
     updateAvailableInputDevices();
 }
 
-void InputRedirection::handleInputDeviceRemoved(InputDevice *device)
+void InputRedirection::removeInputDevice(InputDevice *device)
 {
     m_inputDevices.removeOne(device);
     Q_EMIT deviceRemoved(device);
@@ -2715,8 +2753,8 @@ void InputRedirection::addInputBackend(InputBackend *inputBackend)
     Q_ASSERT(!m_inputBackends.contains(inputBackend));
     m_inputBackends.append(inputBackend);
 
-    connect(inputBackend, &InputBackend::deviceAdded, this, &InputRedirection::handleInputDeviceAdded);
-    connect(inputBackend, &InputBackend::deviceRemoved, this, &InputRedirection::handleInputDeviceRemoved);
+    connect(inputBackend, &InputBackend::deviceAdded, this, &InputRedirection::addInputDevice);
+    connect(inputBackend, &InputBackend::deviceRemoved, this, &InputRedirection::removeInputDevice);
 
     inputBackend->setConfig(InputConfig::self()->inputConfig());
     inputBackend->initialize();
@@ -2877,14 +2915,24 @@ void InputRedirection::registerAxisShortcut(Qt::KeyboardModifiers modifiers, Poi
     m_shortcuts->registerAxisShortcut(action, modifiers, axis);
 }
 
-void InputRedirection::registerRealtimeTouchpadSwipeShortcut(SwipeDirection direction, QAction *action, std::function<void(qreal)> cb)
+void InputRedirection::registerRealtimeTouchpadSwipeShortcut(SwipeDirection direction, uint fingerCount, QAction *action, std::function<void(qreal)> cb)
 {
-    m_shortcuts->registerRealtimeTouchpadSwipe(action, cb, direction);
+    m_shortcuts->registerRealtimeTouchpadSwipe(action, cb, direction, fingerCount);
 }
 
-void InputRedirection::registerTouchpadSwipeShortcut(SwipeDirection direction, QAction *action)
+void InputRedirection::registerTouchpadSwipeShortcut(SwipeDirection direction, uint fingerCount, QAction *action)
 {
-    m_shortcuts->registerTouchpadSwipe(action, direction);
+    m_shortcuts->registerTouchpadSwipe(action, direction, fingerCount);
+}
+
+void InputRedirection::registerTouchpadPinchShortcut(PinchDirection direction, uint fingerCount, QAction *action)
+{
+    m_shortcuts->registerTouchpadPinch(action, direction, fingerCount);
+}
+
+void InputRedirection::registerRealtimeTouchpadPinchShortcut(PinchDirection direction, uint fingerCount, QAction *onUp, std::function<void(qreal)> progressCallback)
+{
+    m_shortcuts->registerRealtimeTouchpadPinch(onUp, progressCallback, direction, fingerCount);
 }
 
 void InputRedirection::registerGlobalAccel(KGlobalAccelInterface *interface)

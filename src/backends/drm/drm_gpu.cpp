@@ -309,9 +309,9 @@ bool DrmGpu::updateOutputs()
     if (testPendingConfiguration()) {
         for (const auto &pipeline : qAsConst(m_pipelines)) {
             pipeline->applyPendingChanges();
-            if (const auto drmOutput = dynamic_cast<DrmAbstractOutput*>(pipeline->displayDevice()); drmOutput && !pipeline->pending.crtc) {
+            if (pipeline->output() && !pipeline->pending.crtc) {
                 pipeline->pending.enabled = false;
-                drmOutput->setEnabled(false);
+                pipeline->output()->setEnabled(false);
             }
         }
     } else {
@@ -422,7 +422,7 @@ bool DrmGpu::testPipelines()
     QVector<DrmPipeline*> inactivePipelines;
     for (const auto &pipeline : qAsConst(m_pipelines)) {
         if (!pipeline->pending.layer) {
-            pipeline->pending.layer = m_platform->renderBackend()->createLayer(pipeline->displayDevice());
+            pipeline->pending.layer = m_platform->renderBackend()->createDrmPipelineLayer(pipeline);
         }
         if (!pipeline->pending.active) {
             pipeline->pending.active = true;
@@ -733,12 +733,14 @@ bool DrmGpu::maybeModeset()
         // commit only once all pipelines are ready for presentation
         return true;
     }
+    // make sure there's no pending pageflips
+    waitIdle();
     const bool ok = DrmPipeline::commitPipelines(pipelines, DrmPipeline::CommitMode::CommitModeset, unusedObjects());
     for (DrmPipeline *pipeline : qAsConst(pipelines)) {
         if (pipeline->modesetPresentPending()) {
             pipeline->resetModesetPresentPending();
             if (!ok) {
-                pipeline->displayDevice()->frameFailed();
+                pipeline->output()->frameFailed();
             }
         }
     }
@@ -770,7 +772,7 @@ QSize DrmGpu::cursorSize() const
 void DrmGpu::recreateSurfaces()
 {
     for (const auto &pipeline : qAsConst(m_pipelines)) {
-        pipeline->pending.layer = m_platform->renderBackend()->createLayer(pipeline->displayDevice());
+        pipeline->pending.layer = m_platform->renderBackend()->createDrmPipelineLayer(pipeline);
     }
     for (const auto &output : qAsConst(m_outputs)) {
         if (const auto virtualOutput = qobject_cast<DrmVirtualOutput*>(output)) {

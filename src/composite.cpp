@@ -6,6 +6,7 @@
 
     SPDX-License-Identifier: GPL-2.0-or-later
 */
+#include <config-kwin.h>
 #include "composite.h"
 #include "abstract_output.h"
 #include "cursorview_opengl.h"
@@ -45,7 +46,9 @@
 
 #include <KGlobalAccel>
 #include <KLocalizedString>
+#if KWIN_BUILD_NOTIFICATIONS
 #include <KNotification>
+#endif
 #include <KSelectionOwner>
 
 #include <QDateTime>
@@ -362,7 +365,7 @@ void Compositor::startupWithWorkspace()
         auto workspaceLayer = new RenderLayer(outputs.constFirst()->renderLoop());
         workspaceLayer->setDelegate(new SceneDelegate(m_scene));
         workspaceLayer->setGeometry(workspace()->geometry());
-        connect(workspace(), &Workspace::geometryChanged, this, [workspaceLayer]() {
+        connect(workspace(), &Workspace::geometryChanged, workspaceLayer, [workspaceLayer]() {
             workspaceLayer->setGeometry(workspace()->geometry());
         });
         addSuperLayer(workspaceLayer);
@@ -421,7 +424,7 @@ void Compositor::addOutput(AbstractOutput *output)
     auto workspaceLayer = new RenderLayer(output->renderLoop());
     workspaceLayer->setDelegate(new SceneDelegate(m_scene, output));
     workspaceLayer->setGeometry(output->geometry());
-    connect(output, &AbstractOutput::geometryChanged, this, [output, workspaceLayer]() {
+    connect(output, &AbstractOutput::geometryChanged, workspaceLayer, [output, workspaceLayer]() {
         workspaceLayer->setGeometry(output->geometry());
     });
 
@@ -630,7 +633,9 @@ void Compositor::composite(RenderLoop *renderLoop)
 {
     if (m_backend->checkGraphicsReset()) {
         qCDebug(KWIN_CORE) << "Graphics reset occurred";
+#if KWIN_BUILD_NOTIFICATIONS
         KNotification::event(QStringLiteral("graphicsreset"), i18n("Desktop effects were restarted due to a graphics reset"));
+#endif
         reinitialize();
         return;
     }
@@ -837,7 +842,9 @@ void X11Compositor::suspend(X11Compositor::SuspendReason reason)
                     i18n("Desktop effects have been suspended by another application.<br/>"
                          "You can resume using the '%1' shortcut.",
                          shortcuts.first().toString(QKeySequence::NativeText));
+#if KWIN_BUILD_NOTIFICATIONS
             KNotification::event(QStringLiteral("compositingsuspendeddbus"), message);
+#endif
         }
     }
     stop();

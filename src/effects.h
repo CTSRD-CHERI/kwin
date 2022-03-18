@@ -113,8 +113,10 @@ public:
     void registerGlobalShortcut(const QKeySequence &shortcut, QAction *action) override;
     void registerPointerShortcut(Qt::KeyboardModifiers modifiers, Qt::MouseButton pointerButtons, QAction *action) override;
     void registerAxisShortcut(Qt::KeyboardModifiers modifiers, PointerAxisDirection axis, QAction *action) override;
-    void registerRealtimeTouchpadSwipeShortcut(SwipeDirection dir, QAction* onUp, std::function<void(qreal)> progressCallback) override;
-    void registerTouchpadSwipeShortcut(SwipeDirection direction, QAction *action) override;
+    void registerRealtimeTouchpadSwipeShortcut(SwipeDirection dir, uint fingerCount, QAction* onUp, std::function<void(qreal)> progressCallback) override;
+    void registerTouchpadSwipeShortcut(SwipeDirection direction, uint fingerCount, QAction *action) override;
+    void registerRealtimeTouchpadPinchShortcut(PinchDirection dir, uint fingerCount, QAction* onUp, std::function<void(qreal)> progressCallback) override;
+    void registerTouchpadPinchShortcut(PinchDirection direction, uint fingerCount, QAction *action) override;
     void* getProxy(QString name) override;
     void startMousePolling() override;
     void stopMousePolling() override;
@@ -171,8 +173,6 @@ public:
     bool hasDecorationShadows() const override;
 
     bool decorationsHaveAlpha() const override;
-
-    bool decorationSupportsBlurBehind() const override;
 
     EffectFrame* effectFrame(EffectFrameStyle style, bool staticSize, const QPoint& position, Qt::Alignment alignment) const override;
 
@@ -276,6 +276,9 @@ public:
     bool isCursorHidden() const override;
     QRect renderTargetRect() const override;
     qreal renderTargetScale() const override;
+
+    KWin::EffectWindow *inputPanel() const override;
+    bool isInputPanelOverlay() const override;
 
 public Q_SLOTS:
     void slotCurrentTabAboutToChange(EffectWindow* from, EffectWindow* to);

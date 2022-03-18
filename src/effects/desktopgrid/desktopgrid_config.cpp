@@ -53,8 +53,8 @@ DesktopGridEffectConfig::DesktopGridEffectConfig(QWidget* parent, const QVariant
     QAction* a = m_actionCollection->addAction(QStringLiteral("ShowDesktopGrid"));
     a->setText(i18n("Show Desktop Grid"));
     a->setProperty("isConfigurationAction", true);
-    KGlobalAccel::self()->setDefaultShortcut(a, QList<QKeySequence>() << Qt::CTRL + Qt::Key_F8);
-    KGlobalAccel::self()->setShortcut(a, QList<QKeySequence>() << Qt::CTRL + Qt::Key_F8);
+    KGlobalAccel::self()->setDefaultShortcut(a, QList<QKeySequence>() << (Qt::CTRL | Qt::Key_F8));
+    KGlobalAccel::self()->setShortcut(a, QList<QKeySequence>() << (Qt::CTRL | Qt::Key_F8));
 
     m_ui->shortcutEditor->addCollection(m_actionCollection);
 
@@ -77,7 +77,7 @@ DesktopGridEffectConfig::DesktopGridEffectConfig(QWidget* parent, const QVariant
     addConfig(DesktopGridConfig::self(), m_ui);
     connect(m_ui->kcfg_LayoutMode, qOverload<int>(&QComboBox::currentIndexChanged), this, &DesktopGridEffectConfig::layoutSelectionChanged);
     connect(m_ui->desktopNameAlignmentCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, &DesktopGridEffectConfig::markAsChanged);
-    connect(m_ui->clickBehaviorButtonGroup, qOverload<int>(&QButtonGroup::buttonClicked), this, &DesktopGridEffectConfig::markAsChanged);
+    connect(m_ui->clickBehaviorButtonGroup, &QButtonGroup::idClicked, this, &DesktopGridEffectConfig::markAsChanged);
     connect(m_ui->shortcutEditor, &KShortcutsEditor::keyChange, this, &DesktopGridEffectConfig::markAsChanged);
 }
 

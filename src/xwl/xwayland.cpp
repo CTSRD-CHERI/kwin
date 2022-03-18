@@ -8,6 +8,7 @@
 
     SPDX-License-Identifier: GPL-2.0-or-later
 */
+#include <config-kwin.h>
 #include "xwayland.h"
 #include "cursor.h"
 #include "databridge.h"
@@ -27,7 +28,9 @@
 #include "xwaylandsocket.h"
 
 #include <KLocalizedString>
+#if KWIN_BUILD_NOTIFICATIONS
 #include <KNotification>
+#endif
 #include <KSelectionOwner>
 
 #include <QAbstractEventDispatcher>
@@ -39,14 +42,10 @@
 #include <QTimer>
 #include <QtConcurrentRun>
 
-// system
-#if __has_include(<unistd.h>)
-#include <unistd.h>
-#endif
-
-#include <sys/socket.h>
 #include <cerrno>
 #include <cstring>
+#include <sys/socket.h>
+#include <unistd.h>
 
 namespace KWin
 {
@@ -297,7 +296,11 @@ void Xwayland::dispatchEvents()
     }
 
     while (xcb_generic_event_t *event = xcb_poll_for_event(connection)) {
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
         long result = 0;
+#else
+        qintptr result = 0;
+#endif
         QAbstractEventDispatcher *dispatcher = QCoreApplication::eventDispatcher();
         dispatcher->filterNativeEvent(QByteArrayLiteral("xcb_generic_event_t"), event, &result);
         free(event);
@@ -344,7 +347,9 @@ void Xwayland::handleXwaylandFinished(int exitCode, QProcess::ExitStatus exitSta
 
 void Xwayland::handleXwaylandCrashed()
 {
+#if KWIN_BUILD_NOTIFICATIONS
     KNotification::event(QStringLiteral("xwaylandcrash"), i18n("Xwayland has crashed"));
+#endif
     m_resetCrashCountTimer->stop();
 
     switch (options->xwaylandCrashPolicy()) {

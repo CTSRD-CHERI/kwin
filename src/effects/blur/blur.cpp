@@ -18,6 +18,7 @@
 #include <QTimer>
 #include <QWindow>
 #include <cmath> // for ceil()
+#include <cstdlib>
 
 #include <KWaylandServer/surface_interface.h>
 #include <KWaylandServer/shadow_interface.h>
@@ -415,21 +416,20 @@ bool BlurEffect::supported()
     return supported;
 }
 
+bool BlurEffect::decorationSupportsBlurBehind(const EffectWindow *w) const
+{
+    return w->decoration() && !w->decoration()->blurRegion().isNull();
+}
+
 QRegion BlurEffect::decorationBlurRegion(const EffectWindow *w) const
 {
-    if (!w || !effects->decorationSupportsBlurBehind() || !w->decoration()) {
+    if (!decorationSupportsBlurBehind(w)) {
         return QRegion();
     }
 
     QRegion decorationRegion = QRegion(w->decoration()->rect()) - w->decorationInnerRect();
-
-    if (!w->decoration()->blurRegion().isNull()) {
-        //! we return only blurred regions that belong to decoration region
-        return decorationRegion.intersected(w->decoration()->blurRegion());
-    }
-
-    //! when decoration requests blur but does not provide any blur region we can assume it prefers entire decoration region
-    return decorationRegion;
+    //! we return only blurred regions that belong to decoration region
+    return decorationRegion.intersected(w->decoration()->blurRegion());
 }
 
 QRect BlurEffect::expand(const QRect &rect) const
@@ -456,7 +456,7 @@ QRegion BlurEffect::blurRegion(const EffectWindow *w) const
     if (value.isValid()) {
         const QRegion appRegion = qvariant_cast<QRegion>(value);
         if (!appRegion.isEmpty()) {
-            if (w->decorationHasAlpha() && effects->decorationSupportsBlurBehind()) {
+            if (w->decorationHasAlpha() && decorationSupportsBlurBehind(w)) {
                 region = decorationBlurRegion(w);
             }
             region |= appRegion.translated(w->contentsRect().topLeft()) &
@@ -466,7 +466,7 @@ QRegion BlurEffect::blurRegion(const EffectWindow *w) const
             // for the whole window.
             region = w->rect();
         }
-    } else if (w->decorationHasAlpha() && effects->decorationSupportsBlurBehind()) {
+    } else if (w->decorationHasAlpha() && decorationSupportsBlurBehind(w)) {
         // If the client hasn't specified a blur region, we'll only enable
         // the effect behind the decoration.
         region = decorationBlurRegion(w);
@@ -542,10 +542,10 @@ void BlurEffect::prePaintWindow(EffectWindow* w, WindowPrePaintData& data, std::
         return;
     }
 
+    const QRegion oldClip = data.clip;
     if (data.clip.intersects(m_currentBlur)) {
         // to blur an area partially we have to shrink the opaque area of a window
         QRegion newClip;
-        const QRegion oldClip = data.clip;
         for (const QRect &rect : data.clip) {
             newClip |= rect.adjusted(m_expandSize, m_expandSize, -m_expandSize, -m_expandSize);
         }
@@ -553,11 +553,12 @@ void BlurEffect::prePaintWindow(EffectWindow* w, WindowPrePaintData& data, std::
 
         // we don't have to blur a region we don't see
         m_currentBlur -= newClip;
-        // if we have to paint a non-opaque part of this window that intersects with the
-        // currently blurred region we have to redraw the whole region
-        if ((data.paint - oldClip).intersects(m_currentBlur)) {
-            data.paint |= m_currentBlur;
-        }
+    }
+
+    // if we have to paint a non-opaque part of this window that intersects with the
+    // currently blurred region we have to redraw the whole region
+    if ((data.paint - oldClip).intersects(m_currentBlur)) {
+        data.paint |= m_currentBlur;
     }
 
     // in case this window has regions to be blurred
@@ -599,8 +600,7 @@ bool BlurEffect::shouldBlur(const EffectWindow *w, int mask, const WindowPaintDa
     if ((scaled || (translated || (mask & PAINT_WINDOW_TRANSFORMED))) && !w->data(WindowForceBlurRole).toBool())
         return false;
 
-    bool blurBehindDecos = effects->decorationsHaveAlpha() &&
-                effects->decorationSupportsBlurBehind();
+    bool blurBehindDecos = effects->decorationsHaveAlpha() && decorationSupportsBlurBehind(w);
 
     if (!w->hasAlpha() && w->opacity() >= 1.0 && !(blurBehindDecos && w->hasDecoration()))
         return false;
@@ -667,7 +667,7 @@ void BlurEffect::generateNoiseTexture()
     }
 
     // Init randomness based on time
-    qsrand((uint)QTime::currentTime().msec());
+    std::srand((uint)QTime::currentTime().msec());
 
     QImage noiseImage(QSize(256, 256), QImage::Format_Grayscale8);
 
@@ -675,7 +675,7 @@ void BlurEffect::generateNoiseTexture()
         uint8_t *noiseImageLine = (uint8_t *) noiseImage.scanLine(y);
 
         for (int x = 0; x < noiseImage.width(); x++) {
-            noiseImageLine[x] = qrand() % m_noiseStrength;
+            noiseImageLine[x] = std::rand() % m_noiseStrength;
         }
     }
 

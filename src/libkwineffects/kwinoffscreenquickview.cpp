@@ -237,7 +237,7 @@ void OffscreenQuickView::update()
         return;
     }
 
-    bool usingGl = d->m_glcontext;
+    bool usingGl = !d->m_glcontext.isNull();
 
     if (usingGl) {
         if (!d->m_glcontext->makeCurrent(d->m_offscreenSurface.data())) {
@@ -322,8 +322,8 @@ void OffscreenQuickView::forwardMouseEvent(QEvent *e)
     case QEvent::Wheel:
     {
         QWheelEvent *we = static_cast<QWheelEvent *>(e);
-        const QPointF widgetPos = d->m_view->mapFromGlobal(we->pos());
-        QWheelEvent cloneEvent(widgetPos, we->globalPosF(), we->pixelDelta(), we->angleDelta(), we->buttons(),
+        const QPointF widgetPos = d->m_view->mapFromGlobal(we->position().toPoint());
+        QWheelEvent cloneEvent(widgetPos, we->globalPosition(), we->pixelDelta(), we->angleDelta(), we->buttons(),
                                we->modifiers(), we->phase(), we->inverted());
         QCoreApplication::sendEvent(d->m_view, &cloneEvent);
         e->setAccepted(cloneEvent.isAccepted());

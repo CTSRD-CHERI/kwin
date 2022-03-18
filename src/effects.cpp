@@ -43,6 +43,9 @@
 #include "kwinglutils.h"
 #include "kwinoffscreenquickview.h"
 
+#include "inputmethod.h"
+#include "inputpanelv1client.h"
+
 #include <QDebug>
 #include <QMouseEvent>
 #include <QWheelEvent>
@@ -265,6 +268,8 @@ EffectsHandlerImpl::EffectsHandlerImpl(Compositor *compositor, Scene *scene)
     for (AbstractOutput *output : outputs) {
         slotOutputEnabled(output);
     }
+
+    connect(InputMethod::self(), &InputMethod::panelChanged, this, &EffectsHandlerImpl::inputPanelChanged);
 
     reconfigure();
 }
@@ -492,11 +497,6 @@ bool EffectsHandlerImpl::hasDecorationShadows() const
 bool EffectsHandlerImpl::decorationsHaveAlpha() const
 {
     return true;
-}
-
-bool EffectsHandlerImpl::decorationSupportsBlurBehind() const
-{
-    return Decoration::DecorationBridge::self()->needsBlur();
 }
 
 // start another painting pass
@@ -818,14 +818,24 @@ void EffectsHandlerImpl::registerAxisShortcut(Qt::KeyboardModifiers modifiers, P
     input()->registerAxisShortcut(modifiers, axis, action);
 }
 
-void EffectsHandlerImpl::registerRealtimeTouchpadSwipeShortcut(SwipeDirection dir, QAction* onUp, std::function<void(qreal)> progressCallback)
+void EffectsHandlerImpl::registerRealtimeTouchpadSwipeShortcut(SwipeDirection dir, uint fingerCount, QAction* onUp, std::function<void(qreal)> progressCallback)
 {
-    input()->registerRealtimeTouchpadSwipeShortcut(dir, onUp, progressCallback);
+    input()->registerRealtimeTouchpadSwipeShortcut(dir, fingerCount, onUp, progressCallback);
 }
 
-void EffectsHandlerImpl::registerTouchpadSwipeShortcut(SwipeDirection direction, QAction *action)
+void EffectsHandlerImpl::registerTouchpadSwipeShortcut(SwipeDirection direction, uint fingerCount, QAction *action)
 {
-    input()->registerTouchpadSwipeShortcut(direction, action);
+    input()->registerTouchpadSwipeShortcut(direction, fingerCount, action);
+}
+
+void EffectsHandlerImpl::registerRealtimeTouchpadPinchShortcut(PinchDirection dir, uint fingerCount, QAction* onUp, std::function<void(qreal)> progressCallback)
+{
+     input()->registerRealtimeTouchpadPinchShortcut(dir, fingerCount, onUp, progressCallback);
+}
+
+void EffectsHandlerImpl::registerTouchpadPinchShortcut(PinchDirection direction, uint fingerCount, QAction *action)
+{
+     input()->registerTouchpadPinchShortcut(direction, fingerCount, action);
 }
 
 void* EffectsHandlerImpl::getProxy(QString name)
@@ -1805,6 +1815,32 @@ QRect EffectsHandlerImpl::renderTargetRect() const
 qreal EffectsHandlerImpl::renderTargetScale() const
 {
     return m_scene->renderTargetScale();
+}
+
+KWin::EffectWindow *EffectsHandlerImpl::inputPanel() const
+{
+    if (!InputMethod::self() || !InputMethod::self()->isEnabled()) {
+        return nullptr;
+    }
+
+    auto panel = InputMethod::self()->panel();
+    if (panel) {
+        return panel->effectWindow();
+    }
+    return nullptr;
+}
+
+bool EffectsHandlerImpl::isInputPanelOverlay() const
+{
+    if (!InputMethod::self() || !InputMethod::self()->isEnabled()) {
+        return true;
+    }
+
+    auto panel = InputMethod::self()->panel();
+    if (panel) {
+        return panel->mode() == InputPanelV1Client::Overlay;
+    }
+    return true;
 }
 
 //****************************************

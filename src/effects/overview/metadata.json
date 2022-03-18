@@ -13,6 +13,7 @@
         "Description[fr]": "Permet d'avoir un aperçu des bureaux virtuels et des fenêtres",
         "Description[hu]": "Lehetővé teszi a virtuális asztalok és ablakok áttekintését",
         "Description[ia]": "Permitte te a supervider scriptorios virtual e fenestre",
+        "Description[id]": "Memungkinkan kamu untuk melihat keseluruhan window dan virtual desktop",
         "Description[it]": "Consente di visualizzare una panoramica di desktop e finestre virtuali",
         "Description[ko]": "가상 바탕 화면과 창 한눈에 보기",
         "Description[nl]": "Biedt u een overzicht van virtuele bureaubladen en vensters",
@@ -27,7 +28,7 @@
         "Description[uk]": "Надає вам змогу оглядати віртуальні стільниці і вікна",
         "Description[vi]": "Cho phép bạn xem tổng quan các bàn làm việc ảo và các cửa sổ",
         "Description[x-test]": "xxAllows you to overview virtual desktops and windowsxx",
-        "Description[zh_CN]": "用于显示所有虚拟桌面和窗口的总览图",
+        "Description[zh_CN]": "显示包含当前所有虚拟桌面和窗口的桌面概览",
         "EnabledByDefault": false,
         "Id": "overview",
         "License": "GPL",
@@ -57,7 +58,7 @@
         "Name[uk]": "Огляд",
         "Name[vi]": "Tổng quan",
         "Name[x-test]": "xxOverviewxx",
-        "Name[zh_CN]": "桌面总览图"
+        "Name[zh_CN]": "桌面概览"
     },
     "X-KDE-ConfigModule": "kwin_overview_config",
     "org.kde.kwin.effect": {

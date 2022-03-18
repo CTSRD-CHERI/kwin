@@ -40,14 +40,6 @@
 #include <QWindow>
 #include <QDBusInterface>
 
-// system
-#if __has_include(<sys/prctl.h>)
-#include <sys/prctl.h>
-#endif
-#if __has_include(<sys/procctl.h>)
-#include <sys/procctl.h>
-#endif
-
 #if HAVE_LIBCAP
 #include <sys/capability.h>
 #endif
@@ -277,7 +269,6 @@ void ApplicationWayland::startSession()
 
 static const QString s_waylandPlugin = QStringLiteral("KWinWaylandWaylandBackend");
 static const QString s_x11Plugin = QStringLiteral("KWinWaylandX11Backend");
-static const QString s_fbdevPlugin = QStringLiteral("KWinWaylandFbdevBackend");
 static const QString s_drmPlugin = QStringLiteral("KWinWaylandDrmBackend");
 static const QString s_virtualPlugin = QStringLiteral("KWinWaylandVirtualBackend");
 
@@ -289,48 +280,7 @@ static QString automaticBackendSelection()
     if (qEnvironmentVariableIsSet("DISPLAY")) {
         return s_x11Plugin;
     }
-    // Only default to drm when there's dri drivers. This way fbdev will be
-    // used when running using nomodeset
-    if (QFileInfo::exists("/dev/dri")) {
-        return s_drmPlugin;
-    }
-    return s_fbdevPlugin;
-}
-
-static void disablePtrace()
-{
-#if HAVE_PR_SET_DUMPABLE
-    // check whether we are running under a debugger
-    const QFileInfo parent(QStringLiteral("/proc/%1/exe").arg(getppid()));
-    if (parent.isSymLink() &&
-            (parent.symLinkTarget().endsWith(QLatin1String("/gdb")) ||
-             parent.symLinkTarget().endsWith(QLatin1String("/gdbserver")) ||
-             parent.symLinkTarget().endsWith(QLatin1String("/lldb-server")))) {
-        // debugger, don't adjust
-        return;
-    }
-
-    // disable ptrace in kwin_wayland
-    prctl(PR_SET_DUMPABLE, 0);
-#endif
-#if HAVE_PROC_TRACE_CTL
-    // FreeBSD's rudimentary procfs does not support /proc/<pid>/exe
-    // We could use the P_TRACED flag of the process to find out
-    // if the process is being debugged ond FreeBSD.
-    int mode = PROC_TRACE_CTL_DISABLE;
-    procctl(P_PID, getpid(), PROC_TRACE_CTL, &mode);
-#endif
-
-}
-
-static void unsetDumpable(int sig)
-{
-#if HAVE_PR_SET_DUMPABLE
-    prctl(PR_SET_DUMPABLE, 1);
-#endif
-    signal(sig, SIG_IGN);
-    raise(sig);
-    return;
+    return s_drmPlugin;
 }
 
 void dropNiceCapability()
@@ -358,7 +308,6 @@ void dropNiceCapability()
 
 int main(int argc, char * argv[])
 {
-    KWin::disablePtrace();
     KWin::Application::setupMalloc();
     KWin::Application::setupLocalizedString();
     KWin::gainRealTime();
@@ -370,8 +319,6 @@ int main(int argc, char * argv[])
         signal(SIGINT, SIG_IGN);
     if (signal(SIGHUP, KWin::sighandler) == SIG_IGN)
         signal(SIGHUP, SIG_IGN);
-    signal(SIGABRT, KWin::unsetDumpable);
-    signal(SIGSEGV, KWin::unsetDumpable);
     signal(SIGPIPE, SIG_IGN);
 
     QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
@@ -403,7 +350,6 @@ int main(int argc, char * argv[])
     const bool hasX11Option = hasPlugin(KWin::s_x11Plugin);
     const bool hasVirtualOption = hasPlugin(KWin::s_virtualPlugin);
     const bool hasWaylandOption = hasPlugin(KWin::s_waylandPlugin);
-    const bool hasFramebufferOption = hasPlugin(KWin::s_fbdevPlugin);
     const bool hasDrmOption = hasPlugin(KWin::s_drmPlugin);
 
     QCommandLineOption xwaylandOption(QStringLiteral("xwayland"),
@@ -411,11 +357,6 @@ int main(int argc, char * argv[])
     QCommandLineOption waylandSocketOption(QStringList{QStringLiteral("s"), QStringLiteral("socket")},
                                            i18n("Name of the Wayland socket to listen on. If not set \"wayland-0\" is used."),
                                            QStringLiteral("socket"));
-    QCommandLineOption framebufferOption(QStringLiteral("framebuffer"),
-                                         i18n("Render to framebuffer."));
-    QCommandLineOption framebufferDeviceOption(QStringLiteral("fb-device"),
-                                               i18n("The framebuffer device to render to."),
-                                               QStringLiteral("fbdev"));
     QCommandLineOption x11DisplayOption(QStringLiteral("x11-display"),
                                         i18n("The X11 Display to use in windowed mode on platform X11."),
                                         QStringLiteral("display"));
@@ -476,10 +417,6 @@ int main(int argc, char * argv[])
     }
     if (hasWaylandOption) {
         parser.addOption(waylandDisplayOption);
-    }
-    if (hasFramebufferOption) {
-        parser.addOption(framebufferOption);
-        parser.addOption(framebufferDeviceOption);
     }
     if (hasVirtualOption) {
         parser.addOption(virtualFbOption);
@@ -609,10 +546,6 @@ int main(int argc, char * argv[])
         pluginName = KWin::s_waylandPlugin;
     }
 
-    if (hasFramebufferOption && parser.isSet(framebufferOption)) {
-        pluginName = KWin::s_fbdevPlugin;
-        deviceIdentifier = parser.value(framebufferDeviceOption).toUtf8();
-    }
     if (hasVirtualOption && parser.isSet(virtualFbOption)) {
         pluginName = KWin::s_virtualPlugin;
     }

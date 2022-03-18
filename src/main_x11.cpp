@@ -34,14 +34,16 @@
 #include <QPushButton>
 #include <QSurfaceFormat>
 #include <QVBoxLayout>
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+#include <private/qtx11extras_p.h>
+#else
 #include <QX11Info>
+#endif
 #include <QtDBus>
 
 // system
-#if __has_include(<unistd.h>)
-#include <unistd.h>
-#endif
 #include <iostream>
+#include <unistd.h>
 
 Q_LOGGING_CATEGORY(KWIN_CORE, "kwin_core", QtWarningMsg)
 

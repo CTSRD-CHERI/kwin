@@ -397,13 +397,21 @@ QQmlListProperty<KWin::AbstractClient> DeclarativeScriptWorkspaceWrapper::client
     return QQmlListProperty<KWin::AbstractClient>(this, nullptr, &DeclarativeScriptWorkspaceWrapper::countClientList, &DeclarativeScriptWorkspaceWrapper::atClientList);
 }
 
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
 int DeclarativeScriptWorkspaceWrapper::countClientList(QQmlListProperty<KWin::AbstractClient> *clients)
+#else
+qsizetype DeclarativeScriptWorkspaceWrapper::countClientList(QQmlListProperty<KWin::AbstractClient> *clients)
+#endif
 {
     Q_UNUSED(clients)
     return workspace()->allClientList().size();
 }
 
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
 KWin::AbstractClient *DeclarativeScriptWorkspaceWrapper::atClientList(QQmlListProperty<KWin::AbstractClient> *clients, int index)
+#else
+KWin::AbstractClient *DeclarativeScriptWorkspaceWrapper::atClientList(QQmlListProperty<KWin::AbstractClient> *clients, qsizetype index)
+#endif
 {
     Q_UNUSED(clients)
     return workspace()->allClientList().at(index);
@@ -413,3 +421,5 @@ DeclarativeScriptWorkspaceWrapper::DeclarativeScriptWorkspaceWrapper(QObject* pa
     : WorkspaceWrapper(parent) {}
 
 } // KWin
+
+#include "moc_workspace_wrapper.cpp"

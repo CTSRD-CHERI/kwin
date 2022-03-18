@@ -855,10 +855,6 @@ class KWINEFFECTS_EXPORT EffectsHandler : public QObject
      * Whether window decorations use the alpha channel.
      */
     Q_PROPERTY(bool decorationsHaveAlpha READ decorationsHaveAlpha)
-    /**
-     * Whether the window decorations support blurring behind the decoration.
-     */
-    Q_PROPERTY(bool decorationSupportsBlurBehind READ decorationSupportsBlurBehind)
     Q_PROPERTY(CompositingType compositingType READ compositingType CONSTANT)
     Q_PROPERTY(QPoint cursorPos READ cursorPos)
     Q_PROPERTY(QSize virtualScreenSize READ virtualScreenSize NOTIFY virtualScreenSizeChanged)
@@ -870,6 +866,8 @@ class KWINEFFECTS_EXPORT EffectsHandler : public QObject
      * @since 5.18
      */
     Q_PROPERTY(KWin::SessionState sessionState READ sessionState NOTIFY sessionStateChanged)
+
+    Q_PROPERTY(KWin::EffectWindow *inputPanel READ inputPanel NOTIFY inputPanelChanged)
 
     friend class Effect;
 public:
@@ -947,10 +945,13 @@ public:
      * @param action The action which gets triggered when the gesture triggers
      * @since 5.10
      */
-    virtual void registerTouchpadSwipeShortcut(SwipeDirection direction, QAction *action) = 0;
+    virtual void registerTouchpadSwipeShortcut(SwipeDirection direction, uint fingerCount, QAction *action) = 0;
 
-    virtual void registerRealtimeTouchpadSwipeShortcut(SwipeDirection dir, QAction* onUp, std::function<void(qreal)> progressCallback) = 0;
+    virtual void registerRealtimeTouchpadSwipeShortcut(SwipeDirection dir, uint fingerCount, QAction* onUp, std::function<void(qreal)> progressCallback) = 0;
 
+    virtual void registerRealtimeTouchpadPinchShortcut(PinchDirection dir, uint fingerCount, QAction* onUp, std::function<void(qreal)> progressCallback) = 0;
+
+    virtual void registerTouchpadPinchShortcut(PinchDirection direction, uint fingerCount, QAction *action) = 0;
     /**
      * Retrieve the proxy class for an effect if it has one. Will return NULL if
      * the effect isn't loaded or doesn't have a proxy class.
@@ -1228,12 +1229,6 @@ public:
     virtual bool decorationsHaveAlpha() const = 0;
 
     /**
-     * Returns @a true if the window decorations support blurring behind the decoration, and @a false otherwise
-     * @since 4.6
-     */
-    virtual bool decorationSupportsBlurBehind() const = 0;
-
-    /**
      * Creates a new frame object. If the frame does not have a static size
      * then it will be located at @a position with @a alignment. A
      * non-static frame will automatically adjust its size to fit the contents.
@@ -1452,6 +1447,9 @@ public:
      * target local coordinate system.
      */
     QRegion mapToRenderTarget(const QRegion &region) const;
+
+    virtual KWin::EffectWindow *inputPanel() const = 0;
+    virtual bool isInputPanelOverlay() const = 0;
 
 Q_SIGNALS:
     /**
@@ -1905,6 +1903,8 @@ Q_SIGNALS:
     void startupAdded(const QString &id, const QIcon &icon);
     void startupChanged(const QString &id, const QIcon &icon);
     void startupRemoved(const QString &id);
+
+    void inputPanelChanged();
 
 protected:
     QVector< EffectPair > loaded_effects;

@@ -65,8 +65,8 @@ private Q_SLOTS:
 private:
     void touchNow() {
         static int time = 0;
-        kwinApp()->platform()->touchDown(0, {100, 100}, ++time);
-        kwinApp()->platform()->touchUp(0, ++time);
+        Test::touchDown(0, {100, 100}, ++time);
+        Test::touchUp(0, ++time);
     }
 };
 
@@ -154,7 +154,7 @@ void InputMethodTest::testOpenClose()
     Test::render(surface.data(), toplevelConfigureRequestedSpy.last().first().value<QSize>(), Qt::red);
     QVERIFY(frameGeometryChangedSpy.wait());
 
-    QCOMPARE(client->frameGeometry().height(), 1024 - keyboardClient->inputGeometry().height() + 1);
+    QCOMPARE(client->frameGeometry().height(), 1024 - keyboardClient->inputGeometry().height());
 
     // Hide the keyboard
     textInput->hideInputPanel();
@@ -508,13 +508,13 @@ void InputMethodTest::testModifierForwarding()
         QVERIFY(keyChanged);
         modifiersChanged = true;
     });
-    kwinApp()->platform()->keyboardKeyPressed(KEY_LEFTCTRL, timestamp++);
+    Test::keyboardKeyPressed(KEY_LEFTCTRL, timestamp++);
     QVERIFY(keySpy.count() == 1 || keySpy.wait());
     QVERIFY(modifierSpy.count() == 2 || modifierSpy.wait());
     disconnect(keyChangedConnection);
     disconnect(modifiersChangedConnection);
 
-    kwinApp()->platform()->keyboardKeyPressed(KEY_A, timestamp++);
+    Test::keyboardKeyPressed(KEY_A, timestamp++);
     QVERIFY(keySpy.count() == 2 || keySpy.wait());
     QVERIFY(modifierSpy.count() == 2 || modifierSpy.wait());
 
@@ -529,7 +529,7 @@ void InputMethodTest::testModifierForwarding()
         QVERIFY(keyChanged);
         modifiersChanged = true;
     });
-    kwinApp()->platform()->keyboardKeyReleased(KEY_LEFTCTRL, timestamp++);
+    Test::keyboardKeyReleased(KEY_LEFTCTRL, timestamp++);
     QVERIFY(keySpy.count() == 3 || keySpy.wait());
     QVERIFY(modifierSpy.count() == 3 || modifierSpy.wait());
     disconnect(keyChangedConnection);

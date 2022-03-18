@@ -49,6 +49,7 @@ public Q_SLOTS:
     void installTitleItem(QQuickItem *item);
 
     void updateShadow();
+    void updateBlur();
 
 Q_SIGNALS:
     void configChanged();
@@ -66,6 +67,8 @@ private:
     void updateBorders();
     void updateBuffer();
     void updateExtendedBorders();
+
+    bool m_supportsMask{false};
 
     QRect m_contentRect; //the geometry of the part of the buffer that is not a shadow when buffer was created.
     QQuickItem *m_item = nullptr;

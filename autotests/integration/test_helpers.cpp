@@ -1272,5 +1272,170 @@ uint32_t WaylandOutputDeviceV2::rgbRange() const
     return m_rgbRange;
 }
 
+VirtualInputDevice::VirtualInputDevice(QObject *parent)
+    : InputDevice(parent)
+{
+}
+
+void VirtualInputDevice::setPointer(bool set)
+{
+    m_pointer = set;
+}
+
+void VirtualInputDevice::setKeyboard(bool set)
+{
+    m_keyboard = set;
+}
+
+void VirtualInputDevice::setTouch(bool set)
+{
+    m_touch = set;
+}
+
+void VirtualInputDevice::setName(const QString &name)
+{
+    m_name = name;
+}
+
+QString VirtualInputDevice::sysName() const
+{
+    return QString();
+}
+
+QString VirtualInputDevice::name() const
+{
+    return m_name;
+}
+
+bool VirtualInputDevice::isEnabled() const
+{
+    return true;
+}
+
+void VirtualInputDevice::setEnabled(bool enabled)
+{
+    Q_UNUSED(enabled)
+}
+
+LEDs VirtualInputDevice::leds() const
+{
+    return LEDs();
+}
+
+void VirtualInputDevice::setLeds(LEDs leds)
+{
+    Q_UNUSED(leds)
+}
+
+bool VirtualInputDevice::isKeyboard() const
+{
+    return m_keyboard;
+}
+
+bool VirtualInputDevice::isAlphaNumericKeyboard() const
+{
+    return m_keyboard;
+}
+
+bool VirtualInputDevice::isPointer() const
+{
+    return m_pointer;
+}
+
+bool VirtualInputDevice::isTouchpad() const
+{
+    return false;
+}
+
+bool VirtualInputDevice::isTouch() const
+{
+    return m_touch;
+}
+
+bool VirtualInputDevice::isTabletTool() const
+{
+    return false;
+}
+
+bool VirtualInputDevice::isTabletPad() const
+{
+    return false;
+}
+
+bool VirtualInputDevice::isTabletModeSwitch() const
+{
+    return false;
+}
+
+bool VirtualInputDevice::isLidSwitch() const
+{
+    return false;
+}
+
+void keyboardKeyPressed(quint32 key, quint32 time)
+{
+    auto virtualKeyboard = static_cast<WaylandTestApplication *>(kwinApp())->virtualKeyboard();
+    Q_EMIT virtualKeyboard->keyChanged(key, InputRedirection::KeyboardKeyState::KeyboardKeyPressed, time, virtualKeyboard);
+}
+
+void keyboardKeyReleased(quint32 key, quint32 time)
+{
+    auto virtualKeyboard = static_cast<WaylandTestApplication *>(kwinApp())->virtualKeyboard();
+    Q_EMIT virtualKeyboard->keyChanged(key, InputRedirection::KeyboardKeyState::KeyboardKeyReleased, time, virtualKeyboard);
+}
+
+void pointerAxisHorizontal(qreal delta, quint32 time, qint32 discreteDelta, InputRedirection::PointerAxisSource source)
+{
+    auto virtualPointer = static_cast<WaylandTestApplication *>(kwinApp())->virtualPointer();
+    Q_EMIT virtualPointer->pointerAxisChanged(InputRedirection::PointerAxis::PointerAxisHorizontal, delta, discreteDelta, source, time, virtualPointer);
+}
+
+void pointerAxisVertical(qreal delta, quint32 time, qint32 discreteDelta, InputRedirection::PointerAxisSource source)
+{
+    auto virtualPointer = static_cast<WaylandTestApplication *>(kwinApp())->virtualPointer();
+    Q_EMIT virtualPointer->pointerAxisChanged(InputRedirection::PointerAxis::PointerAxisVertical, delta, discreteDelta, source, time, virtualPointer);
+}
+
+void pointerButtonPressed(quint32 button, quint32 time)
+{
+    auto virtualPointer = static_cast<WaylandTestApplication *>(kwinApp())->virtualPointer();
+    Q_EMIT virtualPointer->pointerButtonChanged(button, InputRedirection::PointerButtonState::PointerButtonPressed, time, virtualPointer);
+}
+
+void pointerButtonReleased(quint32 button, quint32 time)
+{
+    auto virtualPointer = static_cast<WaylandTestApplication *>(kwinApp())->virtualPointer();
+    Q_EMIT virtualPointer->pointerButtonChanged(button, InputRedirection::PointerButtonState::PointerButtonReleased, time, virtualPointer);
+}
+
+void pointerMotion(const QPointF &position, quint32 time)
+{
+    auto virtualPointer = static_cast<WaylandTestApplication *>(kwinApp())->virtualPointer();
+    Q_EMIT virtualPointer->pointerMotionAbsolute(position, time, virtualPointer);
+}
+
+void touchCancel()
+{
+    auto virtualTouch = static_cast<WaylandTestApplication *>(kwinApp())->virtualTouch();
+    Q_EMIT virtualTouch->touchCanceled(virtualTouch);
+}
+
+void touchDown(qint32 id, const QPointF &pos, quint32 time)
+{
+    auto virtualTouch = static_cast<WaylandTestApplication *>(kwinApp())->virtualTouch();
+    Q_EMIT virtualTouch->touchDown(id, pos, time, virtualTouch);
+}
+
+void touchMotion(qint32 id, const QPointF &pos, quint32 time)
+{
+    auto virtualTouch = static_cast<WaylandTestApplication *>(kwinApp())->virtualTouch();
+    Q_EMIT virtualTouch->touchMotion(id, pos, time, virtualTouch);
+}
+
+void touchUp(qint32 id, quint32 time)
+{
+    auto virtualTouch = static_cast<WaylandTestApplication *>(kwinApp())->virtualTouch();
+    Q_EMIT virtualTouch->touchUp(id, time, virtualTouch);
+}
 }
 }

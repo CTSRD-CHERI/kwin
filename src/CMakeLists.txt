@@ -175,7 +175,6 @@ target_link_libraries(kwin
     KF5::GlobalAccel
     KF5::GlobalAccelPrivate
     KF5::I18n
-    KF5::Notifications
     KF5::Package
     KF5::Plasma
     KF5::QuickAddons
@@ -207,6 +206,10 @@ target_link_libraries(kwin
 
     Threads::Threads
 )
+
+if (KWIN_BUILD_NOTIFICATIONS)
+    target_link_libraries(kwin KF5::Notifications)
+endif()
 
 kconfig_add_kcfg_files(kwin
     settings.kcfgc
@@ -276,8 +279,8 @@ if (KWIN_BUILD_TABBOX)
     target_link_libraries(kwin Qt::GuiPrivate)
 endif()
 
-qt5_generate_dbus_interface(virtualkeyboard_dbus.h org.kde.kwin.VirtualKeyboard.xml OPTIONS -A)
-qt5_generate_dbus_interface(tabletmodemanager.h org.kde.KWin.TabletModeManager.xml OPTIONS -A)
+qt_generate_dbus_interface(virtualkeyboard_dbus.h org.kde.kwin.VirtualKeyboard.xml OPTIONS -A)
+qt_generate_dbus_interface(tabletmodemanager.h org.kde.KWin.TabletModeManager.xml OPTIONS -A)
 
 generate_export_header(kwin EXPORT_FILE_NAME kwin_export.h)
 
@@ -285,8 +288,10 @@ add_executable(kwin_x11 main_x11.cpp)
 target_link_libraries(kwin_x11
     kwin
     KF5::Crash
-    Qt::X11Extras
 )
+if (QT_MAJOR_VERSION EQUAL "5")
+    target_link_libraries(kwin_x11 Qt::X11Extras)
+endif()
 kcoreaddons_target_static_plugins(kwin_x11 "kwin/effects/plugins")
 
 install(TARGETS kwin ${KDE_INSTALL_TARGETS_DEFAULT_ARGS} LIBRARY NAMELINK_SKIP)
@@ -341,7 +346,9 @@ if (PipeWire_FOUND)
 endif()
 
 install(FILES kwin.kcfg DESTINATION ${KDE_INSTALL_KCFGDIR} RENAME ${KWIN_NAME}.kcfg)
-install(FILES kwin.notifyrc DESTINATION ${KDE_INSTALL_KNOTIFY5RCDIR} RENAME ${KWIN_NAME}.notifyrc)
+if (KWIN_BUILD_NOTIFICATIONS)
+    install(FILES kwin.notifyrc DESTINATION ${KDE_INSTALL_KNOTIFYRCDIR} RENAME ${KWIN_NAME}.notifyrc)
+endif()
 install(
     FILES
         org.kde.KWin.VirtualDesktopManager.xml
@@ -357,4 +364,4 @@ install(
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/kwin_export.h DESTINATION ${KDE_INSTALL_INCLUDEDIR} COMPONENT Devel)
 
 # Install the KWin/Script service type
-install(FILES scripting/kwinscript.desktop DESTINATION ${KDE_INSTALL_KSERVICETYPES5DIR})
+install(FILES scripting/kwinscript.desktop DESTINATION ${KDE_INSTALL_KSERVICETYPESDIR})

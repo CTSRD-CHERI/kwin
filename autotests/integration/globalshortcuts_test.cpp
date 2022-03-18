@@ -154,12 +154,12 @@ void GlobalShortcutsTest::testNonLatinLayout()
     input()->registerShortcut(seq, action.data());
 
     quint32 timestamp = 0;
-    kwinApp()->platform()->keyboardKeyPressed(modifierKey, timestamp++);
+    Test::keyboardKeyPressed(modifierKey, timestamp++);
     QCOMPARE(input()->keyboardModifiers(), qtModifier);
-    kwinApp()->platform()->keyboardKeyPressed(key, timestamp++);
+    Test::keyboardKeyPressed(key, timestamp++);
 
-    kwinApp()->platform()->keyboardKeyReleased(key, timestamp++);
-    kwinApp()->platform()->keyboardKeyReleased(modifierKey, timestamp++);
+    Test::keyboardKeyReleased(key, timestamp++);
+    Test::keyboardKeyReleased(modifierKey, timestamp++);
 
     QTRY_COMPARE_WITH_TIMEOUT(triggeredSpy.count(), 1, 100);
 }
@@ -178,14 +178,14 @@ void GlobalShortcutsTest::testConsumedShift()
 
     // press shift+5
     quint32 timestamp = 0;
-    kwinApp()->platform()->keyboardKeyPressed(KEY_LEFTSHIFT, timestamp++);
+    Test::keyboardKeyPressed(KEY_LEFTSHIFT, timestamp++);
     QCOMPARE(input()->keyboardModifiers(), Qt::ShiftModifier);
-    kwinApp()->platform()->keyboardKeyPressed(KEY_5, timestamp++);
+    Test::keyboardKeyPressed(KEY_5, timestamp++);
     QTRY_COMPARE(triggeredSpy.count(), 1);
-    kwinApp()->platform()->keyboardKeyReleased(KEY_5, timestamp++);
+    Test::keyboardKeyReleased(KEY_5, timestamp++);
 
     // release shift
-    kwinApp()->platform()->keyboardKeyReleased(KEY_LEFTSHIFT, timestamp++);
+    Test::keyboardKeyReleased(KEY_LEFTSHIFT, timestamp++);
 }
 
 void GlobalShortcutsTest::testRepeatedTrigger()
@@ -206,23 +206,23 @@ void GlobalShortcutsTest::testRepeatedTrigger()
 
     // press shift+5
     quint32 timestamp = 0;
-    kwinApp()->platform()->keyboardKeyPressed(KEY_WAKEUP, timestamp++);
-    kwinApp()->platform()->keyboardKeyPressed(KEY_LEFTSHIFT, timestamp++);
+    Test::keyboardKeyPressed(KEY_WAKEUP, timestamp++);
+    Test::keyboardKeyPressed(KEY_LEFTSHIFT, timestamp++);
     QCOMPARE(input()->keyboardModifiers(), Qt::ShiftModifier);
-    kwinApp()->platform()->keyboardKeyPressed(KEY_5, timestamp++);
+    Test::keyboardKeyPressed(KEY_5, timestamp++);
     QTRY_COMPARE(triggeredSpy.count(), 1);
     // and should repeat
     QVERIFY(triggeredSpy.wait());
     QVERIFY(triggeredSpy.wait());
     // now release the key
-    kwinApp()->platform()->keyboardKeyReleased(KEY_5, timestamp++);
+    Test::keyboardKeyReleased(KEY_5, timestamp++);
     QVERIFY(!triggeredSpy.wait(50));
 
-    kwinApp()->platform()->keyboardKeyReleased(KEY_WAKEUP, timestamp++);
+    Test::keyboardKeyReleased(KEY_WAKEUP, timestamp++);
     QVERIFY(!triggeredSpy.wait(50));
 
     // release shift
-    kwinApp()->platform()->keyboardKeyReleased(KEY_LEFTSHIFT, timestamp++);
+    Test::keyboardKeyReleased(KEY_LEFTSHIFT, timestamp++);
 }
 
 void GlobalShortcutsTest::testUserActionsMenu()
@@ -244,11 +244,11 @@ void GlobalShortcutsTest::testUserActionsMenu()
 
     quint32 timestamp = 0;
     QVERIFY(!workspace()->userActionsMenu()->isShown());
-    kwinApp()->platform()->keyboardKeyPressed(KEY_LEFTALT, timestamp++);
-    kwinApp()->platform()->keyboardKeyPressed(KEY_F3, timestamp++);
-    kwinApp()->platform()->keyboardKeyReleased(KEY_F3, timestamp++);
+    Test::keyboardKeyPressed(KEY_LEFTALT, timestamp++);
+    Test::keyboardKeyPressed(KEY_F3, timestamp++);
+    Test::keyboardKeyReleased(KEY_F3, timestamp++);
     QTRY_VERIFY(workspace()->userActionsMenu()->isShown());
-    kwinApp()->platform()->keyboardKeyReleased(KEY_LEFTALT, timestamp++);
+    Test::keyboardKeyReleased(KEY_LEFTALT, timestamp++);
 }
 
 void GlobalShortcutsTest::testMetaShiftW()
@@ -259,22 +259,22 @@ void GlobalShortcutsTest::testMetaShiftW()
     action->setObjectName(QStringLiteral("globalshortcuts-test-meta-shift-w"));
     QSignalSpy triggeredSpy(action.data(), &QAction::triggered);
     QVERIFY(triggeredSpy.isValid());
-    KGlobalAccel::self()->setShortcut(action.data(), QList<QKeySequence>{Qt::META + Qt::SHIFT + Qt::Key_W}, KGlobalAccel::NoAutoloading);
-    input()->registerShortcut(Qt::META + Qt::SHIFT + Qt::Key_W, action.data());
+    KGlobalAccel::self()->setShortcut(action.data(), QList<QKeySequence>{Qt::META | Qt::SHIFT | Qt::Key_W}, KGlobalAccel::NoAutoloading);
+    input()->registerShortcut(Qt::META | Qt::SHIFT | Qt::Key_W, action.data());
 
     // press meta+shift+w
     quint32 timestamp = 0;
-    kwinApp()->platform()->keyboardKeyPressed(KEY_LEFTMETA, timestamp++);
+    Test::keyboardKeyPressed(KEY_LEFTMETA, timestamp++);
     QCOMPARE(input()->keyboardModifiers(), Qt::MetaModifier);
-    kwinApp()->platform()->keyboardKeyPressed(KEY_LEFTSHIFT, timestamp++);
+    Test::keyboardKeyPressed(KEY_LEFTSHIFT, timestamp++);
     QCOMPARE(input()->keyboardModifiers(), Qt::ShiftModifier | Qt::MetaModifier);
-    kwinApp()->platform()->keyboardKeyPressed(KEY_W, timestamp++);
+    Test::keyboardKeyPressed(KEY_W, timestamp++);
     QTRY_COMPARE(triggeredSpy.count(), 1);
-    kwinApp()->platform()->keyboardKeyReleased(KEY_W, timestamp++);
+    Test::keyboardKeyReleased(KEY_W, timestamp++);
 
     // release meta+shift
-    kwinApp()->platform()->keyboardKeyReleased(KEY_LEFTSHIFT, timestamp++);
-    kwinApp()->platform()->keyboardKeyReleased(KEY_LEFTMETA, timestamp++);
+    Test::keyboardKeyReleased(KEY_LEFTSHIFT, timestamp++);
+    Test::keyboardKeyReleased(KEY_LEFTMETA, timestamp++);
 }
 
 void GlobalShortcutsTest::testComponseKey()
@@ -290,8 +290,8 @@ void GlobalShortcutsTest::testComponseKey()
 
     // press & release `
     quint32 timestamp = 0;
-    kwinApp()->platform()->keyboardKeyPressed(KEY_RESERVED, timestamp++);
-    kwinApp()->platform()->keyboardKeyReleased(KEY_RESERVED, timestamp++);
+    Test::keyboardKeyPressed(KEY_RESERVED, timestamp++);
+    Test::keyboardKeyReleased(KEY_RESERVED, timestamp++);
 
     QTRY_COMPARE(triggeredSpy.count(), 0);
 }
@@ -343,7 +343,7 @@ void GlobalShortcutsTest::testX11ClientShortcut()
     QCOMPARE(workspace()->activeClient(), client);
     QVERIFY(client->isActive());
     QCOMPARE(client->shortcut(), QKeySequence());
-    const QKeySequence seq(Qt::META + Qt::SHIFT + Qt::Key_Y);
+    const QKeySequence seq(Qt::META | Qt::SHIFT | Qt::Key_Y);
     QVERIFY(workspace()->shortcutAvailable(seq));
     client->setShortcut(seq.toString());
     QCOMPARE(client->shortcut(), seq);
@@ -359,13 +359,13 @@ void GlobalShortcutsTest::testX11ClientShortcut()
 
     // now let's trigger the shortcut
     quint32 timestamp = 0;
-    kwinApp()->platform()->keyboardKeyPressed(KEY_LEFTMETA, timestamp++);
-    kwinApp()->platform()->keyboardKeyPressed(KEY_LEFTSHIFT, timestamp++);
-    kwinApp()->platform()->keyboardKeyPressed(KEY_Y, timestamp++);
+    Test::keyboardKeyPressed(KEY_LEFTMETA, timestamp++);
+    Test::keyboardKeyPressed(KEY_LEFTSHIFT, timestamp++);
+    Test::keyboardKeyPressed(KEY_Y, timestamp++);
     QTRY_COMPARE(workspace()->activeClient(), client);
-    kwinApp()->platform()->keyboardKeyReleased(KEY_Y, timestamp++);
-    kwinApp()->platform()->keyboardKeyReleased(KEY_LEFTSHIFT, timestamp++);
-    kwinApp()->platform()->keyboardKeyReleased(KEY_LEFTMETA, timestamp++);
+    Test::keyboardKeyReleased(KEY_Y, timestamp++);
+    Test::keyboardKeyReleased(KEY_LEFTSHIFT, timestamp++);
+    Test::keyboardKeyReleased(KEY_LEFTMETA, timestamp++);
 
     // destroy window again
     QSignalSpy windowClosedSpy(client, &X11Client::windowClosed);
@@ -385,7 +385,7 @@ void GlobalShortcutsTest::testWaylandClientShortcut()
     QCOMPARE(workspace()->activeClient(), client);
     QVERIFY(client->isActive());
     QCOMPARE(client->shortcut(), QKeySequence());
-    const QKeySequence seq(Qt::META + Qt::SHIFT + Qt::Key_Y);
+    const QKeySequence seq(Qt::META | Qt::SHIFT | Qt::Key_Y);
     QVERIFY(workspace()->shortcutAvailable(seq));
     client->setShortcut(seq.toString());
     QCOMPARE(client->shortcut(), seq);
@@ -398,13 +398,13 @@ void GlobalShortcutsTest::testWaylandClientShortcut()
 
     // now let's trigger the shortcut
     quint32 timestamp = 0;
-    kwinApp()->platform()->keyboardKeyPressed(KEY_LEFTMETA, timestamp++);
-    kwinApp()->platform()->keyboardKeyPressed(KEY_LEFTSHIFT, timestamp++);
-    kwinApp()->platform()->keyboardKeyPressed(KEY_Y, timestamp++);
+    Test::keyboardKeyPressed(KEY_LEFTMETA, timestamp++);
+    Test::keyboardKeyPressed(KEY_LEFTSHIFT, timestamp++);
+    Test::keyboardKeyPressed(KEY_Y, timestamp++);
     QTRY_COMPARE(workspace()->activeClient(), client);
-    kwinApp()->platform()->keyboardKeyReleased(KEY_Y, timestamp++);
-    kwinApp()->platform()->keyboardKeyReleased(KEY_LEFTSHIFT, timestamp++);
-    kwinApp()->platform()->keyboardKeyReleased(KEY_LEFTMETA, timestamp++);
+    Test::keyboardKeyReleased(KEY_Y, timestamp++);
+    Test::keyboardKeyReleased(KEY_LEFTSHIFT, timestamp++);
+    Test::keyboardKeyReleased(KEY_LEFTMETA, timestamp++);
 
     shellSurface.reset();
     surface.reset();
@@ -441,19 +441,19 @@ void GlobalShortcutsTest::testSetupWindowShortcut()
     QTRY_VERIFY(sequenceEdit->hasFocus());
 
     quint32 timestamp = 0;
-    kwinApp()->platform()->keyboardKeyPressed(KEY_LEFTMETA, timestamp++);
-    kwinApp()->platform()->keyboardKeyPressed(KEY_LEFTSHIFT, timestamp++);
-    kwinApp()->platform()->keyboardKeyPressed(KEY_Y, timestamp++);
-    kwinApp()->platform()->keyboardKeyReleased(KEY_Y, timestamp++);
-    kwinApp()->platform()->keyboardKeyReleased(KEY_LEFTSHIFT, timestamp++);
-    kwinApp()->platform()->keyboardKeyReleased(KEY_LEFTMETA, timestamp++);
+    Test::keyboardKeyPressed(KEY_LEFTMETA, timestamp++);
+    Test::keyboardKeyPressed(KEY_LEFTSHIFT, timestamp++);
+    Test::keyboardKeyPressed(KEY_Y, timestamp++);
+    Test::keyboardKeyReleased(KEY_Y, timestamp++);
+    Test::keyboardKeyReleased(KEY_LEFTSHIFT, timestamp++);
+    Test::keyboardKeyReleased(KEY_LEFTMETA, timestamp++);
 
     // the sequence gets accepted after one second, so wait a bit longer
     QTest::qWait(2000);
     // now send in enter
-    kwinApp()->platform()->keyboardKeyPressed(KEY_ENTER, timestamp++);
-    kwinApp()->platform()->keyboardKeyReleased(KEY_ENTER, timestamp++);
-    QTRY_COMPARE(client->shortcut(), QKeySequence(Qt::META + Qt::SHIFT + Qt::Key_Y));
+    Test::keyboardKeyPressed(KEY_ENTER, timestamp++);
+    Test::keyboardKeyReleased(KEY_ENTER, timestamp++);
+    QTRY_COMPARE(client->shortcut(), QKeySequence(Qt::META | Qt::SHIFT | Qt::Key_Y));
 }
 
 WAYLANDTEST_MAIN(GlobalShortcutsTest)

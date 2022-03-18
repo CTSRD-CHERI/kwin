@@ -14,6 +14,7 @@
 #include "drm_object_crtc.h"
 #include "drm_object_plane.h"
 #include "drm_pipeline.h"
+#include "drm_layer.h"
 
 #include "logging.h"
 
@@ -29,16 +30,13 @@ DrmLeaseOutput::DrmLeaseOutput(DrmPipeline *pipeline, KWaylandServer::DrmLeaseDe
         pipeline->connector()->modelName(),
         QStringLiteral("%1 %2").arg(pipeline->connector()->edid()->manufacturerString(), pipeline->connector()->modelName())
     )
-    , DrmDisplayDevice(pipeline->gpu())
     , m_pipeline(pipeline)
 {
-    m_pipeline->setDisplayDevice(this);
     qCDebug(KWIN_DRM) << "offering connector" << m_pipeline->connector()->id() << "for lease";
 }
 
 DrmLeaseOutput::~DrmLeaseOutput()
 {
-    m_pipeline->setDisplayDevice(nullptr);
     qCDebug(KWIN_DRM) << "revoking lease offer for connector" << m_pipeline->connector()->id();
 }
 
@@ -76,69 +74,6 @@ KWaylandServer::DrmLeaseV1Interface *DrmLeaseOutput::lease() const
 DrmPipeline *DrmLeaseOutput::pipeline() const
 {
     return m_pipeline;
-}
-
-bool DrmLeaseOutput::present()
-{
-    return false;
-}
-
-bool DrmLeaseOutput::testScanout()
-{
-    return false;
-}
-
-DrmPlane::Transformations DrmLeaseOutput::softwareTransforms() const
-{
-    return DrmPlane::Transformation::Rotate0;
-}
-
-QSize DrmLeaseOutput::bufferSize() const
-{
-    return m_pipeline->bufferSize();
-}
-
-QSize DrmLeaseOutput::sourceSize() const
-{
-    return m_pipeline->sourceSize();
-}
-
-bool DrmLeaseOutput::isFormatSupported(uint32_t drmFormat) const
-{
-    return m_pipeline->isFormatSupported(drmFormat);
-}
-
-QVector<uint64_t> DrmLeaseOutput::supportedModifiers(uint32_t drmFormat) const
-{
-    return m_pipeline->supportedModifiers(drmFormat);
-}
-
-int DrmLeaseOutput::maxBpc() const
-{
-    if (const auto prop = m_pipeline->connector()->getProp(DrmConnector::PropertyIndex::MaxBpc)) {
-        return prop->maxValue();
-    } else {
-        return 8;
-    }
-}
-
-QRect DrmLeaseOutput::renderGeometry() const
-{
-    return QRect(QPoint(), m_pipeline->sourceSize());
-}
-
-DrmLayer *DrmLeaseOutput::outputLayer() const
-{
-    return m_pipeline->pending.layer.data();
-}
-
-void DrmLeaseOutput::frameFailed() const
-{
-}
-
-void DrmLeaseOutput::pageFlipped(std::chrono::nanoseconds timestamp) const
-{
-    Q_UNUSED(timestamp)
 }
 
 }

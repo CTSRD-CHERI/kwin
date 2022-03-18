@@ -16,19 +16,14 @@ namespace KWin
 
 DrmAbstractOutput::DrmAbstractOutput(DrmGpu *gpu)
     : AbstractWaylandOutput(gpu->platform())
-    , DrmDisplayDevice(gpu)
     , m_renderLoop(new RenderLoop(this))
+    , m_gpu(gpu)
 {
 }
 
 RenderLoop *DrmAbstractOutput::renderLoop() const
 {
     return m_renderLoop;
-}
-
-QRect DrmAbstractOutput::renderGeometry() const
-{
-    return geometry();
 }
 
 void DrmAbstractOutput::frameFailed() const
@@ -39,6 +34,27 @@ void DrmAbstractOutput::frameFailed() const
 void DrmAbstractOutput::pageFlipped(std::chrono::nanoseconds timestamp) const
 {
     RenderLoopPrivate::get(m_renderLoop)->notifyFrameCompleted(timestamp);
+}
+
+QVector<int32_t> DrmAbstractOutput::regionToRects(const QRegion &region) const
+{
+    const int height = pixelSize().height();
+    const QMatrix4x4 matrix = AbstractWaylandOutput::logicalToNativeMatrix(geometry(), scale(), transform());
+    QVector<EGLint> rects;
+    rects.reserve(region.rectCount() * 4);
+    for (const QRect &_rect : region) {
+        const QRect rect = matrix.mapRect(_rect);
+        rects << rect.left();
+        rects << height - (rect.y() + rect.height());
+        rects << rect.width();
+        rects << rect.height();
+    }
+    return rects;
+}
+
+DrmGpu *DrmAbstractOutput::gpu() const
+{
+    return m_gpu;
 }
 
 }

@@ -67,6 +67,9 @@ DesktopGridEffect::DesktopGridEffect()
     QAction* a = m_gestureAction;
 
     connect(a, &QAction::triggered, this, [this]() {
+        if (effects->hasActiveFullScreenEffect() && effects->activeFullScreenEffect() != this) {
+            return;
+        }
         if ((qreal(timeline.currentTime()) / qreal(timeline.duration())) > 0.5) {
             if (effects->isScreenLocked()) {
                 return;
@@ -74,14 +77,21 @@ DesktopGridEffect::DesktopGridEffect()
             activated = true;
             timeline.setDirection(QTimeLine::Forward);
             timelineRunning = true;
-        } else {
+        } else if (timeline.currentTime() > 0) {
             activated = false;
             timeline.setDirection(QTimeLine::Backward);
             timelineRunning = true;
+        } else {
+            finish();
         }
     });
-    effects->registerRealtimeTouchpadSwipeShortcut(SwipeDirection::Up, a, [this](qreal cb) {
-        if (activated) return;
+    effects->registerRealtimeTouchpadPinchShortcut(PinchDirection::Contracting, 4, a, [this](qreal cb) {
+        if (activated) {
+            return;
+        }
+        if (effects->hasActiveFullScreenEffect() && effects->activeFullScreenEffect() != this) {
+            return;
+        }
 
         if (timeline.currentValue() == 0) {
             activated = true;
@@ -89,7 +99,6 @@ DesktopGridEffect::DesktopGridEffect()
             activated = false;
         }
 
-        timeline.setDirection(QTimeLine::Forward);
         timeline.setCurrentTime(timeline.duration() * cb);
         effects->addRepaintFull();
     });
@@ -108,10 +117,10 @@ DesktopGridEffect::DesktopGridEffect()
     s->setObjectName(QStringLiteral("ShowDesktopGrid"));
     s->setText(i18n("Show Desktop Grid"));
 
-    KGlobalAccel::self()->setDefaultShortcut(s, QList<QKeySequence>() << Qt::CTRL + Qt::Key_F8);
-    KGlobalAccel::self()->setShortcut(s, QList<QKeySequence>() << Qt::CTRL + Qt::Key_F8);
+    KGlobalAccel::self()->setDefaultShortcut(s, QList<QKeySequence>() << (Qt::CTRL | Qt::Key_F8));
+    KGlobalAccel::self()->setShortcut(s, QList<QKeySequence>() << (Qt::CTRL | Qt::Key_F8));
     shortcut = KGlobalAccel::self()->shortcut(s);
-    effects->registerGlobalShortcut(Qt::CTRL + Qt::Key_F8, s);
+    effects->registerGlobalShortcut(Qt::CTRL | Qt::Key_F8, s);
 
     connect(s, &QAction::triggered, this, &DesktopGridEffect::toggle);
 
@@ -307,7 +316,7 @@ void DesktopGridEffect::postPaintScreen()
 {
     bool resetLastPresentTime = true;
 
-    if (activated ? timeline.currentValue() != 1 : timeline.currentValue() != 0) {
+    if (timelineRunning || activated ? timeline.currentValue() != 1 : timeline.currentValue() != 0) {
         effects->addRepaintFull(); // Repaint during zoom
         resetLastPresentTime = false;
     }
@@ -743,7 +752,7 @@ void DesktopGridEffect::grabbedKeyboardEvent(QKeyEvent* e)
     if (e->type() == QEvent::KeyPress) {
         // check for global shortcuts
         // HACK: keyboard grab disables the global shortcuts so we have to check for global shortcut (bug 156155)
-        if (shortcut.contains(e->key() + e->modifiers())) {
+        if (shortcut.contains(e->key() | e->modifiers())) {
             deactivate();
             return;
         }

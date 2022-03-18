@@ -13,15 +13,18 @@
 namespace KWin
 {
 
-class DrmLayer;
-class DrmDisplayDevice;
+class DrmPipelineLayer;
+class DrmVirtualOutput;
+class DrmPipeline;
+class DrmOutputLayer;
 
 class DrmRenderBackend
 {
 public:
     virtual ~DrmRenderBackend() = default;
 
-    virtual QSharedPointer<DrmLayer> createLayer(DrmDisplayDevice *displayDevice) = 0;
+    virtual QSharedPointer<DrmPipelineLayer> createDrmPipelineLayer(DrmPipeline *pipeline) = 0;
+    virtual QSharedPointer<DrmOutputLayer> createLayer(DrmVirtualOutput *output) = 0;
 
 };
 

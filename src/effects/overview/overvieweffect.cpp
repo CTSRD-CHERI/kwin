@@ -30,7 +30,7 @@ OverviewEffect::OverviewEffect()
     m_shutdownTimer->setSingleShot(true);
     connect(m_shutdownTimer, &QTimer::timeout, this, &OverviewEffect::realDeactivate);
 
-    const QKeySequence defaultToggleShortcut = Qt::META + Qt::Key_W;
+    const QKeySequence defaultToggleShortcut = Qt::META | Qt::Key_W;
     m_toggleAction = new QAction(this);
     connect(m_toggleAction, &QAction::triggered, this, &OverviewEffect::toggle);
     m_toggleAction->setObjectName(QStringLiteral("Overview"));
@@ -39,6 +39,7 @@ OverviewEffect::OverviewEffect()
     KGlobalAccel::self()->setShortcut(m_toggleAction, {defaultToggleShortcut});
     m_toggleShortcut = KGlobalAccel::self()->shortcut(m_toggleAction);
     effects->registerGlobalShortcut({defaultToggleShortcut}, m_toggleAction);
+    effects->registerTouchpadSwipeShortcut(SwipeDirection::Up, 4, m_toggleAction);
 
     connect(effects, &EffectsHandler::screenAboutToLock, this, &OverviewEffect::realDeactivate);
 
@@ -182,7 +183,7 @@ void OverviewEffect::quickDeactivate()
 
 void OverviewEffect::grabbedKeyboardEvent(QKeyEvent *keyEvent)
 {
-    if (m_toggleShortcut.contains(keyEvent->key() + keyEvent->modifiers())) {
+    if (m_toggleShortcut.contains(keyEvent->key() | keyEvent->modifiers())) {
         if (keyEvent->type() == QEvent::KeyPress) {
             toggle();
         }

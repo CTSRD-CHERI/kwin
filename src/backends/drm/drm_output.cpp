@@ -46,7 +46,7 @@ DrmOutput::DrmOutput(DrmPipeline *pipeline)
     , m_pipeline(pipeline)
     , m_connector(pipeline->connector())
 {
-    m_pipeline->setDisplayDevice(this);
+    m_pipeline->setOutput(this);
     const auto conn = m_pipeline->connector();
     m_renderLoop->setRefreshRate(m_pipeline->pending.mode->refreshRate());
     setSubPixelInternal(conn->subpixel());
@@ -79,7 +79,7 @@ DrmOutput::DrmOutput(DrmPipeline *pipeline)
 
 DrmOutput::~DrmOutput()
 {
-    m_pipeline->setDisplayDevice(nullptr);
+    m_pipeline->setOutput(nullptr);
 }
 
 static bool isCursorSpriteCompatible(const QImage *buffer, const QImage *sprite)
@@ -119,21 +119,12 @@ void DrmOutput::updateCursor()
     }
     const auto plane = m_pipeline->pending.crtc->cursorPlane();
     if (!m_cursor || (plane && !plane->formats().value(m_cursor->drmFormat()).contains(DRM_FORMAT_MOD_LINEAR))) {
-        if (plane) {
-            const auto formatModifiers = plane->formats();
-            const auto formats = formatModifiers.keys();
-            for (uint32_t format : formats) {
-                if (!formatModifiers[format].contains(DRM_FORMAT_MOD_LINEAR)) {
-                    continue;
-                }
-                m_cursor = QSharedPointer<DumbSwapchain>::create(m_gpu, m_gpu->cursorSize(), format, QImage::Format::Format_ARGB32_Premultiplied);
-                if (!m_cursor->isEmpty()) {
-                    break;
-                }
-            }
-        } else {
-            m_cursor = QSharedPointer<DumbSwapchain>::create(m_gpu, m_gpu->cursorSize(), DRM_FORMAT_XRGB8888, QImage::Format::Format_ARGB32_Premultiplied);
+        if (plane && (!plane->formats().contains(DRM_FORMAT_ARGB8888) || !plane->formats().value(DRM_FORMAT_ARGB8888).contains(DRM_FORMAT_MOD_LINEAR))) {
+            m_pipeline->setCursor(nullptr);
+            m_setCursorSuccessful = false;
+            return;
         }
+        m_cursor = QSharedPointer<DumbSwapchain>::create(m_gpu, m_gpu->cursorSize(), plane ? DRM_FORMAT_ARGB8888 : DRM_FORMAT_XRGB8888, QImage::Format::Format_ARGB32_Premultiplied);
         if (!m_cursor || m_cursor->isEmpty()) {
             m_pipeline->setCursor(nullptr);
             m_setCursorSuccessful = false;
@@ -340,11 +331,6 @@ bool DrmOutput::present()
     }
 }
 
-bool DrmOutput::testScanout()
-{
-    return m_pipeline->testScanout();
-}
-
 int DrmOutput::gammaRampSize() const
 {
     return m_pipeline->pending.crtc ? m_pipeline->pending.crtc->gammaRampSize() : 256;
@@ -371,26 +357,6 @@ DrmConnector *DrmOutput::connector() const
 DrmPipeline *DrmOutput::pipeline() const
 {
     return m_pipeline;
-}
-
-QSize DrmOutput::bufferSize() const
-{
-    return m_pipeline->bufferSize();
-}
-
-QSize DrmOutput::sourceSize() const
-{
-    return m_pipeline->sourceSize();
-}
-
-bool DrmOutput::isFormatSupported(uint32_t drmFormat) const
-{
-    return m_pipeline->isFormatSupported(drmFormat);
-}
-
-QVector<uint64_t> DrmOutput::supportedModifiers(uint32_t drmFormat) const
-{
-    return m_pipeline->supportedModifiers(drmFormat);
 }
 
 bool DrmOutput::queueChanges(const WaylandOutputConfig &config)
@@ -449,28 +415,12 @@ void DrmOutput::revertQueuedChanges()
     m_pipeline->revertPendingChanges();
 }
 
-int DrmOutput::maxBpc() const
-{
-    auto prop = m_connector->getProp(DrmConnector::PropertyIndex::MaxBpc);
-    return prop ? prop->maxValue() : 8;
-}
-
 bool DrmOutput::usesSoftwareCursor() const
 {
     return !m_setCursorSuccessful || !m_moveCursorSuccessful;
 }
 
-DrmPlane::Transformations DrmOutput::softwareTransforms() const
-{
-    if (m_pipeline->pending.bufferTransformation == m_pipeline->pending.sourceTransformation) {
-        return DrmPlane::Transformation::Rotate0;
-    } else {
-        // TODO handle sourceTransformation != Rotate0
-        return m_pipeline->pending.sourceTransformation;
-    }
-}
-
-DrmLayer *DrmOutput::outputLayer() const
+DrmOutputLayer *DrmOutput::outputLayer() const
 {
     return m_pipeline->pending.layer.data();
 }

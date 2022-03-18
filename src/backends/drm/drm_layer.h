@@ -18,24 +18,35 @@ namespace KWin
 
 class SurfaceItem;
 class DrmBuffer;
-class DrmDisplayDevice;
+class GLTexture;
+class DrmPipeline;
 
-class DrmLayer : public QObject
+class DrmOutputLayer : public QObject
 {
     Q_OBJECT
 public:
-    DrmLayer(DrmDisplayDevice *device);
-    virtual ~DrmLayer();
+    virtual ~DrmOutputLayer();
 
-    virtual std::optional<QRegion> startRendering() = 0;
-    virtual bool endRendering(const QRegion &damagedRegion) = 0;
+    virtual void aboutToStartPainting(const QRegion &damagedRegion);
+    virtual std::optional<QRegion> startRendering();
+    virtual bool endRendering(const QRegion &damagedRegion);
 
     /**
      * attempts to directly scan out the current buffer of the surfaceItem
      * @returns true if scanout was successful
      *          false if rendering is required
      */
-    virtual bool scanout(SurfaceItem *surfaceItem) = 0;
+    virtual bool scanout(SurfaceItem *surfaceItem);
+
+    virtual QSharedPointer<GLTexture> texture() const;
+
+    virtual QRegion currentDamage() const;
+};
+
+class DrmPipelineLayer : public DrmOutputLayer
+{
+public:
+    DrmPipelineLayer(DrmPipeline *pipeline);
 
     /**
      * @returns a buffer for atomic test commits
@@ -44,13 +55,10 @@ public:
     virtual QSharedPointer<DrmBuffer> testBuffer() = 0;
 
     virtual QSharedPointer<DrmBuffer> currentBuffer() const = 0;
-    virtual QRegion currentDamage() const = 0;
-    virtual bool hasDirectScanoutBuffer() const = 0;
-
-    DrmDisplayDevice *displayDevice() const;
+    virtual bool hasDirectScanoutBuffer() const;
 
 protected:
-    DrmDisplayDevice *const m_displayDevice;
+    DrmPipeline *const m_pipeline;
 };
 
 }
