@@ -33,7 +33,7 @@ public:
     explicit SceneOpenGL(OpenGLBackend *backend, QObject *parent = nullptr);
     ~SceneOpenGL() override;
     bool initFailed() const override;
-    void paint(const QRegion &damage, const QRegion &repaint, QRegion &update, QRegion &valid) override;
+    void paint(const QRegion &region) override;
     Scene::EffectFrame *createEffectFrame(EffectFrameImpl *frame) override;
     Shadow *createShadow(Toplevel *toplevel) override;
     bool makeOpenGLContextCurrent() override;
@@ -45,22 +45,24 @@ public:
     SurfaceTexture *createSurfaceTextureX11(SurfacePixmapX11 *pixmap) override;
     SurfaceTexture *createSurfaceTextureWayland(SurfacePixmapWayland *pixmap) override;
 
-    OpenGLBackend *backend() const {
+    OpenGLBackend *backend() const
+    {
         return m_backend;
     }
 
     QVector<QByteArray> openGLPlatformInterfaceExtensions() const override;
     QSharedPointer<GLTexture> textureForOutput(AbstractOutput *output) const override;
 
-    QMatrix4x4 screenProjectionMatrix() const override { return m_screenProjectionMatrix; }
+    QMatrix4x4 screenProjectionMatrix() const override
+    {
+        return m_screenProjectionMatrix;
+    }
 
     static SceneOpenGL *createScene(OpenGLBackend *backend, QObject *parent);
     static bool supported(OpenGLBackend *backend);
 
 protected:
     void paintBackground(const QRegion &region) override;
-    void aboutToStartPainting(AbstractOutput *output, const QRegion &damage) override;
-    void extendPaintRegion(QRegion &region, bool opaqueFullscreen) override;
     QMatrix4x4 transformation(int mask, const ScreenPaintData &data) const;
     void paintDesktop(int desktop, int mask, const QRegion &region, ScreenPaintData &data) override;
     void paintOffscreenQuickView(OffscreenQuickView *w) override;
@@ -68,11 +70,11 @@ protected:
     void paintSimpleScreen(int mask, const QRegion &region) override;
     void paintGenericScreen(int mask, const ScreenPaintData &data) override;
     Scene::Window *createWindow(Toplevel *t) override;
-    void finalDrawWindow(EffectWindowImpl* w, int mask, const QRegion &region, WindowPaintData& data) override;
+    void finalDrawWindow(EffectWindowImpl *w, int mask, const QRegion &region, WindowPaintData &data) override;
 
 private:
-    void doPaintBackground(const QVector< float >& vertices);
-    void performPaintWindow(EffectWindowImpl* w, int mask, const QRegion &region, WindowPaintData& data);
+    void doPaintBackground(const QVector<float> &vertices);
+    void performPaintWindow(EffectWindowImpl *w, int mask, const QRegion &region, WindowPaintData &data);
 
     bool init_ok = true;
     OpenGLBackend *m_backend;
@@ -126,7 +128,7 @@ class SceneOpenGL::EffectFrame
     : public Scene::EffectFrame
 {
 public:
-    EffectFrame(EffectFrameImpl* frame, SceneOpenGL *scene);
+    EffectFrame(EffectFrameImpl *frame, SceneOpenGL *scene);
     ~EffectFrame() override;
 
     void free() override;
@@ -155,8 +157,8 @@ private:
     GLVertexBuffer *m_unstyledVBO;
     SceneOpenGL *m_scene;
 
-    static GLTexture* m_unstyledTexture;
-    static QPixmap* m_unstyledPixmap; // need to keep the pixmap around to workaround some driver problems
+    static GLTexture *m_unstyledTexture;
+    static QPixmap *m_unstyledPixmap; // need to keep the pixmap around to workaround some driver problems
     static void updateUnstyledTexture(); // Update OpenGL unstyled frame texture
 };
 
@@ -173,11 +175,14 @@ public:
     explicit SceneOpenGLShadow(Toplevel *toplevel);
     ~SceneOpenGLShadow() override;
 
-    GLTexture *shadowTexture() {
+    GLTexture *shadowTexture()
+    {
         return m_texture.data();
     }
+
 protected:
     bool prepareBackend() override;
+
 private:
     QSharedPointer<GLTexture> m_texture;
 };
@@ -198,10 +203,12 @@ public:
 
     void render(const QRegion &region) override;
 
-    GLTexture *texture() {
+    GLTexture *texture()
+    {
         return m_texture.data();
     }
-    GLTexture *texture() const {
+    GLTexture *texture() const
+    {
         return m_texture.data();
     }
 

@@ -56,16 +56,10 @@ void OpenGLBackend::copyPixels(const QRegion &region)
     }
 }
 
-QSharedPointer<KWin::GLTexture> OpenGLBackend::textureForOutput(AbstractOutput* output) const
+QSharedPointer<KWin::GLTexture> OpenGLBackend::textureForOutput(AbstractOutput *output) const
 {
     Q_UNUSED(output)
     return {};
-}
-
-void OpenGLBackend::aboutToStartPainting(AbstractOutput *output, const QRegion &damage)
-{
-    Q_UNUSED(output)
-    Q_UNUSED(damage)
 }
 
 SurfaceTexture *OpenGLBackend::createSurfaceTextureInternal(SurfacePixmapInternal *pixmap)

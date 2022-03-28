@@ -11,20 +11,26 @@
 
 #include <kwin_export.h>
 
+#include <QMap>
 #include <QObject>
 #include <QPointF>
 #include <QSizeF>
-#include <QMap>
 #include <QVector>
 
 namespace KWin
 {
-static const qreal DEFAULT_MINIMUM_SCALE_DELTA = .2; // 20%
+/*
+ * Everytime the scale of the gesture changes by this much, the callback changes by 1.
+ * This is the amount of change for 1 unit of change, like switch by 1 desktop.
+ * */
+static const qreal DEFAULT_UNIT_SCALE_DELTA = .2; // 20%
+
 class Gesture : public QObject
 {
     Q_OBJECT
 public:
     ~Gesture() override;
+
 protected:
     explicit Gesture(QObject *parent);
 
@@ -99,6 +105,11 @@ Q_SIGNALS:
      */
     void progress(qreal);
 
+    /**
+     * The progress in actual pixel distance traveled by the fingers
+     */
+    void deltaProgress(const QSizeF &delta);
+
 private:
     bool m_minimumFingerCountRelevant = false;
     uint m_minimumFingerCount = 0;
@@ -143,9 +154,9 @@ public:
     qreal minimumScaleDelta() const;
 
     /**
-    * scaleDelta is the % scale difference needed to trigger
-    * 0.25 will trigger when scale reaches 0.75 or 1.25
-    */
+     * scaleDelta is the % scale difference needed to trigger
+     * 0.25 will trigger when scale reaches 0.75 or 1.25
+     */
     void setMinimumScaleDelta(const qreal &scaleDelta);
     bool isMinimumScaleDeltaRelevant() const;
 
@@ -166,7 +177,7 @@ private:
     uint m_maximumFingerCount = 0;
     Direction m_direction = Direction::Expanding;
     bool m_minimumScaleDeltaRelevant = false;
-    qreal m_minimumScaleDelta = DEFAULT_MINIMUM_SCALE_DELTA;
+    qreal m_minimumScaleDelta = DEFAULT_UNIT_SCALE_DELTA;
 };
 
 class KWIN_EXPORT GestureRecognizer : public QObject
@@ -189,7 +200,7 @@ public:
     void endSwipeGesture();
 
     int startPinchGesture(uint fingerCount);
-    void updatePinchGesture(qreal scale, qreal angleDelta, const QSizeF& posDelta);
+    void updatePinchGesture(qreal scale, qreal angleDelta, const QSizeF &posDelta);
     void cancelPinchGesture();
     void endPinchGesture();
 

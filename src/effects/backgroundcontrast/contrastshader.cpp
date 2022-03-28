@@ -21,7 +21,9 @@ namespace KWin
 {
 
 ContrastShader::ContrastShader()
-    : mValid(false), shader(nullptr), m_opacity(1)
+    : mValid(false)
+    , shader(nullptr)
+    , m_opacity(1)
 {
 }
 
@@ -59,8 +61,9 @@ float ContrastShader::opacity() const
 
 void ContrastShader::setColorMatrix(const QMatrix4x4 &matrix)
 {
-    if (!isValid())
+    if (!isValid()) {
         return;
+    }
 
     ShaderManager::instance()->pushShader(shader);
     shader->setUniform(colorMatrixLocation, matrix);
@@ -69,24 +72,27 @@ void ContrastShader::setColorMatrix(const QMatrix4x4 &matrix)
 
 void ContrastShader::setTextureMatrix(const QMatrix4x4 &matrix)
 {
-    if (!isValid())
+    if (!isValid()) {
         return;
+    }
 
     shader->setUniform(textureMatrixLocation, matrix);
 }
 
 void ContrastShader::setModelViewProjectionMatrix(const QMatrix4x4 &matrix)
 {
-    if (!isValid())
+    if (!isValid()) {
         return;
+    }
 
     shader->setUniform(mvpMatrixLocation, matrix);
 }
 
 void ContrastShader::bind()
 {
-    if (!isValid())
+    if (!isValid()) {
         return;
+    }
 
     ShaderManager::instance()->pushShader(shader);
 }
@@ -107,11 +113,11 @@ void ContrastShader::init()
     QByteArray vertexSource;
     QByteArray fragmentSource;
 
-    const QByteArray attribute   = core ? "in"                : "attribute";
-    const QByteArray varying_in  = core ? (gles ? "in" : "noperspective in") : "varying";
+    const QByteArray attribute = core ? "in" : "attribute";
+    const QByteArray varying_in = core ? (gles ? "in" : "noperspective in") : "varying";
     const QByteArray varying_out = core ? (gles ? "out" : "noperspective out") : "varying";
-    const QByteArray texture2D   = core ? "texture"           : "texture2D";
-    const QByteArray fragColor   = core ? "fragColor"         : "gl_FragColor";
+    const QByteArray texture2D = core ? "texture" : "texture2D";
+    const QByteArray fragColor = core ? "fragColor" : "gl_FragColor";
 
     // Vertex shader
     // ===================================================================
@@ -138,7 +144,6 @@ void ContrastShader::init()
     stream << "}\n";
     stream.flush();
 
-
     // Fragment shader
     // ===================================================================
     QTextStream stream2(&fragmentSource);
@@ -157,8 +162,9 @@ void ContrastShader::init()
     stream2 << "uniform float opacity;\n";
     stream2 << varying_in << " vec4 varyingTexCoords;\n";
 
-    if (core)
+    if (core) {
         stream2 << "out vec4 fragColor;\n\n";
+    }
 
     stream2 << "void main(void)\n";
     stream2 << "{\n";
@@ -178,8 +184,8 @@ void ContrastShader::init()
     if (shader->isValid()) {
         colorMatrixLocation = shader->uniformLocation("colorMatrix");
         textureMatrixLocation = shader->uniformLocation("textureMatrix");
-        mvpMatrixLocation     = shader->uniformLocation("modelViewProjectionMatrix");
-        opacityLocation       = shader->uniformLocation("opacity");
+        mvpMatrixLocation = shader->uniformLocation("modelViewProjectionMatrix");
+        opacityLocation = shader->uniformLocation("opacity");
 
         QMatrix4x4 modelViewProjection;
         const QSize screenSize = effects->virtualScreenSize();

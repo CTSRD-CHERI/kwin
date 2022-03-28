@@ -177,7 +177,6 @@ target_link_libraries(kwin
     KF5::I18n
     KF5::Package
     KF5::Plasma
-    KF5::QuickAddons
     KF5::WindowSystem
 
     KDecoration2::KDecoration
@@ -201,11 +200,13 @@ target_link_libraries(kwin
 
     UDev::UDev
     XKB::XKB
-    Qt5::XkbCommonSupportPrivate
     epoxy::epoxy
 
     Threads::Threads
 )
+if (QT_MAJOR_VERSION EQUAL "5")
+    target_link_libraries(kwin Qt5::XkbCommonSupportPrivate)
+endif()
 
 if (KWIN_BUILD_NOTIFICATIONS)
     target_link_libraries(kwin KF5::Notifications)

@@ -20,30 +20,30 @@
 #include <kwinglplatform.h>
 #include <kwinoffscreenquickview.h>
 
-#include "utils/common.h"
 #include "abstract_client.h"
+#include "abstract_output.h"
 #include "composite.h"
+#include "cursor.h"
+#include "decorations/decoratedclient.h"
 #include "effects.h"
 #include "lanczosfilter.h"
 #include "main.h"
 #include "overlaywindow.h"
 #include "renderloop.h"
-#include "cursor.h"
-#include "decorations/decoratedclient.h"
 #include "shadowitem.h"
 #include "surfaceitem.h"
+#include "utils/common.h"
 #include "windowitem.h"
-#include "abstract_output.h"
 
 #include <cmath>
 #include <cstddef>
 
 #include <QGraphicsScale>
+#include <QMatrix4x4>
 #include <QPainter>
 #include <QStringList>
 #include <QVector2D>
 #include <QVector4D>
-#include <QMatrix4x4>
 #include <QtMath>
 
 namespace KWin
@@ -97,15 +97,10 @@ bool SceneOpenGL::initFailed() const
     return !init_ok;
 }
 
-void SceneOpenGL::aboutToStartPainting(AbstractOutput *output, const QRegion &damage)
-{
-    m_backend->aboutToStartPainting(output, damage);
-}
-
-void SceneOpenGL::paint(const QRegion &damage, const QRegion &repaint, QRegion &update, QRegion &valid)
+void SceneOpenGL::paint(const QRegion &region)
 {
     GLVertexBuffer::streamingBuffer()->beginFrame();
-    paintScreen(damage, repaint, &update, &valid);
+    paintScreen(region);
     GLVertexBuffer::streamingBuffer()->endOfFrame();
 }
 
@@ -113,15 +108,17 @@ QMatrix4x4 SceneOpenGL::transformation(int mask, const ScreenPaintData &data) co
 {
     QMatrix4x4 matrix;
 
-    if (!(mask & PAINT_SCREEN_TRANSFORMED))
+    if (!(mask & PAINT_SCREEN_TRANSFORMED)) {
         return matrix;
+    }
 
     matrix.translate(data.translation());
     const QVector3D scale = data.scale();
     matrix.scale(scale.x(), scale.y(), scale.z());
 
-    if (data.rotationAngle() == 0.0)
+    if (data.rotationAngle() == 0.0) {
         return matrix;
+    }
 
     // Apply the rotation
     // cannot use data.rotation->applyTo(&matrix) as QGraphicsRotation uses projectedRotate to map back to 2D
@@ -136,7 +133,7 @@ QMatrix4x4 SceneOpenGL::transformation(int mask, const ScreenPaintData &data) co
 void SceneOpenGL::paintBackground(const QRegion &region)
 {
     if (region == infiniteRegion()) {
-        glClearColor(0, 0, 0, 1);
+        glClearColor(0, 0, 0, 0);
         glClear(GL_COLOR_BUFFER_BIT);
     } else if (!region.isEmpty()) {
         QVector<float> verts;
@@ -151,34 +148,6 @@ void SceneOpenGL::paintBackground(const QRegion &region)
             verts << r.x() + r.width() << r.y();
         }
         doPaintBackground(verts);
-    }
-}
-
-void SceneOpenGL::extendPaintRegion(QRegion &region, bool opaqueFullscreen)
-{
-    if (m_backend->supportsBufferAge())
-        return;
-
-    if (options->glPreferBufferSwap() == Options::ExtendDamage) { // only Extend "large" repaints
-        const QRegion displayRegion(geometry());
-        uint damagedPixels = 0;
-        const QSize &sceneSize = geometry().size();
-        const uint fullRepaintLimit = (opaqueFullscreen?0.49f:0.748f)*sceneSize.width()*sceneSize.height();
-        // 16:9 is 75% of 4:3 and 2.55:1 is 49.01% of 5:4
-        // (5:4 is the most square format and 2.55:1 is Cinemascope55 - the widest ever shot
-        // movie aspect - two times ;-) It's a Fox format, though, so maybe we want to restrict
-        // to 2.20:1 - Panavision - which has actually been used for interesting movies ...)
-        // would be 57% of 5/4
-        for (const QRect &r : region) {
-//                 damagedPixels += r.width() * r.height(); // combined window damage test
-            damagedPixels = r.width() * r.height(); // experimental single window damage testing
-            if (damagedPixels > fullRepaintLimit) {
-                region = displayRegion;
-                return;
-            }
-        }
-    } else if (options->glPreferBufferSwap() == Options::PaintFullScreen) { // forced full rePaint
-        region = QRegion(geometry());
     }
 }
 
@@ -265,7 +234,7 @@ QVector<QByteArray> SceneOpenGL::openGLPlatformInterfaceExtensions() const
     return m_backend->extensions().toVector();
 }
 
-QSharedPointer<GLTexture> SceneOpenGL::textureForOutput(AbstractOutput* output) const
+QSharedPointer<GLTexture> SceneOpenGL::textureForOutput(AbstractOutput *output) const
 {
     return m_backend->textureForOutput(output);
 }
@@ -323,11 +292,11 @@ void SceneOpenGL::paintGenericScreen(int mask, const ScreenPaintData &data)
     Scene::paintGenericScreen(mask, data);
 }
 
-void SceneOpenGL::doPaintBackground(const QVector< float >& vertices)
+void SceneOpenGL::doPaintBackground(const QVector<float> &vertices)
 {
     GLVertexBuffer *vbo = GLVertexBuffer::streamingBuffer();
     vbo->reset();
-    vbo->setUseColor(true);
+    vbo->setColor(QColor(0, 0, 0, 0));
     vbo->setData(vertices.count() / 2, 2, vertices.data(), nullptr);
 
     ShaderBinder binder(ShaderTrait::UniformColor);
@@ -341,7 +310,7 @@ Scene::Window *SceneOpenGL::createWindow(Toplevel *t)
     return new OpenGLWindow(t, this);
 }
 
-void SceneOpenGL::finalDrawWindow(EffectWindowImpl* w, int mask, const QRegion &region, WindowPaintData& data)
+void SceneOpenGL::finalDrawWindow(EffectWindowImpl *w, int mask, const QRegion &region, WindowPaintData &data)
 {
     if (waylandServer() && waylandServer()->isScreenLocked() && !w->window()->isLockScreen() && !w->window()->isInputMethod()) {
         return;
@@ -349,15 +318,16 @@ void SceneOpenGL::finalDrawWindow(EffectWindowImpl* w, int mask, const QRegion &
     performPaintWindow(w, mask, region, data);
 }
 
-void SceneOpenGL::performPaintWindow(EffectWindowImpl* w, int mask, const QRegion &region, WindowPaintData& data)
+void SceneOpenGL::performPaintWindow(EffectWindowImpl *w, int mask, const QRegion &region, WindowPaintData &data)
 {
     if (mask & PAINT_WINDOW_LANCZOS) {
         if (!m_lanczosFilter) {
             m_lanczosFilter = new LanczosFilter(this);
         }
         m_lanczosFilter->performPaint(w, mask, region, data);
-    } else
+    } else {
         w->sceneWindow()->performPaint(mask, region, data);
+    }
 }
 
 //****************************************
@@ -384,10 +354,11 @@ QVector4D OpenGLWindow::modulate(float opacity, float brightness) const
 
 void OpenGLWindow::setBlendEnabled(bool enabled)
 {
-    if (enabled && !m_blendingEnabled)
+    if (enabled && !m_blendingEnabled) {
         glEnable(GL_BLEND);
-    else if (!enabled && m_blendingEnabled)
+    } else if (!enabled && m_blendingEnabled) {
         glDisable(GL_BLEND);
+    }
 
     m_blendingEnabled = enabled;
 }
@@ -396,7 +367,7 @@ static GLTexture *bindSurfaceTexture(SurfaceItem *surfaceItem)
 {
     SurfacePixmap *surfacePixmap = surfaceItem->pixmap();
     auto platformSurfaceTexture =
-            static_cast<OpenGLSurfaceTexture *>(surfacePixmap->texture());
+        static_cast<OpenGLSurfaceTexture *>(surfacePixmap->texture());
     if (surfacePixmap->isDiscarded()) {
         return platformSurfaceTexture->texture();
     }
@@ -538,14 +509,16 @@ QMatrix4x4 OpenGLWindow::modelViewProjectionMatrix(int mask, const WindowPaintDa
     // the same dimensions as the default framebuffer.
     //
     // Note that the screen transformation is not applied here.
-    if (!pMatrix.isIdentity())
+    if (!pMatrix.isIdentity()) {
         return pMatrix * mvMatrix;
+    }
 
     // If an effect has specified a model-view matrix, we multiply that matrix
     // with the default projection matrix.  If the effect hasn't specified a
     // model-view matrix, mvMatrix will be the identity matrix.
-    if (mask & Scene::PAINT_SCREEN_TRANSFORMED)
+    if (mask & Scene::PAINT_SCREEN_TRANSFORMED) {
         return m_scene->screenProjectionMatrix() * mvMatrix;
+    }
 
     return m_scene->renderTargetProjectionMatrix() * mvMatrix;
 }
@@ -583,7 +556,7 @@ void OpenGLWindow::performPaint(int mask, const QRegion &region, const WindowPai
         return;
     }
 
-    RenderContext renderContext {
+    RenderContext renderContext{
         .clip = region,
         .paintData = data,
         .hardwareClipping = region != infiniteRegion() && ((mask & Scene::PAINT_WINDOW_TRANSFORMED) || (mask & Scene::PAINT_SCREEN_TRANSFORMED)),
@@ -607,11 +580,13 @@ void OpenGLWindow::performPaint(int mask, const QRegion &region, const WindowPai
     if (!shader) {
         ShaderTraits traits = ShaderTrait::MapTexture;
 
-        if (data.opacity() != 1.0 || data.brightness() != 1.0 || data.crossFadeProgress() != 1.0)
+        if (data.opacity() != 1.0 || data.brightness() != 1.0 || data.crossFadeProgress() != 1.0) {
             traits |= ShaderTrait::Modulate;
+        }
 
-        if (data.saturation() != 1.0)
+        if (data.saturation() != 1.0) {
             traits |= ShaderTrait::AdjustSaturation;
+        }
 
         shader = ShaderManager::instance()->pushShader(traits);
     }
@@ -627,20 +602,21 @@ void OpenGLWindow::performPaint(int mask, const QRegion &region, const WindowPai
     }
 
     const GLVertexAttrib attribs[] = {
-        { VA_Position, 2, GL_FLOAT, offsetof(GLVertex2D, position) },
-        { VA_TexCoord, 2, GL_FLOAT, offsetof(GLVertex2D, texcoord) },
+        {VA_Position, 2, GL_FLOAT, offsetof(GLVertex2D, position)},
+        {VA_TexCoord, 2, GL_FLOAT, offsetof(GLVertex2D, texcoord)},
     };
 
     GLVertexBuffer *vbo = GLVertexBuffer::streamingBuffer();
     vbo->reset();
     vbo->setAttribLayout(attribs, 2, sizeof(GLVertex2D));
 
-    GLVertex2D *map = (GLVertex2D *) vbo->map(size);
+    GLVertex2D *map = (GLVertex2D *)vbo->map(size);
 
     for (int i = 0, v = 0; i < renderContext.renderNodes.count(); i++) {
         RenderNode &renderNode = renderContext.renderNodes[i];
-        if (renderNode.quads.isEmpty() || !renderNode.texture)
+        if (renderNode.quads.isEmpty() || !renderNode.texture) {
             continue;
+        }
 
         renderNode.firstVertex = v;
         renderNode.vertexCount = renderNode.quads.count() * verticesPerQuad;
@@ -668,8 +644,9 @@ void OpenGLWindow::performPaint(int mask, const QRegion &region, const WindowPai
     const QMatrix4x4 modelViewProjection = modelViewProjectionMatrix(mask, data);
     for (int i = 0; i < renderContext.renderNodes.count(); i++) {
         const RenderNode &renderNode = renderContext.renderNodes[i];
-        if (renderNode.vertexCount == 0)
+        if (renderNode.vertexCount == 0) {
             continue;
+        }
 
         setBlendEnabled(renderNode.hasAlpha || renderNode.opacity < 1.0);
 
@@ -693,8 +670,9 @@ void OpenGLWindow::performPaint(int mask, const QRegion &region, const WindowPai
 
     setBlendEnabled(false);
 
-    if (!data.shader)
+    if (!data.shader) {
         ShaderManager::instance()->popShader();
+    }
 
     if (renderContext.hardwareClipping) {
         glDisable(GL_SCISSOR_TEST);
@@ -705,10 +683,10 @@ void OpenGLWindow::performPaint(int mask, const QRegion &region, const WindowPai
 // SceneOpenGL::EffectFrame
 //****************************************
 
-GLTexture* SceneOpenGL::EffectFrame::m_unstyledTexture = nullptr;
-QPixmap* SceneOpenGL::EffectFrame::m_unstyledPixmap = nullptr;
+GLTexture *SceneOpenGL::EffectFrame::m_unstyledTexture = nullptr;
+QPixmap *SceneOpenGL::EffectFrame::m_unstyledPixmap = nullptr;
 
-SceneOpenGL::EffectFrame::EffectFrame(EffectFrameImpl* frame, SceneOpenGL *scene)
+SceneOpenGL::EffectFrame::EffectFrame(EffectFrameImpl *frame, SceneOpenGL *scene)
     : Scene::EffectFrame(frame)
     , m_texture(nullptr)
     , m_textTexture(nullptr)
@@ -791,12 +769,13 @@ void SceneOpenGL::EffectFrame::crossFadeText()
 
 void SceneOpenGL::EffectFrame::render(const QRegion &_region, double opacity, double frameOpacity)
 {
-    if (m_effectFrame->geometry().isEmpty())
+    if (m_effectFrame->geometry().isEmpty()) {
         return; // Nothing to display
+    }
 
     Q_UNUSED(_region); // TODO: Old region doesn't seem to work with OpenGL
 
-    GLShader* shader = m_effectFrame->shader();
+    GLShader *shader = m_effectFrame->shader();
     if (!shader) {
         shader = ShaderManager::instance()->pushShader(ShaderTrait::MapTexture | ShaderTrait::Modulate);
     } else if (shader) {
@@ -939,8 +918,9 @@ void SceneOpenGL::EffectFrame::render(const QRegion &_region, double opacity, do
         m_unstyledVBO->render(GL_TRIANGLES);
         m_unstyledTexture->unbind();
     } else if (m_effectFrame->style() == EffectFrameStyled) {
-        if (!m_texture)   // Lazy creation
+        if (!m_texture) { // Lazy creation
             updateTexture();
+        }
 
         if (shader) {
             const float a = opacity * frameOpacity;
@@ -948,7 +928,7 @@ void SceneOpenGL::EffectFrame::render(const QRegion &_region, double opacity, do
         }
         m_texture->bind();
         qreal left, top, right, bottom;
-        m_effectFrame->frame().getMargins(left, top, right, bottom);   // m_geometry is the inner geometry
+        m_effectFrame->frame().getMargins(left, top, right, bottom); // m_geometry is the inner geometry
         const QRect rect = m_effectFrame->geometry().adjusted(-left, -top, right, bottom);
 
         QMatrix4x4 mvp(projection);
@@ -957,13 +937,13 @@ void SceneOpenGL::EffectFrame::render(const QRegion &_region, double opacity, do
 
         m_texture->render(rect);
         m_texture->unbind();
-
     }
     if (!m_effectFrame->selection().isNull()) {
         if (!m_selectionTexture) { // Lazy creation
             QPixmap pixmap = m_effectFrame->selectionFrame().framePixmap();
-            if (!pixmap.isNull())
+            if (!pixmap.isNull()) {
                 m_selectionTexture = new GLTexture(pixmap);
+            }
         }
         if (m_selectionTexture) {
             if (shader) {
@@ -1042,8 +1022,9 @@ void SceneOpenGL::EffectFrame::render(const QRegion &_region, double opacity, do
                 shader->setUniform(GLShader::ModulationConstant, constant);
             }
         }
-        if (!m_textTexture)   // Lazy creation
+        if (!m_textTexture) { // Lazy creation
             updateTextTexture();
+        }
 
         if (m_textTexture) {
             m_textTexture->bind();
@@ -1075,13 +1056,15 @@ void SceneOpenGL::EffectFrame::updateTextTexture()
     delete m_textPixmap;
     m_textPixmap = nullptr;
 
-    if (m_effectFrame->text().isEmpty())
+    if (m_effectFrame->text().isEmpty()) {
         return;
+    }
 
     // Determine position on texture to paint text
     QRect rect(QPoint(0, 0), m_effectFrame->geometry().size());
-    if (!m_effectFrame->icon().isNull() && !m_effectFrame->iconSize().isEmpty())
+    if (!m_effectFrame->icon().isNull() && !m_effectFrame->iconSize().isEmpty()) {
         rect.setLeft(m_effectFrame->iconSize().width());
+    }
 
     // If static size elide text as required
     QString text = m_effectFrame->text();
@@ -1094,10 +1077,11 @@ void SceneOpenGL::EffectFrame::updateTextTexture()
     m_textPixmap->fill(Qt::transparent);
     QPainter p(m_textPixmap);
     p.setFont(m_effectFrame->font());
-    if (m_effectFrame->style() == EffectFrameStyled)
+    if (m_effectFrame->style() == EffectFrameStyled) {
         p.setPen(m_effectFrame->styledTextColor());
-    else // TODO: What about no frame? Custom color setting required
+    } else { // TODO: What about no frame? Custom color setting required
         p.setPen(Qt::white);
+    }
     p.drawText(rect, m_effectFrame->alignment(), text);
     p.end();
     m_textTexture = new GLTexture(*m_textPixmap);
@@ -1137,7 +1121,7 @@ class DecorationShadowTextureCache
 {
 public:
     ~DecorationShadowTextureCache();
-    DecorationShadowTextureCache(const DecorationShadowTextureCache&) = delete;
+    DecorationShadowTextureCache(const DecorationShadowTextureCache &) = delete;
     static DecorationShadowTextureCache &instance();
 
     void unregister(SceneOpenGLShadow *shadow);
@@ -1145,11 +1129,12 @@ public:
 
 private:
     DecorationShadowTextureCache() = default;
-    struct Data {
+    struct Data
+    {
         QSharedPointer<GLTexture> texture;
-        QVector<SceneOpenGLShadow*> shadows;
+        QVector<SceneOpenGLShadow *> shadows;
     };
-    QHash<KDecoration2::DecorationShadow*, Data> m_cache;
+    QHash<KDecoration2::DecorationShadow *, Data> m_cache;
 };
 
 DecorationShadowTextureCache &DecorationShadowTextureCache::instance()
@@ -1239,12 +1224,8 @@ bool SceneOpenGLShadow::prepareBackend()
     const QSize topLeft(shadowPixmap(ShadowElementTopLeft).size());
     const QSize bottomRight(shadowPixmap(ShadowElementBottomRight).size());
 
-    const int width = std::max({topLeft.width(), left.width(), bottomLeft.width()}) +
-                      std::max(top.width(), bottom.width()) +
-                      std::max({topRight.width(), right.width(), bottomRight.width()});
-    const int height = std::max({topLeft.height(), top.height(), topRight.height()}) +
-                       std::max(left.height(), right.height()) +
-                       std::max({bottomLeft.height(), bottom.height(), bottomRight.height()});
+    const int width = std::max({topLeft.width(), left.width(), bottomLeft.width()}) + std::max(top.width(), bottom.width()) + std::max({topRight.width(), right.width(), bottomRight.width()});
+    const int height = std::max({topLeft.height(), top.height(), topRight.height()}) + std::max(left.height(), right.height()) + std::max({bottomLeft.height(), bottom.height(), bottomRight.height()});
 
     if (width == 0 || height == 0) {
         return false;
@@ -1278,12 +1259,13 @@ bool SceneOpenGLShadow::prepareBackend()
         bool alphaOnly = true;
 
         for (ptrdiff_t y = 0; alphaOnly && y < image.height(); y++) {
-            const uint32_t * const src = reinterpret_cast<const uint32_t *>(image.scanLine(y));
-            uint8_t * const dst = reinterpret_cast<uint8_t *>(alphaImage.scanLine(y));
+            const uint32_t *const src = reinterpret_cast<const uint32_t *>(image.scanLine(y));
+            uint8_t *const dst = reinterpret_cast<uint8_t *>(alphaImage.scanLine(y));
 
             for (ptrdiff_t x = 0; x < image.width(); x++) {
-                if (src[x] & 0x00ffffff)
+                if (src[x] & 0x00ffffff) {
                     alphaOnly = false;
+                }
 
                 dst[x] = qAlpha(src[x]);
             }
@@ -1459,7 +1441,7 @@ void SceneOpenGLDecorationRenderer::renderPart(const QRect &rect, const QRect &p
 }
 
 const QMargins SceneOpenGLDecorationRenderer::texturePadForPart(
-        const QRect &rect, const QRect &partRect)
+    const QRect &rect, const QRect &partRect)
 {
     QMargins result = QMargins(0, 0, 0, 0);
     if (rect.top() == partRect.top()) {
@@ -1490,16 +1472,16 @@ void SceneOpenGLDecorationRenderer::resizeTexture()
 
     size.rwidth() = qMax(qMax(top.width(), bottom.width()),
                          qMax(left.height(), right.height()));
-    size.rheight() = top.height() + bottom.height() +
-                     left.width() + right.width();
+    size.rheight() = top.height() + bottom.height() + left.width() + right.width();
     size *= effectiveDevicePixelRatio();
 
     size.rheight() += 4 * (2 * TexturePad);
     size.rwidth() += 2 * TexturePad;
     size.rwidth() = align(size.width(), 128);
 
-    if (m_texture && m_texture->size() == size)
+    if (m_texture && m_texture->size() == size) {
         return;
+    }
 
     if (!size.isEmpty()) {
         m_texture.reset(new GLTexture(GL_RGBA8, size.width(), size.height()));

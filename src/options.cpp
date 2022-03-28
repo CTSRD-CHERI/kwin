@@ -8,11 +8,12 @@
 
     SPDX-License-Identifier: GPL-2.0-or-later
 */
-
 #include "options.h"
+
 #include "config-kwin.h"
-#include "utils/common.h"
+
 #include "platform.h"
+#include "utils/common.h"
 
 #ifndef KCMRULES
 
@@ -20,10 +21,10 @@
 
 #include "screens.h"
 #include "settings.h"
-#include <kwinglplatform.h>
 #include <QOpenGLContext>
+#include <kwinglplatform.h>
 
-#endif //KCMRULES
+#endif // KCMRULES
 
 namespace KWin
 {
@@ -594,7 +595,6 @@ void Options::setMoveMinimizedWindowsToEndOfTabBoxFocusChain(bool value)
         return;
     }
     m_MoveMinimizedWindowsToEndOfTabBoxFocusChain = value;
-
 }
 
 void Options::setGlPreferBufferSwap(char glPreferBufferSwap)
@@ -603,10 +603,11 @@ void Options::setGlPreferBufferSwap(char glPreferBufferSwap)
         // buffer copying is very fast with the nvidia blob
         // but due to restrictions in DRI2 *incredibly* slow for all MESA drivers
         // see https://www.x.org/releases/X11R7.7/doc/dri2proto/dri2proto.txt, item 2.5
-        if (GLPlatform::instance()->driver() == Driver_NVidia)
+        if (GLPlatform::instance()->driver() == Driver_NVidia) {
             glPreferBufferSwap = CopyFrontBuffer;
-        else if (GLPlatform::instance()->driver() != Driver_Unknown) // undetected, finally resolved when context is initialized
+        } else if (GLPlatform::instance()->driver() != Driver_Unknown) { // undetected, finally resolved when context is initialized
             glPreferBufferSwap = ExtendDamage;
+        }
     }
     if (m_glPreferBufferSwap == (GlSwapStrategy)glPreferBufferSwap) {
         return;
@@ -693,9 +694,8 @@ void Options::updateSettings()
     // and not kstyle tooltips and vise-versa, we don't read the
     // "EffectNoTooltip" setting from kdeglobals.
 
-
-//    QToolTip::setGloballyEnabled( d->show_tooltips );
-// KDE4 this probably needs to be done manually in clients
+    //    QToolTip::setGloballyEnabled( d->show_tooltips );
+    // KDE4 this probably needs to be done manually in clients
 
     // Driver-specific config detection
     reloadCompositingSettings();
@@ -748,10 +748,7 @@ void Options::loadConfig()
     if (config.hasKey("Alt")) {
         m_modifierOnlyShortcuts.insert(Qt::AltModifier, config.readEntry("Alt", QStringList()));
     }
-    m_modifierOnlyShortcuts.insert(Qt::MetaModifier, config.readEntry("Meta", QStringList{QStringLiteral("org.kde.plasmashell"),
-                                                                                          QStringLiteral("/PlasmaShell"),
-                                                                                          QStringLiteral("org.kde.PlasmaShell"),
-                                                                                          QStringLiteral("activateLauncherMenu")}));
+    m_modifierOnlyShortcuts.insert(Qt::MetaModifier, config.readEntry("Meta", QStringList{QStringLiteral("org.kde.plasmashell"), QStringLiteral("/PlasmaShell"), QStringLiteral("org.kde.PlasmaShell"), QStringLiteral("activateLauncherMenu")}));
 }
 
 void Options::syncFromKcfgc()
@@ -794,20 +791,21 @@ void Options::syncFromKcfgc()
     setRenderTimeEstimator(m_settings->renderTimeEstimator());
 }
 
-bool Options::loadCompositingConfig (bool force)
+bool Options::loadCompositingConfig(bool force)
 {
     KConfigGroup config(m_settings->config(), "Compositing");
 
     bool useCompositing = false;
     CompositingType compositingMode = NoCompositing;
     QString compositingBackend = config.readEntry("Backend", "OpenGL");
-    if (compositingBackend == "QPainter")
+    if (compositingBackend == "QPainter") {
         compositingMode = QPainterCompositing;
-    else
+    } else {
         compositingMode = OpenGLCompositing;
+    }
 
     if (const char *c = getenv("KWIN_COMPOSE")) {
-        switch(c[0]) {
+        switch (c[0]) {
         case 'O':
             qCDebug(KWIN_CORE) << "Compositing forced to OpenGL mode by environment variable";
             compositingMode = OpenGLCompositing;
@@ -819,10 +817,11 @@ bool Options::loadCompositingConfig (bool force)
             useCompositing = true;
             break;
         case 'N':
-            if (getenv("KDE_FAILSAFE"))
+            if (getenv("KDE_FAILSAFE")) {
                 qCDebug(KWIN_CORE) << "Compositing disabled forcefully by KDE failsafe mode";
-            else
+            } else {
                 qCDebug(KWIN_CORE) << "Compositing disabled forcefully by environment variable";
+            }
             compositingMode = NoCompositing;
             break;
         default:
@@ -841,8 +840,9 @@ bool Options::loadCompositingConfig (bool force)
     // it's either enforced by env or by initial resume from "suspend" or we check the settings
     setUseCompositing(useCompositing || force || config.readEntry("Enabled", Options::defaultUseCompositing() || !platformSupportsNoCompositing));
 
-    if (!m_useCompositing)
+    if (!m_useCompositing) {
         return false; // not enforced or necessary and not "enabled" by settings
+    }
     return true;
 }
 
@@ -865,21 +865,24 @@ void Options::reloadCompositingSettings(bool force)
 
     char c = 0;
     const QString s = config.readEntry("GLPreferBufferSwap", QString(QLatin1Char(Options::defaultGlPreferBufferSwap())));
-    if (!s.isEmpty())
+    if (!s.isEmpty()) {
         c = s.at(0).toLatin1();
-    if (c != 'a' && c != 'c' && c != 'p' && c != 'e')
+    }
+    if (c != 'a' && c != 'c' && c != 'p' && c != 'e') {
         c = Options::defaultGlPreferBufferSwap();
+    }
     setGlPreferBufferSwap(c);
 
     HiddenPreviews previews = Options::defaultHiddenPreviews();
     // 4 - off, 5 - shown, 6 - always, other are old values
     int hps = config.readEntry("HiddenPreviews", 5);
-    if (hps == 4)
+    if (hps == 4) {
         previews = HiddenPreviewsNever;
-    else if (hps == 5)
+    } else if (hps == 5) {
         previews = HiddenPreviewsShown;
-    else if (hps == 6)
+    } else if (hps == 6) {
         previews = HiddenPreviewsAlways;
+    }
     setHiddenPreviews(previews);
 
     auto interfaceToKey = [](OpenGLPlatformInterface interface) {
@@ -909,69 +912,125 @@ void Options::reloadCompositingSettings(bool force)
 // may not be able to move it back, unless they know about Meta+LMB)
 Options::WindowOperation Options::windowOperation(const QString &name, bool restricted)
 {
-    if (name == QStringLiteral("Move"))
+    if (name == QStringLiteral("Move")) {
         return restricted ? MoveOp : UnrestrictedMoveOp;
-    else if (name == QStringLiteral("Resize"))
+    } else if (name == QStringLiteral("Resize")) {
         return restricted ? ResizeOp : UnrestrictedResizeOp;
-    else if (name == QStringLiteral("Maximize"))
+    } else if (name == QStringLiteral("Maximize")) {
         return MaximizeOp;
-    else if (name == QStringLiteral("Minimize"))
+    } else if (name == QStringLiteral("Minimize")) {
         return MinimizeOp;
-    else if (name == QStringLiteral("Close"))
+    } else if (name == QStringLiteral("Close")) {
         return CloseOp;
-    else if (name == QStringLiteral("OnAllDesktops"))
+    } else if (name == QStringLiteral("OnAllDesktops")) {
         return OnAllDesktopsOp;
-    else if (name == QStringLiteral("Shade"))
+    } else if (name == QStringLiteral("Shade")) {
         return ShadeOp;
-    else if (name == QStringLiteral("Operations"))
+    } else if (name == QStringLiteral("Operations")) {
         return OperationsOp;
-    else if (name == QStringLiteral("Maximize (vertical only)"))
+    } else if (name == QStringLiteral("Maximize (vertical only)")) {
         return VMaximizeOp;
-    else if (name == QStringLiteral("Maximize (horizontal only)"))
+    } else if (name == QStringLiteral("Maximize (horizontal only)")) {
         return HMaximizeOp;
-    else if (name == QStringLiteral("Lower"))
+    } else if (name == QStringLiteral("Lower")) {
         return LowerOp;
+    }
     return NoOp;
 }
 
 Options::MouseCommand Options::mouseCommand(const QString &name, bool restricted)
 {
     QString lowerName = name.toLower();
-    if (lowerName == QStringLiteral("raise")) return MouseRaise;
-    if (lowerName == QStringLiteral("lower")) return MouseLower;
-    if (lowerName == QStringLiteral("operations menu")) return MouseOperationsMenu;
-    if (lowerName == QStringLiteral("toggle raise and lower")) return MouseToggleRaiseAndLower;
-    if (lowerName == QStringLiteral("activate and raise")) return MouseActivateAndRaise;
-    if (lowerName == QStringLiteral("activate and lower")) return MouseActivateAndLower;
-    if (lowerName == QStringLiteral("activate")) return MouseActivate;
-    if (lowerName == QStringLiteral("activate, raise and pass click")) return MouseActivateRaiseAndPassClick;
-    if (lowerName == QStringLiteral("activate and pass click")) return MouseActivateAndPassClick;
-    if (lowerName == QStringLiteral("scroll")) return MouseNothing;
-    if (lowerName == QStringLiteral("activate and scroll")) return MouseActivateAndPassClick;
-    if (lowerName == QStringLiteral("activate, raise and scroll")) return MouseActivateRaiseAndPassClick;
-    if (lowerName == QStringLiteral("activate, raise and move"))
+    if (lowerName == QStringLiteral("raise")) {
+        return MouseRaise;
+    }
+    if (lowerName == QStringLiteral("lower")) {
+        return MouseLower;
+    }
+    if (lowerName == QStringLiteral("operations menu")) {
+        return MouseOperationsMenu;
+    }
+    if (lowerName == QStringLiteral("toggle raise and lower")) {
+        return MouseToggleRaiseAndLower;
+    }
+    if (lowerName == QStringLiteral("activate and raise")) {
+        return MouseActivateAndRaise;
+    }
+    if (lowerName == QStringLiteral("activate and lower")) {
+        return MouseActivateAndLower;
+    }
+    if (lowerName == QStringLiteral("activate")) {
+        return MouseActivate;
+    }
+    if (lowerName == QStringLiteral("activate, raise and pass click")) {
+        return MouseActivateRaiseAndPassClick;
+    }
+    if (lowerName == QStringLiteral("activate and pass click")) {
+        return MouseActivateAndPassClick;
+    }
+    if (lowerName == QStringLiteral("scroll")) {
+        return MouseNothing;
+    }
+    if (lowerName == QStringLiteral("activate and scroll")) {
+        return MouseActivateAndPassClick;
+    }
+    if (lowerName == QStringLiteral("activate, raise and scroll")) {
+        return MouseActivateRaiseAndPassClick;
+    }
+    if (lowerName == QStringLiteral("activate, raise and move")) {
         return restricted ? MouseActivateRaiseAndMove : MouseActivateRaiseAndUnrestrictedMove;
-    if (lowerName == QStringLiteral("move")) return restricted ? MouseMove : MouseUnrestrictedMove;
-    if (lowerName == QStringLiteral("resize")) return restricted ? MouseResize : MouseUnrestrictedResize;
-    if (lowerName == QStringLiteral("shade")) return MouseShade;
-    if (lowerName == QStringLiteral("minimize")) return MouseMinimize;
-    if (lowerName == QStringLiteral("close")) return MouseClose;
-    if (lowerName == QStringLiteral("increase opacity")) return MouseOpacityMore;
-    if (lowerName == QStringLiteral("decrease opacity")) return MouseOpacityLess;
-    if (lowerName == QStringLiteral("nothing")) return MouseNothing;
+    }
+    if (lowerName == QStringLiteral("move")) {
+        return restricted ? MouseMove : MouseUnrestrictedMove;
+    }
+    if (lowerName == QStringLiteral("resize")) {
+        return restricted ? MouseResize : MouseUnrestrictedResize;
+    }
+    if (lowerName == QStringLiteral("shade")) {
+        return MouseShade;
+    }
+    if (lowerName == QStringLiteral("minimize")) {
+        return MouseMinimize;
+    }
+    if (lowerName == QStringLiteral("close")) {
+        return MouseClose;
+    }
+    if (lowerName == QStringLiteral("increase opacity")) {
+        return MouseOpacityMore;
+    }
+    if (lowerName == QStringLiteral("decrease opacity")) {
+        return MouseOpacityLess;
+    }
+    if (lowerName == QStringLiteral("nothing")) {
+        return MouseNothing;
+    }
     return MouseNothing;
 }
 
 Options::MouseWheelCommand Options::mouseWheelCommand(const QString &name)
 {
     QString lowerName = name.toLower();
-    if (lowerName == QStringLiteral("raise/lower")) return MouseWheelRaiseLower;
-    if (lowerName == QStringLiteral("shade/unshade")) return MouseWheelShadeUnshade;
-    if (lowerName == QStringLiteral("maximize/restore")) return MouseWheelMaximizeRestore;
-    if (lowerName == QStringLiteral("above/below")) return MouseWheelAboveBelow;
-    if (lowerName == QStringLiteral("previous/next desktop")) return MouseWheelPreviousNextDesktop;
-    if (lowerName == QStringLiteral("change opacity")) return MouseWheelChangeOpacity;
-    if (lowerName == QStringLiteral("nothing")) return MouseWheelNothing;
+    if (lowerName == QStringLiteral("raise/lower")) {
+        return MouseWheelRaiseLower;
+    }
+    if (lowerName == QStringLiteral("shade/unshade")) {
+        return MouseWheelShadeUnshade;
+    }
+    if (lowerName == QStringLiteral("maximize/restore")) {
+        return MouseWheelMaximizeRestore;
+    }
+    if (lowerName == QStringLiteral("above/below")) {
+        return MouseWheelAboveBelow;
+    }
+    if (lowerName == QStringLiteral("previous/next desktop")) {
+        return MouseWheelPreviousNextDesktop;
+    }
+    if (lowerName == QStringLiteral("change opacity")) {
+        return MouseWheelChangeOpacity;
+    }
+    if (lowerName == QStringLiteral("nothing")) {
+        return MouseWheelNothing;
+    }
     return MouseWheelNothing;
 }
 
@@ -982,7 +1041,7 @@ bool Options::condensedTitle() const
 
 Options::MouseCommand Options::wheelToMouseCommand(MouseWheelCommand com, int delta) const
 {
-    switch(com) {
+    switch (com) {
     case MouseWheelRaiseLower:
         return delta > 0 ? MouseRaise : MouseLower;
     case MouseWheelShadeUnshade:
@@ -1003,7 +1062,7 @@ Options::MouseCommand Options::wheelToMouseCommand(MouseWheelCommand com, int de
 
 double Options::animationTimeFactor() const
 {
- #ifndef KCMRULES
+#ifndef KCMRULES
     return m_settings->animationDurationFactor();
 #else
     return 0;
@@ -1012,9 +1071,8 @@ double Options::animationTimeFactor() const
 
 Options::WindowOperation Options::operationMaxButtonClick(Qt::MouseButtons button) const
 {
-    return button == Qt::RightButton ? opMaxButtonRightClick :
-           button == Qt::MiddleButton ?   opMaxButtonMiddleClick :
-           opMaxButtonLeftClick;
+    return button == Qt::RightButton ? opMaxButtonRightClick : button == Qt::MiddleButton ? opMaxButtonMiddleClick
+                                                                                          : opMaxButtonLeftClick;
 }
 
 QStringList Options::modifierOnlyDBusShortcut(Qt::KeyboardModifier mod) const

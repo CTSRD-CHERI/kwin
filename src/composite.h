@@ -12,8 +12,8 @@
 #include <kwinglobals.h>
 
 #include <QObject>
-#include <QTimer>
 #include <QRegion>
+#include <QTimer>
 
 namespace KWin
 {
@@ -67,10 +67,12 @@ public:
      */
     bool isActive();
 
-    Scene *scene() const {
+    Scene *scene() const
+    {
         return m_scene;
     }
-    RenderBackend *backend() const {
+    RenderBackend *backend() const
+    {
         return m_backend;
     }
 
@@ -79,7 +81,8 @@ public:
      *
      * @return bool @c true if there is a Compositor and it is active, @c false otherwise
      */
-    static bool compositing() {
+    static bool compositing()
+    {
         return s_compositor != nullptr && s_compositor->isActive();
     }
 
@@ -141,7 +144,7 @@ private:
     void prePaintPass(RenderLayer *layer);
     void postPaintPass(RenderLayer *layer);
     void preparePaintPass(RenderLayer *layer, QRegion *repaint);
-    void paintPass(RenderLayer *layer, const QRegion &repaint, const QRegion &repair, QRegion *surfaceDamage, QRegion *bufferDamage);
+    void paintPass(RenderLayer *layer, const QRegion &region);
 
     State m_state = State::Off;
     CompositorSelectionOwner *m_selectionOwner = nullptr;
@@ -175,11 +178,11 @@ class KWIN_EXPORT X11Compositor final : public Compositor
     Q_OBJECT
 public:
     enum SuspendReason {
-        NoReasonSuspend     = 0,
-        UserSuspend         = 1 << 0,
-        BlockRuleSuspend    = 1 << 1,
-        ScriptSuspend       = 1 << 2,
-        AllReasonSuspend    = 0xff
+        NoReasonSuspend = 0,
+        UserSuspend = 1 << 0,
+        BlockRuleSuspend = 1 << 1,
+        ScriptSuspend = 1 << 2,
+        AllReasonSuspend = 0xff
     };
     Q_DECLARE_FLAGS(SuspendReasons, SuspendReason)
     Q_ENUM(SuspendReason)

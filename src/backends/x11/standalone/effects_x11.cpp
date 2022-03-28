@@ -8,8 +8,8 @@
     SPDX-License-Identifier: GPL-2.0-or-later
 */
 #include "effects_x11.h"
-#include "effects_mouse_interception_x11_filter.h"
 #include "cursor.h"
+#include "effects_mouse_interception_x11_filter.h"
 #include "screenedge.h"
 #include "screens.h"
 #include "utils/common.h"
@@ -45,8 +45,9 @@ EffectsHandlerImplX11::~EffectsHandlerImplX11()
 bool EffectsHandlerImplX11::doGrabKeyboard()
 {
     bool ret = grabXKeyboard();
-    if (!ret)
+    if (!ret) {
         return false;
+    }
     // Workaround for Qt 5.9 regression introduced with 2b34aefcf02f09253473b096eb4faffd3e62b5f4
     // we no longer get any events for the root window, one needs to call winId() on the desktop window
     // TODO: change effects event handling to create the appropriate QKeyEvent without relying on Qt
@@ -70,8 +71,7 @@ void EffectsHandlerImplX11::doStartMouseInterception(Qt::CursorShape shape)
         const uint32_t mask = XCB_CW_OVERRIDE_REDIRECT | XCB_CW_EVENT_MASK;
         const uint32_t values[] = {
             true,
-            XCB_EVENT_MASK_BUTTON_PRESS | XCB_EVENT_MASK_BUTTON_RELEASE | XCB_EVENT_MASK_POINTER_MOTION
-        };
+            XCB_EVENT_MASK_BUTTON_PRESS | XCB_EVENT_MASK_BUTTON_RELEASE | XCB_EVENT_MASK_POINTER_MOTION};
         m_mouseInterceptionWindow.reset(Xcb::createInputWindow(geo, mask, values));
         defineCursor(shape);
     } else {

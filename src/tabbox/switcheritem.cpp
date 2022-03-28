@@ -10,8 +10,8 @@
 // KWin
 #include "abstract_output.h"
 #include "composite.h"
-#include "tabboxhandler.h"
 #include "screens.h"
+#include "tabboxhandler.h"
 #include "workspace.h"
 // Qt
 #include <QAbstractItemModel>
@@ -63,8 +63,9 @@ void SwitcherItem::setVisible(bool visible)
     if (m_visible == visible) {
         return;
     }
-    if (visible)
+    if (visible) {
         Q_EMIT screenGeometryChanged();
+    }
     m_visible = visible;
     Q_EMIT visibleChanged();
 }

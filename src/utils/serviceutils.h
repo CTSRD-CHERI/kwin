@@ -17,7 +17,7 @@
 // Qt
 #include <QFileInfo>
 #include <QLoggingCategory>
-//KF
+// KF
 #include <KApplicationTrader>
 
 namespace KWin
@@ -29,11 +29,11 @@ const static QString s_dbusRestrictedInterfaceName = QStringLiteral("X-KDE-DBUS-
 static QStringList fetchProcessServiceField(const QString &executablePath, const QString &fieldName)
 {
     // needed to be able to use the logging category in a header static function
-    static QLoggingCategory KWIN_UTILS ("KWIN_UTILS", QtWarningMsg);
-    const auto servicesFound = KApplicationTrader::query([&executablePath] (const KService::Ptr &service) {
-
-        if (service->exec().isEmpty() || QFileInfo(service->exec()).canonicalFilePath() != executablePath)
+    static QLoggingCategory KWIN_UTILS("KWIN_UTILS", QtWarningMsg);
+    const auto servicesFound = KApplicationTrader::query([&executablePath](const KService::Ptr &service) {
+        if (service->exec().isEmpty() || QFileInfo(service->exec()).canonicalFilePath() != executablePath) {
             return false;
+        }
 
         return true;
     });
@@ -61,6 +61,6 @@ static inline QStringList fetchRestrictedDBusInterfacesFromPid(const uint pid)
     return fetchProcessServiceField(executablePath, s_dbusRestrictedInterfaceName);
 }
 
-}// namespace
+} // namespace
 
 #endif // SERVICE_UTILS_H

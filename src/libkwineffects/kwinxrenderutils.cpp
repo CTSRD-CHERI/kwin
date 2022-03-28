@@ -11,9 +11,9 @@
 #include "logging_p.h"
 
 #include <QCoreApplication>
-#include <QStack>
-#include <QPixmap>
 #include <QGlobalStatic>
+#include <QPixmap>
+#include <QStack>
 
 namespace KWin
 {
@@ -48,9 +48,9 @@ xcb_render_color_t preMultiply(const QColor &c, float opacity)
                G = c.green(),
                B = c.blue();
     color.alpha = (A | A << 8);
-    color.red   = (R | R << 8) * color.alpha / 0x10000;
+    color.red = (R | R << 8) * color.alpha / 0x10000;
     color.green = (G | G << 8) * color.alpha / 0x10000;
-    color.blue  = (B | B << 8) * color.alpha / 0x10000;
+    color.blue = (B | B << 8) * color.alpha / 0x10000;
     return color;
 }
 
@@ -89,8 +89,9 @@ XRenderPicture xRenderBlendPicture(double opacity)
 
 static xcb_render_picture_t createPicture(xcb_pixmap_t pix, int depth)
 {
-    if (pix == XCB_PIXMAP_NONE)
+    if (pix == XCB_PIXMAP_NONE) {
         return XCB_RENDER_PICTURE_NONE;
+    }
     xcb_connection_t *c = XRenderUtils::s_connection;
     static QHash<int, xcb_render_pictformat_t> s_renderFormats;
     if (!s_renderFormats.contains(depth)) {
@@ -99,8 +100,8 @@ static xcb_render_picture_t createPicture(xcb_pixmap_t pix, int depth)
             return XCB_RENDER_PICTURE_NONE;
         }
         for (xcb_render_pictforminfo_iterator_t it = xcb_render_query_pict_formats_formats_iterator(formats);
-                it.rem;
-                xcb_render_pictforminfo_next(&it)) {
+             it.rem;
+             xcb_render_pictforminfo_next(&it)) {
             if (it.data->depth == depth) {
                 s_renderFormats.insert(depth, it.data->id);
                 break;
@@ -175,7 +176,7 @@ XFixesRegion::~XFixesRegion()
 }
 
 static xcb_render_picture_t s_offscreenTarget = XCB_RENDER_PICTURE_NONE;
-static QStack<XRenderPicture*> s_scene_offscreenTargetStack;
+static QStack<XRenderPicture *> s_scene_offscreenTargetStack;
 static int s_renderOffscreen = 0;
 
 void scene_setXRenderOffscreenTarget(xcb_render_picture_t pix)
@@ -228,10 +229,11 @@ namespace XRenderUtils
 
 struct PictFormatData
 {
-    PictFormatData() {
+    PictFormatData()
+    {
         // Fetch the render pict formats
         reply = xcb_render_query_pict_formats_reply(s_connection,
-                        xcb_render_query_pict_formats_unchecked(s_connection), nullptr);
+                                                    xcb_render_query_pict_formats_unchecked(s_connection), nullptr);
 
         // Init the visual ID -> format ID hash table
         for (auto screens = xcb_render_query_pict_formats_screens_iterator(reply); screens.rem; xcb_render_pictscreen_next(&screens)) {
@@ -239,8 +241,9 @@ struct PictFormatData
                 const xcb_render_pictvisual_t *visuals = xcb_render_pictdepth_visuals(depths.data);
                 const int len = xcb_render_pictdepth_visuals_length(depths.data);
 
-                for (int i = 0; i < len; i++)
+                for (int i = 0; i < len; i++) {
                     visualHash.insert(visuals[i].visual, visuals[i].format);
+                }
             }
         }
 
@@ -249,12 +252,14 @@ struct PictFormatData
         const int len = xcb_render_query_pict_formats_formats_length(reply);
 
         for (int i = 0; i < len; i++) {
-            if (formats[i].type == XCB_RENDER_PICT_TYPE_DIRECT)
+            if (formats[i].type == XCB_RENDER_PICT_TYPE_DIRECT) {
                 formatInfoHash.insert(formats[i].id, &formats[i].direct);
+            }
         }
     }
 
-    ~PictFormatData() {
+    ~PictFormatData()
+    {
         free(reply);
     }
 

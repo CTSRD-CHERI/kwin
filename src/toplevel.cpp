@@ -103,7 +103,7 @@ void Toplevel::detectShape(xcb_window_t id)
 }
 
 // used only by Deleted::copy()
-void Toplevel::copyToDeleted(Toplevel* c)
+void Toplevel::copyToDeleted(Toplevel *c)
 {
     m_internalId = c->internalId();
     m_bufferGeometry = c->m_bufferGeometry;
@@ -116,8 +116,9 @@ void Toplevel::copyToDeleted(Toplevel* c)
     ready_for_painting = c->ready_for_painting;
     is_shape = c->is_shape;
     effect_window = c->effect_window;
-    if (effect_window != nullptr)
+    if (effect_window != nullptr) {
         effect_window->setWindow(this);
+    }
     m_shadow = c->m_shadow;
     if (m_shadow) {
         m_shadow->setToplevel(this);
@@ -240,7 +241,7 @@ void Toplevel::getResourceClass()
 
 void Toplevel::setResourceClass(const QByteArray &name, const QByteArray &className)
 {
-    resource_name  = name;
+    resource_name = name;
     resource_class = className;
     Q_EMIT windowClassChanged();
 }
@@ -271,8 +272,9 @@ void Toplevel::setOpacity(qreal opacity)
 
 bool Toplevel::setupCompositing()
 {
-    if (!Compositor::compositing())
+    if (!Compositor::compositing()) {
         return false;
+    }
 
     effect_window = new EffectWindowImpl(this);
     updateShadow();
@@ -342,7 +344,7 @@ void Toplevel::addWorkspaceRepaint(int x, int y, int w, int h)
     addWorkspaceRepaint(QRect(x, y, w, h));
 }
 
-void Toplevel::addWorkspaceRepaint(const QRect& r2)
+void Toplevel::addWorkspaceRepaint(const QRect &r2)
 {
     if (Compositor::compositing()) {
         Compositor::self()->scene()->addRepaint(r2);

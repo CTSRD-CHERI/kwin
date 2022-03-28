@@ -10,8 +10,8 @@
 #pragma once
 
 #include <QObject>
-#include <QUrl>
 #include <QRect>
+#include <QUrl>
 
 #include <kwineffects_export.h>
 
@@ -187,6 +187,7 @@ public:
     QQuickItem *rootItem() const;
 
     void setSource(const QUrl &source);
+    void setSource(const QUrl &source, const QVariantMap &initialProperties);
 
 private:
     class Private;

@@ -20,9 +20,9 @@
 #include <kwingltexture.h>
 #include <kwinglutils.h>
 
-#include <QSGImageNode>
-#include <QRunnable>
 #include <QQuickWindow>
+#include <QRunnable>
+#include <QSGImageNode>
 #include <QSGTextureProvider>
 
 namespace KWin
@@ -57,10 +57,16 @@ void ThumbnailTextureProvider::setTexture(const QSharedPointer<GLTexture> &nativ
     if (m_nativeTexture != nativeTexture) {
         const GLuint textureId = nativeTexture->texture();
         m_nativeTexture = nativeTexture;
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
         m_texture.reset(m_window->createTextureFromNativeObject(QQuickWindow::NativeObjectTexture,
                                                                 &textureId, 0,
                                                                 nativeTexture->size(),
                                                                 QQuickWindow::TextureHasAlphaChannel));
+#else
+        m_texture.reset(QNativeInterface::QSGOpenGLTexture::fromNative(textureId, m_window,
+                                                                       nativeTexture->size(),
+                                                                       QQuickWindow::TextureHasAlphaChannel));
+#endif
         m_texture->setFiltering(QSGTexture::Linear);
         m_texture->setHorizontalWrapMode(QSGTexture::ClampToEdge);
         m_texture->setVerticalWrapMode(QSGTexture::ClampToEdge);
@@ -303,7 +309,7 @@ void WindowThumbnailItem::setClient(AbstractClient *client)
         disconnect(m_client, &AbstractClient::damaged,
                    this, &WindowThumbnailItem::invalidateOffscreenTexture);
         disconnect(m_client, &AbstractClient::frameGeometryChanged,
-                this, &WindowThumbnailItem::updateImplicitSize);
+                   this, &WindowThumbnailItem::updateImplicitSize);
     }
     m_client = client;
     if (m_client) {

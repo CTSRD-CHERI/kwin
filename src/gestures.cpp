@@ -8,9 +8,10 @@
 */
 #include "gestures.h"
 
+#include <QDebug>
 #include <QRect>
-#include <functional>
 #include <cmath>
+#include <functional>
 
 namespace KWin
 {
@@ -230,7 +231,7 @@ void GestureRecognizer::updateSwipeGesture(const QSizeF &delta)
         break;
     default:
         return;
-        }
+    }
 
     // Eliminate wrong gestures (takes two iterations)
     for (int i = 0; i < 2; i++) {
@@ -243,9 +244,12 @@ void GestureRecognizer::updateSwipeGesture(const QSizeF &delta)
             auto g = static_cast<SwipeGesture *>(*it);
 
             if (g->direction() != direction) {
-                Q_EMIT g->cancelled();
-                it = m_activeSwipeGestures.erase(it);
-                continue;
+                // If a gesture was started from a touchscreen border never cancel it
+                if (!g->minimumXIsRelevant() || !g->maximumXIsRelevant() || !g->minimumYIsRelevant() || !g->maximumYIsRelevant()) {
+                    Q_EMIT g->cancelled();
+                    it = m_activeSwipeGestures.erase(it);
+                    continue;
+                }
             }
 
             it++;
@@ -253,10 +257,10 @@ void GestureRecognizer::updateSwipeGesture(const QSizeF &delta)
     }
 
     // Send progress update
-    for (SwipeGesture *g: std::as_const(m_activeSwipeGestures)) {
+    for (SwipeGesture *g : std::as_const(m_activeSwipeGestures)) {
         Q_EMIT g->progress(g->minimumDeltaReachedProgress(m_currentDelta));
+        Q_EMIT g->deltaProgress(m_currentDelta);
     }
-
 }
 
 void GestureRecognizer::cancelActiveGestures()
@@ -370,7 +374,7 @@ void GestureRecognizer::cancelPinchGesture()
     m_currentSwipeAxis = Axis::None;
 }
 
-void GestureRecognizer::endPinchGesture()//because fingers up
+void GestureRecognizer::endPinchGesture() // because fingers up
 {
     for (auto g : qAsConst(m_activePinchGestures)) {
         if (g->minimumScaleDeltaReached(m_currentScale)) {

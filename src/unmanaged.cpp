@@ -9,11 +9,11 @@
 
 #include "unmanaged.h"
 
-#include "workspace.h"
-#include "effects.h"
 #include "deleted.h"
+#include "effects.h"
 #include "surfaceitem_x11.h"
 #include "utils/common.h"
+#include "workspace.h"
 
 #include <QDebug>
 #include <QTimer>
@@ -30,11 +30,24 @@ namespace KWin
 {
 
 // window types that are supported as unmanaged (mainly for compositing)
-const NET::WindowTypes SUPPORTED_UNMANAGED_WINDOW_TYPES_MASK = NET::NormalMask | NET::DesktopMask | NET::DockMask
-        | NET::ToolbarMask | NET::MenuMask | NET::DialogMask /*| NET::OverrideMask*/ | NET::TopMenuMask
-        | NET::UtilityMask | NET::SplashMask | NET::DropdownMenuMask | NET::PopupMenuMask
-        | NET::TooltipMask | NET::NotificationMask | NET::ComboBoxMask | NET::DNDIconMask | NET::OnScreenDisplayMask
-        | NET::CriticalNotificationMask;
+const NET::WindowTypes SUPPORTED_UNMANAGED_WINDOW_TYPES_MASK = NET::NormalMask
+    | NET::DesktopMask
+    | NET::DockMask
+    | NET::ToolbarMask
+    | NET::MenuMask
+    | NET::DialogMask
+    /*| NET::OverrideMask*/
+    | NET::TopMenuMask
+    | NET::UtilityMask
+    | NET::SplashMask
+    | NET::DropdownMenuMask
+    | NET::PopupMenuMask
+    | NET::TooltipMask
+    | NET::NotificationMask
+    | NET::ComboBoxMask
+    | NET::DNDIconMask
+    | NET::OnScreenDisplayMask
+    | NET::CriticalNotificationMask;
 
 Unmanaged::Unmanaged()
     : Toplevel()
@@ -96,7 +109,7 @@ bool Unmanaged::track(xcb_window_t w)
     if (geo.isNull()) {
         return false;
     }
-    setWindowHandles(w);   // the window is also the frame
+    setWindowHandles(w); // the window is also the frame
     Xcb::selectInput(w, attr->your_event_mask | XCB_EVENT_MASK_STRUCTURE_NOTIFY | XCB_EVENT_MASK_PROPERTY_CHANGE);
     m_bufferGeometry = geo.rect();
     m_frameGeometry = geo.rect();
@@ -106,16 +119,14 @@ bool Unmanaged::track(xcb_window_t w)
     bit_depth = geo->depth;
     info = new NETWinInfo(kwinApp()->x11Connection(), w, kwinApp()->x11RootWindow(),
                           NET::WMWindowType | NET::WMPid,
-                          NET::WM2Opacity |
-                          NET::WM2WindowRole |
-                          NET::WM2WindowClass |
-                          NET::WM2OpaqueRegion);
+                          NET::WM2Opacity | NET::WM2WindowRole | NET::WM2WindowClass | NET::WM2OpaqueRegion);
     setOpacity(info->opacityF());
     getResourceClass();
     getWmClientLeader();
     getWmClientMachine();
-    if (Xcb::Extensions::self()->isShapeAvailable())
+    if (Xcb::Extensions::self()->isShapeAvailable()) {
         xcb_shape_select_input(kwinApp()->x11Connection(), w, true);
+    }
     detectShape(w);
     getWmOpaqueRegion();
     getSkipCloseAnimation();
@@ -123,22 +134,24 @@ bool Unmanaged::track(xcb_window_t w)
     if (QWindow *internalWindow = findInternalWindow()) {
         m_outline = internalWindow->property("__kwin_outline").toBool();
     }
-    if (effects)
-        static_cast<EffectsHandlerImpl*>(effects)->checkInputWindowStacking();
+    if (effects) {
+        static_cast<EffectsHandlerImpl *>(effects)->checkInputWindowStacking();
+    }
     return true;
 }
 
 void Unmanaged::release(ReleaseReason releaseReason)
 {
-    Deleted* del = nullptr;
+    Deleted *del = nullptr;
     if (releaseReason != ReleaseReason::KWinShutsDown) {
         del = Deleted::create(this);
     }
     Q_EMIT windowClosed(this, del);
     finishCompositing(releaseReason);
     if (!QWidget::find(window()) && releaseReason != ReleaseReason::Destroyed) { // don't affect our own windows
-        if (Xcb::Extensions::self()->isShapeAvailable())
+        if (Xcb::Extensions::self()->isShapeAvailable()) {
             xcb_shape_select_input(kwinApp()->x11Connection(), window(), false);
+        }
         Xcb::selectInput(window(), XCB_EVENT_MASK_NO_EVENT);
     }
     workspace()->removeUnmanaged(this);
@@ -149,7 +162,7 @@ void Unmanaged::release(ReleaseReason releaseReason)
     deleteUnmanaged(this);
 }
 
-void Unmanaged::deleteUnmanaged(Unmanaged* c)
+void Unmanaged::deleteUnmanaged(Unmanaged *c)
 {
     delete c;
 }
@@ -176,7 +189,7 @@ QVector<VirtualDesktop *> Unmanaged::desktops() const
 
 QPoint Unmanaged::clientPos() const
 {
-    return QPoint(0, 0);   // unmanaged windows don't have decorations
+    return QPoint(0, 0); // unmanaged windows don't have decorations
 }
 
 NET::WindowType Unmanaged::windowType(bool direct, int supportedTypes) const
@@ -216,4 +229,3 @@ void Unmanaged::damageNotifyEvent()
 }
 
 } // namespace
-

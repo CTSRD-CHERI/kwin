@@ -24,7 +24,7 @@ namespace Decoration
 {
 
 DecorationPalette::DecorationPalette(const QString &colorScheme)
-    : m_colorScheme(colorScheme != QStringLiteral("kdeglobals") ? colorScheme : QString() )
+    : m_colorScheme(colorScheme != QStringLiteral("kdeglobals") ? colorScheme : QString())
 {
     if (m_colorScheme.isEmpty()) {
         m_colorSchemeConfig = KSharedConfig::openConfig(m_colorScheme, KConfig::FullConfig);
@@ -45,116 +45,114 @@ bool DecorationPalette::isValid() const
 
 QColor DecorationPalette::color(KDecoration2::ColorGroup group, KDecoration2::ColorRole role) const
 {
-    using KDecoration2::ColorRole;
     using KDecoration2::ColorGroup;
+    using KDecoration2::ColorRole;
 
-    if (m_legacyPalette.has_value()) {
+    if (m_legacyColors.has_value()) {
         switch (role) {
-            case ColorRole::Frame:
-                switch (group) {
-                    case ColorGroup::Active:
-                        return m_legacyPalette->activeFrameColor;
-                    case ColorGroup::Inactive:
-                        return m_legacyPalette->inactiveFrameColor;
-                    default:
-                        return QColor();
-                }
-            case ColorRole::TitleBar:
-                switch (group) {
-                    case ColorGroup::Active:
-                        return m_legacyPalette->activeTitleBarColor;
-                    case ColorGroup::Inactive:
-                        return m_legacyPalette->inactiveTitleBarColor;
-                    default:
-                        return QColor();
-                }
-            case ColorRole::Foreground:
-                switch (group) {
-                    case ColorGroup::Active:
-                        return m_legacyPalette->activeForegroundColor;
-                    case ColorGroup::Inactive:
-                        return m_legacyPalette->inactiveForegroundColor;
-                    case ColorGroup::Warning:
-                        return m_legacyPalette->warningForegroundColor;
-                    default:
-                        return QColor();
-                }
+        case ColorRole::Frame:
+            switch (group) {
+            case ColorGroup::Active:
+                return m_legacyColors->activeFrameColor;
+            case ColorGroup::Inactive:
+                return m_legacyColors->inactiveFrameColor;
             default:
                 return QColor();
+            }
+        case ColorRole::TitleBar:
+            switch (group) {
+            case ColorGroup::Active:
+                return m_legacyColors->activeTitleBarColor;
+            case ColorGroup::Inactive:
+                return m_legacyColors->inactiveTitleBarColor;
+            default:
+                return QColor();
+            }
+        case ColorRole::Foreground:
+            switch (group) {
+            case ColorGroup::Active:
+                return m_legacyColors->activeForegroundColor;
+            case ColorGroup::Inactive:
+                return m_legacyColors->inactiveForegroundColor;
+            case ColorGroup::Warning:
+                return m_legacyColors->warningForegroundColor;
+            default:
+                return QColor();
+            }
+        default:
+            return QColor();
         }
     }
 
     switch (role) {
-        case ColorRole::Frame:
-            switch (group) {
-                case ColorGroup::Active:
-                    return m_palette.active.background().color();
-                case ColorGroup::Inactive:
-                    return m_palette.inactive.background().color();
-                default:
-                    return QColor();
-            }
-        case ColorRole::TitleBar:
-            switch (group) {
-                case ColorGroup::Active:
-                    return m_palette.active.background().color();
-                case ColorGroup::Inactive:
-                    return m_palette.inactive.background().color();
-                default:
-                    return QColor();
-            }
-        case ColorRole::Foreground:
-            switch (group) {
-                case ColorGroup::Active:
-                    return m_palette.active.foreground().color();
-                case ColorGroup::Inactive:
-                    return m_palette.inactive.foreground().color();
-                case ColorGroup::Warning:
-                    return m_palette.inactive.foreground(KColorScheme::ForegroundRole::NegativeText).color();
-                default:
-                    return QColor();
-            }
+    case ColorRole::Frame:
+        switch (group) {
+        case ColorGroup::Active:
+            return m_colors.active.background().color();
+        case ColorGroup::Inactive:
+            return m_colors.inactive.background().color();
         default:
             return QColor();
+        }
+    case ColorRole::TitleBar:
+        switch (group) {
+        case ColorGroup::Active:
+            return m_colors.active.background().color();
+        case ColorGroup::Inactive:
+            return m_colors.inactive.background().color();
+        default:
+            return QColor();
+        }
+    case ColorRole::Foreground:
+        switch (group) {
+        case ColorGroup::Active:
+            return m_colors.active.foreground().color();
+        case ColorGroup::Inactive:
+            return m_colors.inactive.foreground().color();
+        case ColorGroup::Warning:
+            return m_colors.inactive.foreground(KColorScheme::ForegroundRole::NegativeText).color();
+        default:
+            return QColor();
+        }
+    default:
+        return QColor();
     }
 }
 
 QPalette DecorationPalette::palette() const
 {
-    return m_legacyPalette ? m_legacyPalette->palette : m_applicationPalette;
+    return m_palette;
 }
 
 void DecorationPalette::update()
 {
     m_colorSchemeConfig->sync();
-
-    m_applicationPalette = KColorScheme::createApplicationPalette(m_colorSchemeConfig);
+    m_palette = KColorScheme::createApplicationPalette(m_colorSchemeConfig);
 
     if (KColorScheme::isColorSetSupported(m_colorSchemeConfig, KColorScheme::Header)) {
-        m_palette.active = KColorScheme(QPalette::Normal, KColorScheme::Header, m_colorSchemeConfig);
-        m_palette.inactive = KColorScheme(QPalette::Inactive, KColorScheme::Header, m_colorSchemeConfig);
-        m_legacyPalette.reset();
+        m_colors.active = KColorScheme(QPalette::Normal, KColorScheme::Header, m_colorSchemeConfig);
+        m_colors.inactive = KColorScheme(QPalette::Inactive, KColorScheme::Header, m_colorSchemeConfig);
+        m_legacyColors.reset();
     } else {
         KConfigGroup wmConfig(m_colorSchemeConfig, QStringLiteral("WM"));
 
         if (!wmConfig.exists()) {
-            m_palette.active = KColorScheme(QPalette::Normal, KColorScheme::Window, m_colorSchemeConfig);
-            m_palette.inactive = KColorScheme(QPalette::Inactive, KColorScheme::Window, m_colorSchemeConfig);
-            m_legacyPalette.reset();
+            m_colors.active = KColorScheme(QPalette::Normal, KColorScheme::Window, m_colorSchemeConfig);
+            m_colors.inactive = KColorScheme(QPalette::Inactive, KColorScheme::Window, m_colorSchemeConfig);
+            m_legacyColors.reset();
             return;
         }
 
-        m_legacyPalette = LegacyPalette{};
-        m_legacyPalette->palette = KColorScheme::createApplicationPalette(m_colorSchemeConfig);
-        m_legacyPalette->activeFrameColor        = wmConfig.readEntry("frame", m_legacyPalette->palette.color(QPalette::Active, QPalette::Window));
-        m_legacyPalette->inactiveFrameColor      = wmConfig.readEntry("inactiveFrame", m_legacyPalette->activeFrameColor);
-        m_legacyPalette->activeTitleBarColor     = wmConfig.readEntry("activeBackground", m_legacyPalette->palette.color(QPalette::Active, QPalette::Highlight));
-        m_legacyPalette->inactiveTitleBarColor   = wmConfig.readEntry("inactiveBackground", m_legacyPalette->inactiveTitleBarColor);
-        m_legacyPalette->activeForegroundColor   = wmConfig.readEntry("activeForeground", m_legacyPalette->palette.color(QPalette::Active, QPalette::HighlightedText));
-        m_legacyPalette->inactiveForegroundColor = wmConfig.readEntry("inactiveForeground", m_legacyPalette->activeForegroundColor.darker());
+        m_legacyColors = LegacyColors{};
+        m_legacyColors->activeFrameColor = wmConfig.readEntry("frame", m_palette.color(QPalette::Active, QPalette::Window));
+        m_legacyColors->inactiveFrameColor = wmConfig.readEntry("inactiveFrame", m_legacyColors->activeFrameColor);
+        m_legacyColors->activeTitleBarColor = wmConfig.readEntry("activeBackground", m_palette.color(QPalette::Active, QPalette::Highlight));
+        m_legacyColors->inactiveTitleBarColor = wmConfig.readEntry("inactiveBackground", m_legacyColors->inactiveTitleBarColor);
+        m_legacyColors->activeForegroundColor = wmConfig.readEntry("activeForeground", m_palette.color(QPalette::Active, QPalette::HighlightedText));
+        m_legacyColors->inactiveForegroundColor = wmConfig.readEntry("inactiveForeground", m_legacyColors->activeForegroundColor.darker());
 
         KConfigGroup windowColorsConfig(m_colorSchemeConfig, QStringLiteral("Colors:Window"));
-        m_legacyPalette->warningForegroundColor = windowColorsConfig.readEntry("ForegroundNegative", QColor(237, 21, 2));
+        m_legacyColors->warningForegroundColor = windowColorsConfig.readEntry("ForegroundNegative", QColor(237, 21, 2));
     }
 
     Q_EMIT changed();
