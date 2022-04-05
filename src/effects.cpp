@@ -139,8 +139,12 @@ EffectsHandlerImpl::EffectsHandlerImpl(Compositor *compositor, Scene *scene)
 
     Workspace *ws = Workspace::self();
     VirtualDesktopManager *vds = VirtualDesktopManager::self();
-    connect(ws, &Workspace::showingDesktopChanged,
-            this, &EffectsHandlerImpl::showingDesktopChanged);
+    connect(ws, &Workspace::showingDesktopChanged, this,
+        [this](bool showing, bool animated) {
+            if (animated) {
+                Q_EMIT showingDesktopChanged(showing);
+            }
+    });
     connect(ws, &Workspace::currentDesktopChanged, this, [this](int old, AbstractClient *c) {
         const int newDesktop = VirtualDesktopManager::self()->current();
         if (old != 0 && newDesktop != old) {
@@ -1260,17 +1264,19 @@ EffectScreen *EffectsHandlerImpl::activeScreen() const
     return EffectScreenImpl::get(workspace()->activeOutput());
 }
 
+static VirtualDesktop *resolveVirtualDesktop(int desktopId)
+{
+    if (desktopId == 0 || desktopId == -1) {
+        return VirtualDesktopManager::self()->currentDesktop();
+    } else {
+        return VirtualDesktopManager::self()->desktopForX11Id(desktopId);
+    }
+}
+
 QRect EffectsHandlerImpl::clientArea(clientAreaOption opt, const EffectScreen *screen, int desktop) const
 {
-    const VirtualDesktop *virtualDesktop;
-    if (desktop == 0 || desktop == -1) {
-        virtualDesktop = VirtualDesktopManager::self()->currentDesktop();
-    } else {
-        virtualDesktop = VirtualDesktopManager::self()->desktopForX11Id(desktop);
-    }
-
     const EffectScreenImpl *screenImpl = static_cast<const EffectScreenImpl *>(screen);
-    return Workspace::self()->clientArea(opt, screenImpl->platformOutput(), virtualDesktop);
+    return Workspace::self()->clientArea(opt, screenImpl->platformOutput(), resolveVirtualDesktop(desktop));
 }
 
 QRect EffectsHandlerImpl::clientArea(clientAreaOption opt, const EffectWindow *c) const
@@ -1281,7 +1287,9 @@ QRect EffectsHandlerImpl::clientArea(clientAreaOption opt, const EffectWindow *c
 
 QRect EffectsHandlerImpl::clientArea(clientAreaOption opt, const QPoint &p, int desktop) const
 {
-    return Workspace::self()->clientArea(opt, p, desktop);
+    const AbstractOutput *output = kwinApp()->platform()->outputAt(p);
+    const VirtualDesktop *virtualDesktop = resolveVirtualDesktop(desktop);
+    return Workspace::self()->clientArea(opt, output, virtualDesktop);
 }
 
 QRect EffectsHandlerImpl::virtualScreenGeometry() const
@@ -1885,6 +1893,11 @@ qreal EffectScreenImpl::devicePixelRatio() const
 QRect EffectScreenImpl::geometry() const
 {
     return m_platformOutput->geometry();
+}
+
+int EffectScreenImpl::refreshRate() const
+{
+    return m_platformOutput->refreshRate();
 }
 
 EffectScreen::Transform EffectScreenImpl::transform() const
