@@ -16,28 +16,6 @@ namespace KWin
 
 DrmOutputLayer::~DrmOutputLayer() = default;
 
-void DrmOutputLayer::aboutToStartPainting(const QRegion &damagedRegion)
-{
-    Q_UNUSED(damagedRegion)
-}
-
-bool DrmOutputLayer::scanout(SurfaceItem *surfaceItem)
-{
-    Q_UNUSED(surfaceItem)
-    return false;
-}
-
-std::optional<QRegion> DrmOutputLayer::startRendering()
-{
-    return {};
-}
-
-bool DrmOutputLayer::endRendering(const QRegion &damagedRegion)
-{
-    Q_UNUSED(damagedRegion)
-    return false;
-}
-
 QRegion DrmOutputLayer::currentDamage() const
 {
     return {};
@@ -58,6 +36,30 @@ bool DrmPipelineLayer::hasDirectScanoutBuffer() const
     return false;
 }
 
+DrmOverlayLayer::DrmOverlayLayer(DrmPipeline *pipeline)
+    : DrmPipelineLayer(pipeline)
+{
+}
+
+void DrmOverlayLayer::setPosition(const QPoint &pos)
+{
+    m_position = pos;
+}
+
+QPoint DrmOverlayLayer::position() const
+{
+    return m_position;
+}
+
+void DrmOverlayLayer::setVisible(bool visible)
+{
+    m_visible = visible;
+}
+
+bool DrmOverlayLayer::isVisible() const
+{
+    return m_visible;
+}
 }
 
 #include "drm_layer.moc"

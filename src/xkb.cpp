@@ -8,15 +8,18 @@
 */
 #include "xkb.h"
 #include "utils/common.h"
+#include "wayland/keyboard_interface.h"
+#include "wayland/seat_interface.h"
 // frameworks
 #include <KConfigGroup>
-// KWayland
-#include <KWaylandServer/keyboard_interface.h>
-#include <KWaylandServer/seat_interface.h>
 // Qt
 #include <QKeyEvent>
 #include <QTemporaryFile>
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
 #include <QtXkbCommonSupport/private/qxkbcommon_p.h>
+#else
+#include <QtGui/private/qxkbcommon_p.h>
+#endif
 // xkbcommon
 #include <xkbcommon/xkbcommon-compose.h>
 #include <xkbcommon/xkbcommon-keysyms.h>

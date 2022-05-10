@@ -7,25 +7,24 @@
 */
 
 #include "screencastmanager.h"
-#include "abstract_client.h"
-#include "abstract_wayland_output.h"
 #include "composite.h"
 #include "deleted.h"
 #include "effects.h"
 #include "kwingltexture.h"
+#include "output.h"
 #include "outputscreencastsource.h"
 #include "platform.h"
 #include "regionscreencastsource.h"
 #include "scene.h"
 #include "screencaststream.h"
+#include "wayland/display.h"
+#include "wayland/output_interface.h"
 #include "wayland_server.h"
+#include "window.h"
 #include "windowscreencastsource.h"
 #include "workspace.h"
 
 #include <KLocalizedString>
-
-#include <KWaylandServer/display.h>
-#include <KWaylandServer/output_interface.h>
 
 namespace KWin
 {
@@ -44,13 +43,11 @@ ScreencastManager::ScreencastManager(QObject *parent)
 class WindowStream : public ScreenCastStream
 {
 public:
-    WindowStream(Toplevel *toplevel, QObject *parent)
-        : ScreenCastStream(new WindowScreenCastSource(toplevel), parent)
-        , m_toplevel(toplevel)
+    WindowStream(Window *window, QObject *parent)
+        : ScreenCastStream(new WindowScreenCastSource(window), parent)
+        , m_window(window)
     {
-        if (AbstractClient *client = qobject_cast<AbstractClient *>(toplevel)) {
-            setObjectName(client->desktopFileName());
-        }
+        setObjectName(window->desktopFileName());
         connect(this, &ScreenCastStream::startStreaming, this, &WindowStream::startFeeding);
         connect(this, &ScreenCastStream::stopStreaming, this, &WindowStream::stopFeeding);
     }
@@ -60,9 +57,9 @@ private:
     {
         connect(Compositor::self()->scene(), &Scene::frameRendered, this, &WindowStream::bufferToStream);
 
-        connect(m_toplevel, &Toplevel::damaged, this, &WindowStream::includeDamage);
-        m_damagedRegion = m_toplevel->visibleGeometry();
-        m_toplevel->addRepaintFull();
+        connect(m_window, &Window::damaged, this, &WindowStream::includeDamage);
+        m_damagedRegion = m_window->visibleGeometry();
+        m_window->output()->renderLoop()->scheduleRepaint();
     }
 
     void stopFeeding()
@@ -70,9 +67,9 @@ private:
         disconnect(Compositor::self()->scene(), &Scene::frameRendered, this, &WindowStream::bufferToStream);
     }
 
-    void includeDamage(Toplevel *toplevel, const QRegion &damage)
+    void includeDamage(Window *window, const QRegion &damage)
     {
-        Q_ASSERT(m_toplevel == toplevel);
+        Q_ASSERT(m_window == window);
         m_damagedRegion |= damage;
     }
 
@@ -85,19 +82,18 @@ private:
     }
 
     QRegion m_damagedRegion;
-    Toplevel *m_toplevel;
+    Window *m_window;
 };
 
 void ScreencastManager::streamWindow(KWaylandServer::ScreencastStreamV1Interface *waylandStream, const QString &winid)
 {
-    auto *toplevel = Workspace::self()->findToplevel(QUuid(winid));
-
-    if (!toplevel) {
+    auto window = Workspace::self()->findToplevel(QUuid(winid));
+    if (!window) {
         waylandStream->sendFailed(i18n("Could not find window id %1", winid));
         return;
     }
 
-    auto stream = new WindowStream(toplevel, this);
+    auto stream = new WindowStream(window, this);
     integrateStreams(waylandStream, stream);
 }
 
@@ -107,7 +103,7 @@ void ScreencastManager::streamVirtualOutput(KWaylandServer::ScreencastStreamV1In
                                             double scale,
                                             KWaylandServer::ScreencastV1Interface::CursorMode mode)
 {
-    auto output = qobject_cast<AbstractWaylandOutput *>(kwinApp()->platform()->createVirtualOutput(name, size, scale));
+    auto output = kwinApp()->platform()->createVirtualOutput(name, size, scale);
     streamOutput(stream, output, mode);
     connect(stream, &KWaylandServer::ScreencastStreamV1Interface::finished, output, [output] {
         kwinApp()->platform()->removeVirtualOutput(output);
@@ -122,7 +118,7 @@ void ScreencastManager::streamWaylandOutput(KWaylandServer::ScreencastStreamV1In
 }
 
 void ScreencastManager::streamOutput(KWaylandServer::ScreencastStreamV1Interface *waylandStream,
-                                     AbstractWaylandOutput *streamOutput,
+                                     Output *streamOutput,
                                      KWaylandServer::ScreencastV1Interface::CursorMode mode)
 {
     if (!streamOutput) {
@@ -133,18 +129,14 @@ void ScreencastManager::streamOutput(KWaylandServer::ScreencastStreamV1Interface
     auto stream = new ScreenCastStream(new OutputScreenCastSource(streamOutput), this);
     stream->setObjectName(streamOutput->name());
     stream->setCursorMode(mode, streamOutput->scale(), streamOutput->geometry());
-    auto bufferToStream = [streamOutput, stream](const QRegion &damagedRegion) {
-        if (damagedRegion.isEmpty()) {
-            return;
+    auto bufferToStream = [stream](const QRegion &damagedRegion) {
+        if (!damagedRegion.isEmpty()) {
+            stream->recordFrame(damagedRegion);
         }
-
-        const QRect frame({}, streamOutput->modeSize());
-        const QRegion region = streamOutput->pixelSize() != streamOutput->modeSize() ? frame : damagedRegion.translated(-streamOutput->geometry().topLeft()).intersected(frame);
-        stream->recordFrame(region);
     };
     connect(stream, &ScreenCastStream::startStreaming, waylandStream, [streamOutput, stream, bufferToStream] {
         Compositor::self()->scene()->addRepaint(streamOutput->geometry());
-        connect(streamOutput, &AbstractWaylandOutput::outputChange, stream, bufferToStream);
+        connect(streamOutput, &Output::outputChange, stream, bufferToStream);
     });
     integrateStreams(waylandStream, stream);
 }
@@ -171,19 +163,18 @@ void ScreencastManager::streamRegion(KWaylandServer::ScreencastStreamV1Interface
 
         const auto allOutputs = kwinApp()->platform()->enabledOutputs();
         for (auto output : allOutputs) {
-            AbstractWaylandOutput *streamOutput = qobject_cast<AbstractWaylandOutput *>(output);
-            if (streamOutput->geometry().intersects(geometry)) {
-                auto bufferToStream = [streamOutput, stream, source](const QRegion &damagedRegion) {
+            if (output->geometry().intersects(geometry)) {
+                auto bufferToStream = [output, stream, source](const QRegion &damagedRegion) {
                     if (damagedRegion.isEmpty()) {
                         return;
                     }
 
                     const QRect streamRegion = source->region();
-                    const QRegion region = streamOutput->pixelSize() != streamOutput->modeSize() ? streamOutput->geometry() : damagedRegion;
-                    source->updateOutput(streamOutput);
+                    const QRegion region = output->pixelSize() != output->modeSize() ? output->geometry() : damagedRegion;
+                    source->updateOutput(output);
                     stream->recordFrame(region.translated(-streamRegion.topLeft()).intersected(streamRegion));
                 };
-                connect(streamOutput, &AbstractWaylandOutput::outputChange, stream, bufferToStream);
+                connect(output, &Output::outputChange, stream, bufferToStream);
             }
         }
     });

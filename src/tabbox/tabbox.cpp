@@ -36,7 +36,7 @@
 #include "utils/xcbutils.h"
 #include "virtualdesktops.h"
 #include "workspace.h"
-#include "x11client.h"
+#include "x11window.h"
 // Qt
 #include <QAction>
 #include <QKeyEvent>
@@ -147,8 +147,8 @@ int TabBoxHandlerImpl::numberOfDesktops() const
 
 QWeakPointer<TabBoxClient> TabBoxHandlerImpl::activeClient() const
 {
-    if (Workspace::self()->activeClient()) {
-        return qWeakPointerCast<TabBoxClient, TabBoxClientImpl>(Workspace::self()->activeClient()->tabBoxClient());
+    if (Workspace::self()->activeWindow()) {
+        return qWeakPointerCast<TabBoxClient, TabBoxClientImpl>(Workspace::self()->activeWindow()->tabBoxClient());
     } else {
         return QWeakPointer<TabBoxClient>();
     }
@@ -197,7 +197,7 @@ bool TabBoxHandlerImpl::checkApplications(TabBoxClient *client) const
                 continue;
             }
             if ((c = dynamic_cast<TabBoxClientImpl *>(client.data()))) {
-                if (AbstractClient::belongToSameApplication(c->client(), current, AbstractClient::SameApplicationCheck::AllowCrossProcesses)) {
+                if (Window::belongToSameApplication(c->client(), current, Window::SameApplicationCheck::AllowCrossProcesses)) {
                     return false;
                 }
             }
@@ -209,7 +209,7 @@ bool TabBoxHandlerImpl::checkApplications(TabBoxClient *client) const
             return false;
         }
         if ((c = dynamic_cast<TabBoxClientImpl *>(pointer.data()))) {
-            if (AbstractClient::belongToSameApplication(c->client(), current, AbstractClient::SameApplicationCheck::AllowCrossProcesses)) {
+            if (Window::belongToSameApplication(c->client(), current, Window::SameApplicationCheck::AllowCrossProcesses)) {
                 return true;
             }
         }
@@ -251,8 +251,8 @@ QWeakPointer<TabBoxClient> TabBoxHandlerImpl::clientToAddToList(TabBoxClient *cl
     if (!client) {
         return QWeakPointer<TabBoxClient>();
     }
-    AbstractClient *ret = nullptr;
-    AbstractClient *current = (static_cast<TabBoxClientImpl *>(client))->client();
+    Window *ret = nullptr;
+    Window *current = (static_cast<TabBoxClientImpl *>(client))->client();
 
     bool addClient = checkDesktop(client, desktop)
         && checkActivity(client)
@@ -262,7 +262,7 @@ QWeakPointer<TabBoxClient> TabBoxHandlerImpl::clientToAddToList(TabBoxClient *cl
     addClient = addClient && current->wantsTabFocus() && !current->skipSwitcher();
     if (addClient) {
         // don't add windows that have modal dialogs
-        AbstractClient *modal = current->findModal();
+        Window *modal = current->findModal();
         if (modal == nullptr || modal == current) {
             ret = current;
         } else if (!clientList().contains(qWeakPointerCast<TabBoxClient, TabBoxClientImpl>(modal->tabBoxClient()))) {
@@ -280,11 +280,11 @@ QWeakPointer<TabBoxClient> TabBoxHandlerImpl::clientToAddToList(TabBoxClient *cl
 
 TabBoxClientList TabBoxHandlerImpl::stackingOrder() const
 {
-    const QList<Toplevel *> stacking = Workspace::self()->stackingOrder();
+    const QList<Window *> stacking = Workspace::self()->stackingOrder();
     TabBoxClientList ret;
-    for (Toplevel *toplevel : stacking) {
-        if (auto client = qobject_cast<AbstractClient *>(toplevel)) {
-            ret.append(qWeakPointerCast<TabBoxClient, TabBoxClientImpl>(client->tabBoxClient()));
+    for (Window *window : stacking) {
+        if (window->isClient()) {
+            ret.append(qWeakPointerCast<TabBoxClient, TabBoxClientImpl>(window->tabBoxClient()));
         }
     }
     return ret;
@@ -297,7 +297,7 @@ bool TabBoxHandlerImpl::isKWinCompositing() const
 
 void TabBoxHandlerImpl::raiseClient(TabBoxClient *c) const
 {
-    Workspace::self()->raiseClient(static_cast<TabBoxClientImpl *>(c)->client());
+    Workspace::self()->raiseWindow(static_cast<TabBoxClientImpl *>(c)->client());
 }
 
 void TabBoxHandlerImpl::restack(TabBoxClient *c, TabBoxClient *under)
@@ -310,14 +310,14 @@ void TabBoxHandlerImpl::elevateClient(TabBoxClient *c, QWindow *tabbox, bool b) 
 {
     auto cl = static_cast<TabBoxClientImpl *>(c)->client();
     cl->elevate(b);
-    if (Toplevel *w = Workspace::self()->findInternal(tabbox)) {
+    if (Window *w = Workspace::self()->findInternal(tabbox)) {
         w->elevate(b);
     }
 }
 
 void TabBoxHandlerImpl::shadeClient(TabBoxClient *c, bool b) const
 {
-    AbstractClient *client = static_cast<TabBoxClientImpl *>(c)->client();
+    Window *client = static_cast<TabBoxClientImpl *>(c)->client();
     client->cancelShadeHoverTimer(); // stop core shading action
     if (!b && client->shadeMode() == ShadeNormal) {
         client->setShade(ShadeHover);
@@ -329,10 +329,9 @@ void TabBoxHandlerImpl::shadeClient(TabBoxClient *c, bool b) const
 QWeakPointer<TabBoxClient> TabBoxHandlerImpl::desktopClient() const
 {
     const auto stackingOrder = Workspace::self()->stackingOrder();
-    for (Toplevel *toplevel : stackingOrder) {
-        auto client = qobject_cast<AbstractClient *>(toplevel);
-        if (client && client->isDesktop() && client->isOnCurrentDesktop() && client->output() == workspace()->activeOutput()) {
-            return qWeakPointerCast<TabBoxClient, TabBoxClientImpl>(client->tabBoxClient());
+    for (Window *window : stackingOrder) {
+        if (window->isClient() && window->isDesktop() && window->isOnCurrentDesktop() && window->output() == workspace()->activeOutput()) {
+            return qWeakPointerCast<TabBoxClient, TabBoxClientImpl>(window->tabBoxClient());
         }
     }
     return QWeakPointer<TabBoxClient>();
@@ -352,7 +351,7 @@ void TabBoxHandlerImpl::highlightWindows(TabBoxClient *window, QWindow *controll
     if (window) {
         windows << static_cast<TabBoxClientImpl *>(window)->client()->effectWindow();
     }
-    if (Toplevel *t = workspace()->findInternal(controller)) {
+    if (Window *t = workspace()->findInternal(controller)) {
         windows << t->effectWindow();
     }
     static_cast<EffectsHandlerImpl *>(effects)->highlightWindows(windows);
@@ -367,7 +366,7 @@ bool TabBoxHandlerImpl::noModifierGrab() const
  * TabBoxClientImpl
  *********************************************************/
 
-TabBoxClientImpl::TabBoxClientImpl(AbstractClient *client)
+TabBoxClientImpl::TabBoxClientImpl(Window *client)
     : TabBoxClient()
     , m_client(client)
 {
@@ -622,8 +621,8 @@ void TabBox::reset(bool partial_reset)
     case TabBoxConfig::ClientTabBox:
         m_tabBox->createModel(partial_reset);
         if (!partial_reset) {
-            if (Workspace::self()->activeClient()) {
-                setCurrentClient(Workspace::self()->activeClient());
+            if (Workspace::self()->activeWindow()) {
+                setCurrentClient(Workspace::self()->activeWindow());
             }
             // it's possible that the active client is not part of the model
             // in that case the index is invalid
@@ -654,10 +653,10 @@ void TabBox::nextPrev(bool next)
     Q_EMIT tabBoxUpdated();
 }
 
-AbstractClient *TabBox::currentClient()
+Window *TabBox::currentClient()
 {
     if (TabBoxClientImpl *client = static_cast<TabBoxClientImpl *>(m_tabBox->client(m_tabBox->currentIndex()))) {
-        if (!Workspace::self()->hasClient(client->client())) {
+        if (!Workspace::self()->hasWindow(client->client())) {
             return nullptr;
         }
         return client->client();
@@ -666,10 +665,10 @@ AbstractClient *TabBox::currentClient()
     }
 }
 
-QList<AbstractClient *> TabBox::currentClientList()
+QList<Window *> TabBox::currentClientList()
 {
     const TabBoxClientList list = m_tabBox->clientList();
-    QList<AbstractClient *> ret;
+    QList<Window *> ret;
     for (const QWeakPointer<TabBoxClient> &clientPointer : list) {
         QSharedPointer<TabBoxClient> client = clientPointer.toStrongRef();
         if (!client) {
@@ -692,7 +691,7 @@ QList<int> TabBox::currentDesktopList()
     return m_tabBox->desktopList();
 }
 
-void TabBox::setCurrentClient(AbstractClient *newClient)
+void TabBox::setCurrentClient(Window *newClient)
 {
     setCurrentIndex(m_tabBox->index(qWeakPointerCast<TabBoxClient, TabBoxClientImpl>(newClient->tabBoxClient())));
 }
@@ -1042,9 +1041,9 @@ void TabBox::navigatingThroughWindows(bool forward, const QKeySequence &shortcut
         //  CDE style raise / lower
         CDEWalkThroughWindows(forward);
     } else {
-        workspace()->forEachAbstractClient([](Toplevel *toplevel) {
-            if (toplevel->isPopupWindow()) {
-                toplevel->popupDone();
+        workspace()->forEachAbstractClient([](Window *window) {
+            if (window->isPopupWindow()) {
+                window->popupDone();
             }
         });
         if (areModKeysDepressed(shortcut)) {
@@ -1155,7 +1154,7 @@ void TabBox::slotWalkBackThroughDesktopList()
     }
 }
 
-void TabBox::shadeActivate(AbstractClient *c)
+void TabBox::shadeActivate(Window *c)
 {
     if ((c->shadeMode() == ShadeNormal || c->shadeMode() == ShadeHover) && options->isShadeHover()) {
         c->setShade(ShadeActivated);
@@ -1238,30 +1237,28 @@ void TabBox::walkThroughDesktops(bool forward)
 
 void TabBox::CDEWalkThroughWindows(bool forward)
 {
-    AbstractClient *c = nullptr;
+    Window *c = nullptr;
     // this function find the first suitable client for unreasonable focus
     // policies - the topmost one, with some exceptions (can't be keepabove/below,
     // otherwise it gets stuck on them)
     //     Q_ASSERT(Workspace::self()->block_stacking_updates == 0);
-    for (int i = Workspace::self()->stackingOrder().size() - 1;
-         i >= 0;
-         --i) {
-        auto it = qobject_cast<AbstractClient *>(Workspace::self()->stackingOrder().at(i));
-        if (it && it->isOnCurrentActivity() && it->isOnCurrentDesktop() && !it->isSpecialWindow()
-            && !it->isShade() && it->isShown() && it->wantsTabFocus()
-            && !it->keepAbove() && !it->keepBelow()) {
-            c = it;
+    for (int i = Workspace::self()->stackingOrder().size() - 1; i >= 0; --i) {
+        auto t = Workspace::self()->stackingOrder().at(i);
+        if (t->isClient() && t->isOnCurrentActivity() && t->isOnCurrentDesktop() && !t->isSpecialWindow()
+            && !t->isShade() && t->isShown() && t->wantsTabFocus()
+            && !t->keepAbove() && !t->keepBelow()) {
+            c = t;
             break;
         }
     }
-    AbstractClient *nc = c;
+    Window *nc = c;
     bool options_traverse_all;
     {
         KConfigGroup group(kwinApp()->config(), "TabBox");
         options_traverse_all = group.readEntry("TraverseAll", false);
     }
 
-    AbstractClient *firstClient = nullptr;
+    Window *firstClient = nullptr;
     do {
         nc = forward ? nextClientStatic(nc) : previousClientStatic(nc);
         if (!firstClient) {
@@ -1276,16 +1273,16 @@ void TabBox::CDEWalkThroughWindows(bool forward)
     } while (nc && nc != c && ((!options_traverse_all && !nc->isOnDesktop(currentDesktop())) || nc->isMinimized() || !nc->wantsTabFocus() || nc->keepAbove() || nc->keepBelow() || !nc->isOnCurrentActivity()));
     if (nc) {
         if (c && c != nc) {
-            Workspace::self()->lowerClient(c);
+            Workspace::self()->lowerWindow(c);
         }
         if (options->focusPolicyIsReasonable()) {
-            Workspace::self()->activateClient(nc);
+            Workspace::self()->activateWindow(nc);
             shadeActivate(nc);
         } else {
             if (!nc->isOnDesktop(currentDesktop())) {
                 setCurrentDesktop(nc->desktop());
             }
-            Workspace::self()->raiseClient(nc);
+            Workspace::self()->raiseWindow(nc);
         }
     }
 }
@@ -1295,8 +1292,8 @@ void TabBox::KDEOneStepThroughWindows(bool forward, TabBoxMode mode)
     setMode(mode);
     reset();
     nextPrev(forward);
-    if (AbstractClient *c = currentClient()) {
-        Workspace::self()->activateClient(c);
+    if (Window *c = currentClient()) {
+        Workspace::self()->activateWindow(c);
         shadeActivate(c);
     }
 }
@@ -1437,8 +1434,8 @@ void TabBox::keyPress(int keyQt)
             // if Escape is part of the shortcut, don't cancel
             close(true);
         } else if (direction == Steady) {
-            QKeyEvent *event = new QKeyEvent(QEvent::KeyPress, keyQt & ~Qt::KeyboardModifierMask, Qt::NoModifier);
-            grabbedKeyEvent(event);
+            QKeyEvent event(QEvent::KeyPress, keyQt & ~Qt::KeyboardModifierMask, Qt::NoModifier);
+            grabbedKeyEvent(&event);
         }
     }
 }
@@ -1457,12 +1454,12 @@ void TabBox::close(bool abort)
 
 void TabBox::accept(bool closeTabBox)
 {
-    AbstractClient *c = currentClient();
+    Window *c = currentClient();
     if (closeTabBox) {
         close();
     }
     if (c) {
-        Workspace::self()->activateClient(c);
+        Workspace::self()->activateWindow(c);
         shadeActivate(c);
         if (c->isDesktop()) {
             Workspace::self()->setShowingDesktop(!Workspace::self()->showingDesktop(), !m_desktopListConfig.isHighlightWindows());
@@ -1508,7 +1505,7 @@ int TabBox::previousDesktopStatic(int iDesktop) const
  * Auxiliary functions to travers all clients according to the static
  * order. Useful for the CDE-style Alt-tab feature.
  */
-AbstractClient *TabBox::nextClientStatic(AbstractClient *c) const
+Window *TabBox::nextClientStatic(Window *c) const
 {
     const auto &list = Workspace::self()->allClientList();
     if (!c || list.isEmpty()) {
@@ -1529,7 +1526,7 @@ AbstractClient *TabBox::nextClientStatic(AbstractClient *c) const
  * Auxiliary functions to travers all clients according to the static
  * order. Useful for the CDE-style Alt-tab feature.
  */
-AbstractClient *TabBox::previousClientStatic(AbstractClient *c) const
+Window *TabBox::previousClientStatic(Window *c) const
 {
     const auto &list = Workspace::self()->allClientList();
     if (!c || list.isEmpty()) {
@@ -1563,8 +1560,8 @@ bool TabBox::establishTabBoxGrab()
     // the active client, which may not have it.
     Q_ASSERT(!m_forcedGlobalMouseGrab);
     m_forcedGlobalMouseGrab = true;
-    if (Workspace::self()->activeClient() != nullptr) {
-        Workspace::self()->activeClient()->updateMouseGrab();
+    if (Workspace::self()->activeWindow() != nullptr) {
+        Workspace::self()->activeWindow()->updateMouseGrab();
     }
     m_x11EventFilter.reset(new X11Filter);
     return true;
@@ -1580,8 +1577,8 @@ void TabBox::removeTabBoxGrab()
     ungrabXKeyboard();
     Q_ASSERT(m_forcedGlobalMouseGrab);
     m_forcedGlobalMouseGrab = false;
-    if (Workspace::self()->activeClient() != nullptr) {
-        Workspace::self()->activeClient()->updateMouseGrab();
+    if (Workspace::self()->activeWindow() != nullptr) {
+        Workspace::self()->activeWindow()->updateMouseGrab();
     }
     m_x11EventFilter.reset();
 }

@@ -9,19 +9,18 @@
 #include "scene_qpainter.h"
 #include "qpaintersurfacetexture.h"
 // KWin
-#include "abstract_client.h"
-#include "abstract_output.h"
 #include "composite.h"
 #include "cursor.h"
 #include "decorations/decoratedclient.h"
 #include "deleted.h"
 #include "effects.h"
 #include "main.h"
+#include "output.h"
 #include "platform.h"
 #include "renderloop.h"
 #include "screens.h"
 #include "surfaceitem.h"
-#include "toplevel.h"
+#include "window.h"
 #include "windowitem.h"
 
 #include <kwinoffscreenquickview.h>
@@ -68,9 +67,9 @@ void SceneQPainter::paintGenericScreen(int mask, const ScreenPaintData &data)
     m_painter->restore();
 }
 
-void SceneQPainter::paint(const QRegion &region)
+void SceneQPainter::paint(RenderTarget *target, const QRegion &region)
 {
-    QImage *buffer = m_backend->bufferForScreen(painted_screen);
+    QImage *buffer = std::get<QImage *>(target->nativeHandle());
     if (buffer && !buffer->isNull()) {
         m_painter->begin(buffer);
         m_painter->setWindow(painted_screen->geometry());
@@ -99,45 +98,17 @@ void SceneQPainter::paintOffscreenQuickView(OffscreenQuickView *w)
     painter->restore();
 }
 
-Scene::Window *SceneQPainter::createWindow(Toplevel *toplevel)
+Shadow *SceneQPainter::createShadow(Window *window)
 {
-    return new SceneQPainter::Window(this, toplevel);
+    return new SceneQPainterShadow(window);
 }
 
-Scene::EffectFrame *SceneQPainter::createEffectFrame(EffectFrameImpl *frame)
-{
-    return new QPainterEffectFrame(frame, this);
-}
-
-Shadow *SceneQPainter::createShadow(Toplevel *toplevel)
-{
-    return new SceneQPainterShadow(toplevel);
-}
-
-QImage *SceneQPainter::qpainterRenderBuffer(AbstractOutput *output) const
-{
-    return m_backend->bufferForScreen(output);
-}
-
-//****************************************
-// SceneQPainter::Window
-//****************************************
-SceneQPainter::Window::Window(SceneQPainter *scene, Toplevel *c)
-    : Scene::Window(c)
-    , m_scene(scene)
-{
-}
-
-SceneQPainter::Window::~Window()
-{
-}
-
-void SceneQPainter::Window::performPaint(int mask, const QRegion &_region, const WindowPaintData &data)
+void SceneQPainter::render(Item *item, int mask, const QRegion &_region, const WindowPaintData &data)
 {
     QRegion region = _region;
 
-    const QRect boundingRect = windowItem()->mapToGlobal(windowItem()->boundingRect());
-    if (!(mask & (PAINT_WINDOW_TRANSFORMED | PAINT_SCREEN_TRANSFORMED))) {
+    const QRect boundingRect = item->mapToGlobal(item->boundingRect());
+    if (!(mask & (Scene::PAINT_WINDOW_TRANSFORMED | Scene::PAINT_SCREEN_TRANSFORMED))) {
         region &= boundingRect;
     }
 
@@ -145,13 +116,12 @@ void SceneQPainter::Window::performPaint(int mask, const QRegion &_region, const
         return;
     }
 
-    QPainter *scenePainter = m_scene->scenePainter();
-    QPainter *painter = scenePainter;
+    QPainter *painter = scenePainter();
     painter->save();
     painter->setClipRegion(region);
     painter->setClipping(true);
 
-    if (mask & PAINT_WINDOW_TRANSFORMED) {
+    if (mask & Scene::PAINT_WINDOW_TRANSFORMED) {
         painter->translate(data.xTranslation(), data.yTranslation());
         painter->scale(data.xScale(), data.yScale());
     }
@@ -169,7 +139,7 @@ void SceneQPainter::Window::performPaint(int mask, const QRegion &_region, const
         painter = &tempPainter;
     }
 
-    renderItem(painter, windowItem());
+    renderItem(painter, item);
 
     if (!opaque) {
         tempPainter.restore();
@@ -178,14 +148,14 @@ void SceneQPainter::Window::performPaint(int mask, const QRegion &_region, const
         translucent.setAlphaF(data.opacity());
         tempPainter.fillRect(QRect(QPoint(0, 0), boundingRect.size()), translucent);
         tempPainter.end();
-        painter = scenePainter;
+        painter = scenePainter();
         painter->drawImage(boundingRect.topLeft(), tempImage);
     }
 
     painter->restore();
 }
 
-void SceneQPainter::Window::renderItem(QPainter *painter, Item *item) const
+void SceneQPainter::renderItem(QPainter *painter, Item *item) const
 {
     const QList<Item *> sortedChildItems = item->sortedChildItems();
 
@@ -196,7 +166,7 @@ void SceneQPainter::Window::renderItem(QPainter *painter, Item *item) const
         if (childItem->z() >= 0) {
             break;
         }
-        if (childItem->isVisible()) {
+        if (childItem->explicitVisible()) {
             renderItem(painter, childItem);
         }
     }
@@ -212,7 +182,7 @@ void SceneQPainter::Window::renderItem(QPainter *painter, Item *item) const
         if (childItem->z() < 0) {
             continue;
         }
-        if (childItem->isVisible()) {
+        if (childItem->explicitVisible()) {
             renderItem(painter, childItem);
         }
     }
@@ -220,7 +190,7 @@ void SceneQPainter::Window::renderItem(QPainter *painter, Item *item) const
     painter->restore();
 }
 
-void SceneQPainter::Window::renderSurfaceItem(QPainter *painter, SurfaceItem *surfaceItem) const
+void SceneQPainter::renderSurfaceItem(QPainter *painter, SurfaceItem *surfaceItem) const
 {
     const SurfacePixmap *surfaceTexture = surfaceItem->pixmap();
     if (!surfaceTexture || !surfaceTexture->isValid()) {
@@ -247,17 +217,11 @@ void SceneQPainter::Window::renderSurfaceItem(QPainter *painter, SurfaceItem *su
     }
 }
 
-void SceneQPainter::Window::renderDecorationItem(QPainter *painter, DecorationItem *decorationItem) const
+void SceneQPainter::renderDecorationItem(QPainter *painter, DecorationItem *decorationItem) const
 {
     const auto renderer = static_cast<const SceneQPainterDecorationRenderer *>(decorationItem->renderer());
     QRect dtr, dlr, drr, dbr;
-    if (auto client = qobject_cast<AbstractClient *>(toplevel)) {
-        client->layoutDecorationRects(dlr, dtr, drr, dbr);
-    } else if (auto deleted = qobject_cast<Deleted *>(toplevel)) {
-        deleted->layoutDecorationRects(dlr, dtr, drr, dbr);
-    } else {
-        return;
-    }
+    decorationItem->window()->layoutDecorationRects(dlr, dtr, drr, dbr);
 
     painter->drawImage(dtr, renderer->image(SceneQPainterDecorationRenderer::DecorationPart::Top));
     painter->drawImage(dlr, renderer->image(SceneQPainterDecorationRenderer::DecorationPart::Left));
@@ -280,88 +244,11 @@ SurfaceTexture *SceneQPainter::createSurfaceTextureWayland(SurfacePixmapWayland 
     return m_backend->createSurfaceTextureWayland(pixmap);
 }
 
-QPainterEffectFrame::QPainterEffectFrame(EffectFrameImpl *frame, SceneQPainter *scene)
-    : Scene::EffectFrame(frame)
-    , m_scene(scene)
-{
-}
-
-QPainterEffectFrame::~QPainterEffectFrame()
-{
-}
-
-void QPainterEffectFrame::render(const QRegion &region, double opacity, double frameOpacity)
-{
-    Q_UNUSED(region)
-    Q_UNUSED(opacity)
-    // TODO: adjust opacity
-    if (m_effectFrame->geometry().isEmpty()) {
-        return; // Nothing to display
-    }
-    QPainter *painter = m_scene->scenePainter();
-
-    // Render the actual frame
-    if (m_effectFrame->style() == EffectFrameUnstyled) {
-        painter->save();
-        painter->setPen(Qt::NoPen);
-        QColor color(Qt::black);
-        color.setAlphaF(frameOpacity);
-        painter->setBrush(color);
-        painter->setRenderHint(QPainter::Antialiasing);
-        painter->drawRoundedRect(m_effectFrame->geometry().adjusted(-5, -5, 5, 5), 5.0, 5.0);
-        painter->restore();
-    } else if (m_effectFrame->style() == EffectFrameStyled) {
-        qreal left, top, right, bottom;
-        m_effectFrame->frame().getMargins(left, top, right, bottom); // m_geometry is the inner geometry
-        QRect geom = m_effectFrame->geometry().adjusted(-left, -top, right, bottom);
-        painter->drawPixmap(geom, m_effectFrame->frame().framePixmap());
-    }
-    if (!m_effectFrame->selection().isNull()) {
-        painter->drawPixmap(m_effectFrame->selection(), m_effectFrame->selectionFrame().framePixmap());
-    }
-
-    // Render icon
-    if (!m_effectFrame->icon().isNull() && !m_effectFrame->iconSize().isEmpty()) {
-        const QPoint topLeft(m_effectFrame->geometry().x(),
-                             m_effectFrame->geometry().center().y() - m_effectFrame->iconSize().height() / 2);
-
-        const QRect geom = QRect(topLeft, m_effectFrame->iconSize());
-        painter->drawPixmap(geom, m_effectFrame->icon().pixmap(m_effectFrame->iconSize()));
-    }
-
-    // Render text
-    if (!m_effectFrame->text().isEmpty()) {
-        // Determine position on texture to paint text
-        QRect rect(QPoint(0, 0), m_effectFrame->geometry().size());
-        if (!m_effectFrame->icon().isNull() && !m_effectFrame->iconSize().isEmpty()) {
-            rect.setLeft(m_effectFrame->iconSize().width());
-        }
-
-        // If static size elide text as required
-        QString text = m_effectFrame->text();
-        if (m_effectFrame->isStatic()) {
-            QFontMetrics metrics(m_effectFrame->text());
-            text = metrics.elidedText(text, Qt::ElideRight, rect.width());
-        }
-
-        painter->save();
-        painter->setFont(m_effectFrame->font());
-        if (m_effectFrame->style() == EffectFrameStyled) {
-            painter->setPen(m_effectFrame->styledTextColor());
-        } else {
-            // TODO: What about no frame? Custom color setting required
-            painter->setPen(Qt::white);
-        }
-        painter->drawText(rect.translated(m_effectFrame->geometry().topLeft()), m_effectFrame->alignment(), text);
-        painter->restore();
-    }
-}
-
 //****************************************
 // QPainterShadow
 //****************************************
-SceneQPainterShadow::SceneQPainterShadow(Toplevel *toplevel)
-    : Shadow(toplevel)
+SceneQPainterShadow::SceneQPainterShadow(Window *window)
+    : Shadow(window)
 {
 }
 
@@ -430,7 +317,7 @@ void SceneQPainterDecorationRenderer::render(const QRegion &region)
 void SceneQPainterDecorationRenderer::resizeImages()
 {
     QRect left, top, right, bottom;
-    client()->client()->layoutDecorationRects(left, top, right, bottom);
+    client()->window()->layoutDecorationRects(left, top, right, bottom);
 
     auto checkAndCreate = [this](int index, const QSize &size) {
         auto dpr = effectiveDevicePixelRatio();

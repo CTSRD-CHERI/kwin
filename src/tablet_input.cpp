@@ -7,19 +7,17 @@
     SPDX-License-Identifier: GPL-2.0-or-later
 */
 #include "tablet_input.h"
-#include "abstract_client.h"
 #include "decorations/decoratedclient.h"
 #include "input_event.h"
 #include "input_event_spy.h"
 #include "pointer_input.h"
-#include "toplevel.h"
+#include "wayland/seat_interface.h"
+#include "wayland/surface_interface.h"
 #include "wayland_server.h"
+#include "window.h"
 #include "workspace.h"
 // KDecoration
 #include <KDecoration2/Decoration>
-// KWayland
-#include <KWaylandServer/seat_interface.h>
-#include <KWaylandServer/surface_interface.h>
 // Qt
 #include <QHoverEvent>
 #include <QWindow>
@@ -154,19 +152,19 @@ void TabletInputRedirection::cleanupDecoration(Decoration::DecoratedClientImpl *
         return;
     }
 
-    const auto pos = m_lastPosition - now->client()->pos();
+    const auto pos = m_lastPosition - now->window()->pos();
     QHoverEvent event(QEvent::HoverEnter, pos, pos);
     QCoreApplication::instance()->sendEvent(now->decoration(), &event);
-    now->client()->processDecorationMove(pos.toPoint(), m_lastPosition.toPoint());
+    now->window()->processDecorationMove(pos.toPoint(), m_lastPosition.toPoint());
 
     m_decorationGeometryConnection = connect(
-        decoration()->client(), &AbstractClient::frameGeometryChanged, this, [this]() {
+        decoration()->window(), &Window::frameGeometryChanged, this, [this]() {
             // ensure maximize button gets the leave event when maximizing/restore a window, see BUG 385140
             const auto oldDeco = decoration();
             update();
-            if (oldDeco && oldDeco == decoration() && !decoration()->client()->isInteractiveMove() && !decoration()->client()->isInteractiveResize()) {
+            if (oldDeco && oldDeco == decoration() && !decoration()->window()->isInteractiveMove() && !decoration()->window()->isInteractiveResize()) {
                 // position of window did not change, we need to send HoverMotion manually
-                const QPointF p = m_lastPosition - decoration()->client()->pos();
+                const QPointF p = m_lastPosition - decoration()->window()->pos();
                 QHoverEvent event(QEvent::HoverMove, p, p);
                 QCoreApplication::instance()->sendEvent(decoration()->decoration(), &event);
             }
@@ -177,7 +175,7 @@ void TabletInputRedirection::cleanupDecoration(Decoration::DecoratedClientImpl *
     m_decorationDestroyedConnection = connect(now, &QObject::destroyed, this, &TabletInputRedirection::update, Qt::QueuedConnection);
 }
 
-void TabletInputRedirection::focusUpdate(Toplevel *focusOld, Toplevel *focusNow)
+void TabletInputRedirection::focusUpdate(Window *focusOld, Window *focusNow)
 {
     Q_UNUSED(focusOld)
     Q_UNUSED(focusNow)

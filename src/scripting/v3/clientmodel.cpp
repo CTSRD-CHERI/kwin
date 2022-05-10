@@ -5,10 +5,10 @@
 */
 
 #include "clientmodel.h"
-#include "abstract_client.h"
-#include "abstract_output.h"
+#include "output.h"
 #include "platform.h"
 #include "virtualdesktops.h"
+#include "window.h"
 #include "workspace.h"
 
 namespace KWin::ScriptingModels::V3
@@ -17,35 +17,35 @@ namespace KWin::ScriptingModels::V3
 ClientModel::ClientModel(QObject *parent)
     : QAbstractListModel(parent)
 {
-    connect(workspace(), &Workspace::clientAdded, this, &ClientModel::handleClientAdded);
-    connect(workspace(), &Workspace::clientRemoved, this, &ClientModel::handleClientRemoved);
+    connect(workspace(), &Workspace::windowAdded, this, &ClientModel::handleClientAdded);
+    connect(workspace(), &Workspace::windowRemoved, this, &ClientModel::handleClientRemoved);
 
     m_clients = workspace()->allClientList();
-    for (AbstractClient *client : qAsConst(m_clients)) {
+    for (Window *client : qAsConst(m_clients)) {
         setupClientConnections(client);
     }
 }
 
-void ClientModel::markRoleChanged(AbstractClient *client, int role)
+void ClientModel::markRoleChanged(Window *client, int role)
 {
     const QModelIndex row = index(m_clients.indexOf(client), 0);
     Q_EMIT dataChanged(row, row, {role});
 }
 
-void ClientModel::setupClientConnections(AbstractClient *client)
+void ClientModel::setupClientConnections(Window *client)
 {
-    connect(client, &AbstractClient::desktopChanged, this, [this, client]() {
+    connect(client, &Window::desktopChanged, this, [this, client]() {
         markRoleChanged(client, DesktopRole);
     });
-    connect(client, &AbstractClient::screenChanged, this, [this, client]() {
+    connect(client, &Window::screenChanged, this, [this, client]() {
         markRoleChanged(client, ScreenRole);
     });
-    connect(client, &AbstractClient::activitiesChanged, this, [this, client]() {
+    connect(client, &Window::activitiesChanged, this, [this, client]() {
         markRoleChanged(client, ActivityRole);
     });
 }
 
-void ClientModel::handleClientAdded(AbstractClient *client)
+void ClientModel::handleClientAdded(Window *client)
 {
     beginInsertRows(QModelIndex(), m_clients.count(), m_clients.count());
     m_clients.append(client);
@@ -54,7 +54,7 @@ void ClientModel::handleClientAdded(AbstractClient *client)
     setupClientConnections(client);
 }
 
-void ClientModel::handleClientRemoved(AbstractClient *client)
+void ClientModel::handleClientRemoved(Window *client)
 {
     const int index = m_clients.indexOf(client);
     Q_ASSERT(index != -1);
@@ -81,7 +81,7 @@ QVariant ClientModel::data(const QModelIndex &index, int role) const
         return QVariant();
     }
 
-    AbstractClient *client = m_clients[index.row()];
+    Window *client = m_clients[index.row()];
     switch (role) {
     case Qt::DisplayRole:
     case ClientRole:
@@ -186,7 +186,7 @@ QString ClientFilterModel::screenName() const
 
 void ClientFilterModel::setScreenName(const QString &screen)
 {
-    AbstractOutput *output = kwinApp()->platform()->findOutput(screen);
+    Output *output = kwinApp()->platform()->findOutput(screen);
     if (m_output != output) {
         m_output = output;
         Q_EMIT screenNameChanged();
@@ -226,6 +226,22 @@ void ClientFilterModel::resetWindowType()
     }
 }
 
+void ClientFilterModel::setMinimizedWindows(bool show)
+{
+    if (m_showMinimizedWindows == show) {
+        return;
+    }
+
+    m_showMinimizedWindows = show;
+    invalidateFilter();
+    Q_EMIT minimizedWindowsChanged();
+}
+
+bool ClientFilterModel::minimizedWindows() const
+{
+    return m_showMinimizedWindows;
+}
+
 bool ClientFilterModel::filterAcceptsRow(int sourceRow, const QModelIndex &sourceParent) const
 {
     if (!m_clientModel) {
@@ -241,7 +257,7 @@ bool ClientFilterModel::filterAcceptsRow(int sourceRow, const QModelIndex &sourc
         return true;
     }
 
-    AbstractClient *client = qvariant_cast<AbstractClient *>(data);
+    Window *client = qvariant_cast<Window *>(data);
     if (!client) {
         return false;
     }
@@ -288,10 +304,14 @@ bool ClientFilterModel::filterAcceptsRow(int sourceRow, const QModelIndex &sourc
         }
         return false;
     }
+
+    if (!m_showMinimizedWindows) {
+        return !client->isMinimized();
+    }
     return true;
 }
 
-ClientFilterModel::WindowTypes ClientFilterModel::windowTypeMask(AbstractClient *client) const
+ClientFilterModel::WindowTypes ClientFilterModel::windowTypeMask(Window *client) const
 {
     WindowTypes mask;
     if (client->isNormalWindow()) {

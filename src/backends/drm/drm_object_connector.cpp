@@ -20,24 +20,20 @@
 #include <KConfigGroup>
 
 #include <cerrno>
+#include <cstring>
+#include <libxcvt/libxcvt.h>
 
 namespace KWin
 {
 
 static bool checkIfEqual(const drmModeModeInfo *one, const drmModeModeInfo *two)
 {
-    return one->clock == two->clock
-        && one->hdisplay == two->hdisplay
-        && one->hsync_start == two->hsync_start
-        && one->hsync_end == two->hsync_end
-        && one->htotal == two->htotal
-        && one->hskew == two->hskew
-        && one->vdisplay == two->vdisplay
-        && one->vsync_start == two->vsync_start
-        && one->vsync_end == two->vsync_end
-        && one->vtotal == two->vtotal
-        && one->vscan == two->vscan
-        && one->vrefresh == two->vrefresh;
+    return std::memcmp(one, two, sizeof(drmModeModeInfo)) == 0;
+}
+
+static QSize resolutionForMode(const drmModeModeInfo *info)
+{
+    return QSize(info->hdisplay, info->vdisplay);
 }
 
 static quint64 refreshRateForMode(_drmModeModeInfo *m)
@@ -57,11 +53,19 @@ static quint64 refreshRateForMode(_drmModeModeInfo *m)
     return refreshRate;
 }
 
+static OutputMode::Flags flagsForMode(const drmModeModeInfo *info)
+{
+    OutputMode::Flags flags;
+    if (info->type & DRM_MODE_TYPE_PREFERRED) {
+        flags |= OutputMode::Flag::Preferred;
+    }
+    return flags;
+}
+
 DrmConnectorMode::DrmConnectorMode(DrmConnector *connector, drmModeModeInfo nativeMode)
-    : m_connector(connector)
+    : OutputMode(resolutionForMode(&nativeMode), refreshRateForMode(&nativeMode), flagsForMode(&nativeMode))
+    , m_connector(connector)
     , m_nativeMode(nativeMode)
-    , m_size(nativeMode.hdisplay, nativeMode.vdisplay)
-    , m_refreshRate(refreshRateForMode(&nativeMode))
 {
 }
 
@@ -76,16 +80,6 @@ DrmConnectorMode::~DrmConnectorMode()
 drmModeModeInfo *DrmConnectorMode::nativeMode()
 {
     return &m_nativeMode;
-}
-
-QSize DrmConnectorMode::size() const
-{
-    return m_size;
-}
-
-uint32_t DrmConnectorMode::refreshRate() const
-{
-    return m_refreshRate;
 }
 
 uint32_t DrmConnectorMode::blobId()
@@ -204,7 +198,7 @@ QSize DrmConnector::physicalSize() const
     return m_physicalSize;
 }
 
-QVector<QSharedPointer<DrmConnectorMode>> DrmConnector::modes() const
+QList<QSharedPointer<DrmConnectorMode>> DrmConnector::modes() const
 {
     return m_modes;
 }
@@ -217,21 +211,21 @@ QSharedPointer<DrmConnectorMode> DrmConnector::findMode(const drmModeModeInfo &m
     return it == m_modes.constEnd() ? nullptr : *it;
 }
 
-AbstractWaylandOutput::SubPixel DrmConnector::subpixel() const
+Output::SubPixel DrmConnector::subpixel() const
 {
     switch (m_conn->subpixel) {
     case DRM_MODE_SUBPIXEL_UNKNOWN:
-        return AbstractWaylandOutput::SubPixel::Unknown;
+        return Output::SubPixel::Unknown;
     case DRM_MODE_SUBPIXEL_NONE:
-        return AbstractWaylandOutput::SubPixel::None;
+        return Output::SubPixel::None;
     case DRM_MODE_SUBPIXEL_HORIZONTAL_RGB:
-        return AbstractWaylandOutput::SubPixel::Horizontal_RGB;
+        return Output::SubPixel::Horizontal_RGB;
     case DRM_MODE_SUBPIXEL_HORIZONTAL_BGR:
-        return AbstractWaylandOutput::SubPixel::Horizontal_BGR;
+        return Output::SubPixel::Horizontal_BGR;
     case DRM_MODE_SUBPIXEL_VERTICAL_RGB:
-        return AbstractWaylandOutput::SubPixel::Vertical_RGB;
+        return Output::SubPixel::Vertical_RGB;
     case DRM_MODE_SUBPIXEL_VERTICAL_BGR:
-        return AbstractWaylandOutput::SubPixel::Vertical_BGR;
+        return Output::SubPixel::Vertical_BGR;
     default:
         Q_UNREACHABLE();
     }
@@ -281,10 +275,10 @@ bool DrmConnector::hasRgbRange() const
     return rgb && rgb->hasAllEnums();
 }
 
-AbstractWaylandOutput::RgbRange DrmConnector::rgbRange() const
+Output::RgbRange DrmConnector::rgbRange() const
 {
     const auto &rgb = getProp(PropertyIndex::Broadcast_RGB);
-    return rgb->enumForValue<AbstractWaylandOutput::RgbRange>(rgb->pending());
+    return rgb->enumForValue<Output::RgbRange>(rgb->pending());
 }
 
 bool DrmConnector::updateProperties()
@@ -312,16 +306,11 @@ bool DrmConnector::updateProperties()
     }
 
     // parse edid
-    auto edidProp = getProp(PropertyIndex::Edid);
-    if (edidProp) {
-        DrmScopedPointer<drmModePropertyBlobRes> blob(drmModeGetPropertyBlob(gpu()->fd(), edidProp->current()));
-        if (blob && blob->data) {
-            m_edid = Edid(blob->data, blob->length);
-            if (!m_edid.isValid()) {
-                qCWarning(KWIN_DRM) << "Couldn't parse EDID for connector" << this;
-            }
+    if (const auto edidProp = getProp(PropertyIndex::Edid); edidProp && edidProp->immutableBlob()) {
+        m_edid = Edid(edidProp->immutableBlob()->data, edidProp->immutableBlob()->length);
+        if (!m_edid.isValid()) {
+            qCWarning(KWIN_DRM) << "Couldn't parse EDID for connector" << this;
         }
-        deleteProp(PropertyIndex::Edid);
     } else {
         qCDebug(KWIN_DRM) << "Could not find edid for connector" << this;
     }
@@ -344,21 +333,25 @@ bool DrmConnector::updateProperties()
     }
 
     // update modes
-    bool equal = m_conn->count_modes == m_modes.count();
+    bool equal = m_conn->count_modes == m_driverModes.count();
     for (int i = 0; equal && i < m_conn->count_modes; i++) {
-        equal &= checkIfEqual(m_modes[i]->nativeMode(), &m_conn->modes[i]);
+        equal &= checkIfEqual(m_driverModes[i]->nativeMode(), &m_conn->modes[i]);
     }
     if (!equal) {
         // reload modes
-        m_modes.clear();
+        m_driverModes.clear();
         for (int i = 0; i < m_conn->count_modes; i++) {
-            m_modes.append(QSharedPointer<DrmConnectorMode>::create(this, m_conn->modes[i]));
+            m_driverModes.append(QSharedPointer<DrmConnectorMode>::create(this, m_conn->modes[i]));
         }
-        if (m_modes.isEmpty()) {
+        if (m_driverModes.isEmpty()) {
             return false;
         } else {
-            if (!m_pipeline->pending.mode) {
-                m_pipeline->pending.mode = m_modes.constFirst();
+            m_modes.clear();
+            m_modes.append(m_driverModes);
+            m_modes.append(generateCommonModes());
+            if (!m_pipeline->mode()) {
+                m_pipeline->setMode(m_modes.constFirst());
+                m_pipeline->applyPendingChanges();
             }
             if (m_pipeline->output()) {
                 m_pipeline->output()->updateModes();
@@ -401,6 +394,74 @@ DrmConnector::LinkStatus DrmConnector::linkStatus() const
         return property->enumForValue<LinkStatus>(property->current());
     }
     return LinkStatus::Good;
+}
+
+static const QVector<QSize> s_commonModes = {
+    /* 4:3 (1.33) */
+    QSize(1600, 1200),
+    QSize(1280, 1024), /* 5:4 (1.25) */
+    QSize(1024, 768),
+    /* 16:10 (1.6) */
+    QSize(2560, 1600),
+    QSize(1920, 1200),
+    QSize(1280, 800),
+    /* 16:9 (1.77) */
+    QSize(5120, 2880),
+    QSize(3840, 2160),
+    QSize(3200, 1800),
+    QSize(2880, 1620),
+    QSize(2560, 1440),
+    QSize(1920, 1080),
+    QSize(1600, 900),
+    QSize(1368, 768),
+    QSize(1280, 720),
+};
+
+QList<QSharedPointer<DrmConnectorMode>> DrmConnector::generateCommonModes()
+{
+    QList<QSharedPointer<DrmConnectorMode>> ret;
+    uint32_t maxBandwidthEstimation = 0;
+    QSize maxSize;
+    for (const auto &mode : qAsConst(m_driverModes)) {
+        if (mode->size().width() > maxSize.width() || mode->size().height() > maxSize.height()) {
+            maxSize = mode->size();
+            maxBandwidthEstimation = std::max(maxBandwidthEstimation, static_cast<uint32_t>(mode->size().width() * mode->size().height() * mode->refreshRate()));
+        }
+    }
+    for (const auto &size : s_commonModes) {
+        uint32_t bandwidthEstimation = size.width() * size.height() * 60000;
+        const auto it = std::find_if(m_driverModes.constBegin(), m_driverModes.constEnd(), [size](const auto &mode) {
+            return mode->size() == size;
+        });
+        if (it == m_driverModes.constEnd() && size.width() <= maxSize.width() && size.height() <= maxSize.height() && bandwidthEstimation < maxBandwidthEstimation) {
+            ret << generateMode(size, 60000);
+        }
+    }
+    return ret;
+}
+
+QSharedPointer<DrmConnectorMode> DrmConnector::generateMode(const QSize &size, uint32_t refreshRate)
+{
+    auto modeInfo = libxcvt_gen_mode_info(size.width(), size.height(), refreshRate, false, false);
+
+    drmModeModeInfo mode;
+    mode.vdisplay = modeInfo->vdisplay;
+    mode.hdisplay = modeInfo->hdisplay;
+    mode.clock = modeInfo->dot_clock;
+    mode.hsync_start = modeInfo->hsync_start;
+    mode.hsync_end = modeInfo->hsync_end;
+    mode.htotal = modeInfo->htotal;
+    mode.vsync_start = modeInfo->vsync_start;
+    mode.vsync_end = modeInfo->vsync_end;
+    mode.vtotal = modeInfo->vtotal;
+    mode.vrefresh = modeInfo->vrefresh;
+    mode.flags = modeInfo->mode_flags;
+
+    mode.type = DRM_MODE_TYPE_USERDEF;
+    sprintf(mode.name, "%dx%d@%d", size.width(), size.height(), mode.vrefresh);
+
+    free(modeInfo);
+    return QSharedPointer<DrmConnectorMode>::create(this, mode);
 }
 
 QDebug &operator<<(QDebug &s, const KWin::DrmConnector *obj)

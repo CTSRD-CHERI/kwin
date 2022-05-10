@@ -13,17 +13,17 @@
 #include "effectloader.h"
 #include "effects.h"
 #include "platform.h"
+#include "wayland/display.h"
+#include "wayland/output_interface.h"
 #include "wayland_server.h"
 #include "workspace.h"
-#include "x11client.h"
+#include "x11window.h"
 
 #include <KConfigGroup>
 
 #include <KWayland/Client/seat.h>
 #include <KWayland/Client/server_decoration.h>
 #include <KWayland/Client/surface.h>
-#include <KWaylandServer/display.h>
-#include <KWaylandServer/output_interface.h>
 
 using namespace KWin;
 using namespace KWayland::Client;
@@ -54,7 +54,7 @@ void DontCrashCursorPhysicalSizeEmpty::cleanup()
 
 void DontCrashCursorPhysicalSizeEmpty::initTestCase()
 {
-    qRegisterMetaType<KWin::AbstractClient *>();
+    qRegisterMetaType<KWin::Window *>();
     QSignalSpy applicationStartedSpy(kwinApp(), &Application::started);
     QVERIFY(applicationStartedSpy.isValid());
     kwinApp()->platform()->setInitialWindowSize(QSize(1280, 1024));
@@ -83,9 +83,9 @@ void DontCrashCursorPhysicalSizeEmpty::testMoveCursorOverDeco()
     Test::waylandServerSideDecoration()->create(surface.data(), surface.data());
     QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
 
-    auto c = Test::renderAndWaitForShown(surface.data(), QSize(100, 50), Qt::blue);
-    QVERIFY(c);
-    QVERIFY(c->isDecorated());
+    auto window = Test::renderAndWaitForShown(surface.data(), QSize(100, 50), Qt::blue);
+    QVERIFY(window);
+    QVERIFY(window->isDecorated());
 
     // destroy physical size
     KWaylandServer::Display *display = waylandServer()->display();
@@ -94,7 +94,7 @@ void DontCrashCursorPhysicalSizeEmpty::testMoveCursorOverDeco()
     // and fake a cursor theme change, so that the theme gets recreated
     Q_EMIT KWin::Cursors::self()->mouse()->themeChanged();
 
-    KWin::Cursors::self()->mouse()->setPos(QPoint(c->frameGeometry().center().x(), c->clientPos().y() / 2));
+    KWin::Cursors::self()->mouse()->setPos(QPoint(window->frameGeometry().center().x(), window->clientPos().y() / 2));
 }
 
 WAYLANDTEST_MAIN(DontCrashCursorPhysicalSizeEmpty)

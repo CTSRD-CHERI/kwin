@@ -1,3 +1,7 @@
+if (QT_MAJOR_VERSION EQUAL "5")
+    find_package(Qt5 REQUIRED COMPONENTS WaylandClient)
+endif()
+
 if (XCB_ICCCM_FOUND)
     set(normalhintsbasesizetest_SRCS normalhintsbasesizetest.cpp)
     add_executable(normalhintsbasesizetest ${normalhintsbasesizetest_SRCS})
@@ -36,3 +40,17 @@ add_executable(cursorhotspottest cursorhotspottest.cpp)
 target_link_libraries(cursorhotspottest Qt::Widgets)
 
 include_directories(${CMAKE_CURRENT_BINARY_DIR})
+
+if (QT_MAJOR_VERSION EQUAL "5")
+    add_executable(xdgactivationtest-qt5 xdgactivationtest-qt5.cpp)
+    target_link_libraries(xdgactivationtest-qt5 Qt::Widgets Qt::WaylandClient Qt::WaylandClientPrivate Wayland::Client)
+    ecm_add_qtwayland_client_protocol(xdgactivationtest-qt5
+        PROTOCOL ${WaylandProtocols_DATADIR}/staging/xdg-activation/xdg-activation-v1.xml
+        BASENAME xdg-activation-v1
+    )
+endif()
+
+if (TARGET Qt6::Gui)
+    add_executable(xdgactivationtest-qt6 xdgactivationtest-qt6.cpp)
+    target_link_libraries(xdgactivationtest-qt6 Qt6::Widgets)
+endif()

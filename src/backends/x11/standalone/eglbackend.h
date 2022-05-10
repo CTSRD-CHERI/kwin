@@ -8,6 +8,7 @@
 
 #include "eglonxbackend.h"
 #include "openglsurfacetexture_x11.h"
+#include "outputlayer.h"
 #include "utils/damagejournal.h"
 
 #include <kwingltexture.h>
@@ -19,6 +20,19 @@ namespace KWin
 class EglPixmapTexturePrivate;
 class SoftwareVsyncMonitor;
 class X11StandalonePlatform;
+class EglBackend;
+
+class EglLayer : public OutputLayer
+{
+public:
+    EglLayer(EglBackend *backend);
+
+    OutputLayerBeginFrameInfo beginFrame() override;
+    void endFrame(const QRegion &renderedRegion, const QRegion &damagedRegion) override;
+
+private:
+    EglBackend *const m_backend;
+};
 
 class EglBackend : public EglOnXBackend
 {
@@ -31,8 +45,10 @@ public:
     void init() override;
 
     SurfaceTexture *createSurfaceTextureX11(SurfacePixmapX11 *texture) override;
-    QRegion beginFrame(AbstractOutput *output) override;
-    void endFrame(AbstractOutput *output, const QRegion &renderedRegion, const QRegion &damagedRegion) override;
+    OutputLayerBeginFrameInfo beginFrame();
+    void endFrame(const QRegion &renderedRegion, const QRegion &damagedRegion);
+    void present(Output *output) override;
+    OutputLayer *primaryLayer(Output *output) override;
 
 private:
     void screenGeometryChanged();
@@ -42,8 +58,10 @@ private:
     X11StandalonePlatform *m_backend;
     SoftwareVsyncMonitor *m_vsyncMonitor;
     DamageJournal m_damageJournal;
-    QScopedPointer<GLRenderTarget> m_renderTarget;
+    QScopedPointer<GLFramebuffer> m_fbo;
     int m_bufferAge = 0;
+    QRegion m_lastRenderedRegion;
+    QScopedPointer<EglLayer> m_layer;
 };
 
 class EglPixmapTexture : public GLTexture

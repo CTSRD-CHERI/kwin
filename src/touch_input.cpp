@@ -11,17 +11,15 @@
 
 #include <config-kwin.h>
 
-#include "abstract_client.h"
 #include "decorations/decoratedclient.h"
 #include "input_event_spy.h"
 #include "pointer_input.h"
-#include "toplevel.h"
+#include "wayland/seat_interface.h"
 #include "wayland_server.h"
+#include "window.h"
 #include "workspace.h"
 // KDecoration
 #include <KDecoration2/Decoration>
-// KWayland
-#include <KWaylandServer/seat_interface.h>
 // screenlocker
 #if KWIN_BUILD_SCREENLOCKER
 #include <KScreenLocker/KsldApp>
@@ -89,18 +87,18 @@ bool TouchInputRedirection::positionValid() const
     return !m_activeTouchPoints.isEmpty();
 }
 
-void TouchInputRedirection::focusUpdate(Toplevel *focusOld, Toplevel *focusNow)
+void TouchInputRedirection::focusUpdate(Window *focusOld, Window *focusNow)
 {
     // TODO: handle pointer grab aka popups
 
-    if (AbstractClient *ac = qobject_cast<AbstractClient *>(focusOld)) {
-        ac->pointerLeaveEvent();
+    if (focusOld && focusOld->isClient()) {
+        focusOld->pointerLeaveEvent();
     }
     disconnect(m_focusGeometryConnection);
     m_focusGeometryConnection = QMetaObject::Connection();
 
-    if (AbstractClient *ac = qobject_cast<AbstractClient *>(focusNow)) {
-        ac->pointerEnterEvent(m_lastPosition.toPoint());
+    if (focusNow && focusNow->isClient()) {
+        focusNow->pointerEnterEvent(m_lastPosition.toPoint());
     }
 
     auto seat = waylandServer()->seat();
@@ -113,7 +111,7 @@ void TouchInputRedirection::focusUpdate(Toplevel *focusOld, Toplevel *focusNow)
 
     // FIXME: add input transformation API to KWaylandServer::SeatInterface for touch input
     seat->setFocusedTouchSurface(focusNow->surface(), -1 * focusNow->inputTransformation().map(focusNow->pos()) + focusNow->pos());
-    m_focusGeometryConnection = connect(focusNow, &Toplevel::frameGeometryChanged, this, [this]() {
+    m_focusGeometryConnection = connect(focusNow, &Window::frameGeometryChanged, this, [this]() {
         if (!focus()) {
             return;
         }

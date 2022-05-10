@@ -22,9 +22,8 @@
 #include "logging.h"
 #include "shadowbuffer.h"
 #include "surfaceitem_wayland.h"
-
-#include "KWaylandServer/linuxdmabufv1clientbuffer.h"
-#include "KWaylandServer/surface_interface.h"
+#include "wayland/linuxdmabufv1clientbuffer.h"
+#include "wayland/surface_interface.h"
 
 #include <QRegion>
 #include <drm_fourcc.h>
@@ -39,13 +38,6 @@ VirtualEglGbmLayer::VirtualEglGbmLayer(EglGbmBackend *eglBackend, DrmVirtualOutp
     : m_output(output)
     , m_eglBackend(eglBackend)
 {
-    connect(eglBackend, &EglGbmBackend::aboutToBeDestroyed, this, &VirtualEglGbmLayer::destroyResources);
-}
-
-void VirtualEglGbmLayer::destroyResources()
-{
-    m_gbmSurface.reset();
-    m_oldGbmSurface.reset();
 }
 
 void VirtualEglGbmLayer::aboutToStartPainting(const QRegion &damagedRegion)
@@ -61,36 +53,39 @@ void VirtualEglGbmLayer::aboutToStartPainting(const QRegion &damagedRegion)
     }
 }
 
-std::optional<QRegion> VirtualEglGbmLayer::startRendering()
+OutputLayerBeginFrameInfo VirtualEglGbmLayer::beginFrame()
 {
     // gbm surface
-    if (doesGbmSurfaceFit(m_gbmSurface.data())) {
+    if (doesGbmSurfaceFit(m_gbmSurface.get())) {
         m_oldGbmSurface.reset();
     } else {
-        if (doesGbmSurfaceFit(m_oldGbmSurface.data())) {
+        if (doesGbmSurfaceFit(m_oldGbmSurface.get())) {
             m_gbmSurface = m_oldGbmSurface;
         } else {
             if (!createGbmSurface()) {
-                return std::optional<QRegion>();
+                return {};
             }
         }
     }
     if (!m_gbmSurface->makeContextCurrent()) {
-        return std::optional<QRegion>();
+        return {};
     }
-    GLRenderTarget::pushRenderTarget(m_gbmSurface->renderTarget());
-    return m_gbmSurface->repaintRegion(m_output->geometry());
+    GLFramebuffer::pushFramebuffer(m_gbmSurface->fbo());
+    return OutputLayerBeginFrameInfo{
+        .renderTarget = RenderTarget(m_gbmSurface->fbo()),
+        .repaint = m_gbmSurface->repaintRegion(),
+    };
 }
 
-bool VirtualEglGbmLayer::endRendering(const QRegion &damagedRegion)
+void VirtualEglGbmLayer::endFrame(const QRegion &renderedRegion, const QRegion &damagedRegion)
 {
-    GLRenderTarget::popRenderTarget();
-    const auto buffer = m_gbmSurface->swapBuffers(damagedRegion.intersected(m_output->geometry()));
+    Q_UNUSED(renderedRegion);
+    GLFramebuffer::popFramebuffer();
+    const auto buffer = m_gbmSurface->swapBuffers(damagedRegion);
     if (buffer) {
         m_currentBuffer = buffer;
         m_currentDamage = damagedRegion;
     }
-    return !buffer.isNull();
 }
 
 QRegion VirtualEglGbmLayer::currentDamage() const
@@ -111,11 +106,11 @@ bool VirtualEglGbmLayer::createGbmSurface()
             const auto modifiers = it.value();
             const bool allowModifiers = m_eglBackend->gpu()->addFB2ModifiersSupported() && ((m_eglBackend->gpu()->isNVidia() && !modifiersEnvSet) || (modifiersEnvSet && modifiersEnv));
 
-            QSharedPointer<GbmSurface> gbmSurface;
+            std::shared_ptr<GbmSurface> gbmSurface;
             if (!allowModifiers) {
-                gbmSurface = QSharedPointer<GbmSurface>::create(m_eglBackend->gpu(), size, it.key(), GBM_BO_USE_RENDERING, config);
+                gbmSurface = std::make_shared<GbmSurface>(m_eglBackend->gpu(), size, it.key(), GBM_BO_USE_RENDERING, config);
             } else {
-                gbmSurface = QSharedPointer<GbmSurface>::create(m_eglBackend->gpu(), size, it.key(), it.value(), config);
+                gbmSurface = std::make_shared<GbmSurface>(m_eglBackend->gpu(), size, it.key(), it.value(), config);
             }
             if (!gbmSurface->isValid()) {
                 continue;
@@ -135,17 +130,11 @@ bool VirtualEglGbmLayer::doesGbmSurfaceFit(GbmSurface *surf) const
 
 QSharedPointer<GLTexture> VirtualEglGbmLayer::texture() const
 {
-    GbmBuffer *gbmBuffer = m_gbmSurface->currentBuffer().get();
-    if (!gbmBuffer) {
+    if (!m_currentBuffer) {
         qCWarning(KWIN_DRM) << "Failed to record frame: No gbm buffer!";
         return nullptr;
     }
-    EGLImageKHR image = eglCreateImageKHR(m_eglBackend->eglDisplay(), nullptr, EGL_NATIVE_PIXMAP_KHR, gbmBuffer->getBo(), nullptr);
-    if (image == EGL_NO_IMAGE_KHR) {
-        qCWarning(KWIN_DRM) << "Failed to record frame: Error creating EGLImageKHR - " << glGetError();
-        return nullptr;
-    }
-    return QSharedPointer<EGLImageTexture>::create(m_eglBackend->eglDisplay(), image, GL_RGBA8, m_gbmSurface->size());
+    return m_currentBuffer->createTexture(m_eglBackend->eglDisplay());
 }
 
 bool VirtualEglGbmLayer::scanout(SurfaceItem *surfaceItem)
@@ -164,27 +153,22 @@ bool VirtualEglGbmLayer::scanout(SurfaceItem *surfaceItem)
     if (!buffer || buffer->planes().isEmpty() || buffer->size() != m_output->pixelSize()) {
         return false;
     }
-    const auto scanoutBuffer = QSharedPointer<GbmBuffer>::create(m_output->gpu(), buffer);
-    if (!scanoutBuffer->getBo()) {
+    const auto scanoutBuffer = GbmBuffer::importBuffer(m_output->gpu(), buffer);
+    if (!scanoutBuffer) {
         return false;
     }
     // damage tracking for screen casting
-    QRegion damage;
-    if (m_scanoutSurface == item->surface()) {
-        QRegion trackedDamage = surfaceItem->damage();
-        surfaceItem->resetDamage();
-        for (const auto &rect : trackedDamage) {
-            auto damageRect = QRect(rect);
-            damageRect.translate(m_output->geometry().topLeft());
-            damage |= damageRect;
-        }
-    } else {
-        damage = m_output->geometry();
-    }
+    m_currentDamage = m_scanoutSurface == item->surface() ? surfaceItem->damage() : infiniteRegion();
+    surfaceItem->resetDamage();
     m_scanoutSurface = item->surface();
     m_currentBuffer = scanoutBuffer;
-    m_currentDamage = damage;
     return true;
 }
 
+void VirtualEglGbmLayer::releaseBuffers()
+{
+    m_currentBuffer.reset();
+    m_gbmSurface.reset();
+    m_oldGbmSurface.reset();
+}
 }

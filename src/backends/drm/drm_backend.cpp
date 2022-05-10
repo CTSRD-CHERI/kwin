@@ -25,12 +25,12 @@
 #include "gbm_dmabuf.h"
 #include "logging.h"
 #include "main.h"
+#include "outputconfiguration.h"
 #include "renderloop.h"
 #include "scene.h"
 #include "scene_qpainter_drm_backend.h"
 #include "session.h"
 #include "udev.h"
-#include "waylandoutputconfig.h"
 // KF5
 #include <KCoreAddons>
 #include <KLocalizedString>
@@ -55,12 +55,34 @@
 namespace KWin
 {
 
+static QStringList splitPathList(const QString &input, const QChar delimiter)
+{
+    QStringList ret;
+    QString tmp;
+    for (int i = 0; i < input.size(); i++) {
+        if (input[i] == delimiter) {
+            if (i > 0 && input[i - 1] == '\\') {
+                tmp[tmp.size() - 1] = delimiter;
+            } else if (!tmp.isEmpty()) {
+                ret.append(tmp);
+                tmp = QString();
+            }
+        } else {
+            tmp.append(input[i]);
+        }
+    }
+    if (!tmp.isEmpty()) {
+        ret.append(tmp);
+    }
+    return ret;
+}
+
 DrmBackend::DrmBackend(QObject *parent)
     : Platform(parent)
     , m_udev(new Udev)
     , m_udevMonitor(m_udev->monitor())
     , m_session(Session::create(this))
-    , m_explicitGpus(qEnvironmentVariable("KWIN_DRM_DEVICES").split(':', Qt::SkipEmptyParts))
+    , m_explicitGpus(splitPathList(qEnvironmentVariable("KWIN_DRM_DEVICES"), ':'))
     , m_dpmsFilter()
 {
     setSupportsPointerWarping(true);
@@ -107,7 +129,7 @@ void DrmBackend::turnOutputsOn()
 {
     m_dpmsFilter.reset();
     for (auto it = m_enabledOutputs.constBegin(), end = m_enabledOutputs.constEnd(); it != end; it++) {
-        (*it)->setDpmsMode(AbstractWaylandOutput::DpmsMode::On);
+        (*it)->setDpmsMode(Output::DpmsMode::On);
     }
 }
 
@@ -118,7 +140,7 @@ void DrmBackend::checkOutputsAreOn()
         return;
     }
     for (auto it = m_enabledOutputs.constBegin(), end = m_enabledOutputs.constEnd(); it != end; it++) {
-        if ((*it)->dpmsMode() != AbstractWaylandOutput::DpmsMode::On) {
+        if ((*it)->dpmsMode() != Output::DpmsMode::On) {
             // dpms still disabled, need to keep the filter
             return;
         }
@@ -435,8 +457,8 @@ bool DrmBackend::readOutputsConfiguration(const QVector<DrmAbstractOutput *> &ou
     Q_ASSERT(!outputs.isEmpty());
     const auto outputsInfo = KWinKScreenIntegration::outputsConfig(outputs);
 
-    AbstractWaylandOutput *primaryOutput = outputs.constFirst();
-    WaylandOutputConfig cfg;
+    Output *primaryOutput = outputs.constFirst();
+    OutputConfiguration cfg;
     // default position goes from left to right
     QPoint pos(0, 0);
     for (const auto &output : qAsConst(outputs)) {
@@ -460,7 +482,7 @@ bool DrmBackend::readOutputsConfiguration(const QVector<DrmAbstractOutput *> &ou
 
             props->overscan = static_cast<uint32_t>(outputInfo["overscan"].toInt(props->overscan));
             props->vrrPolicy = static_cast<RenderLoop::VrrPolicy>(outputInfo["vrrpolicy"].toInt(static_cast<uint32_t>(props->vrrPolicy)));
-            props->rgbRange = static_cast<AbstractWaylandOutput::RgbRange>(outputInfo["rgbrange"].toInt(static_cast<uint32_t>(props->rgbRange)));
+            props->rgbRange = static_cast<Output::RgbRange>(outputInfo["rgbrange"].toInt(static_cast<uint32_t>(props->rgbRange)));
 
             if (const QJsonObject mode = outputInfo["mode"].toObject(); !mode.isEmpty()) {
                 const QJsonObject size = mode["size"].toObject();
@@ -515,7 +537,7 @@ void DrmBackend::enableOutput(DrmAbstractOutput *output, bool enable)
             outputs.removeOne(output);
             if (!readOutputsConfiguration(outputs)) {
                 // config is invalid or failed to apply -> Try to enable an output anyways
-                WaylandOutputConfig cfg;
+                OutputConfiguration cfg;
                 cfg.changeSet(outputs.constFirst())->enabled = true;
                 if (!applyOutputChanges(cfg)) {
                     qCCritical(KWIN_DRM) << "Could not enable any outputs!";
@@ -524,7 +546,7 @@ void DrmBackend::enableOutput(DrmAbstractOutput *output, bool enable)
         }
         if (m_enabledOutputs.count() == 1 && !kwinApp()->isTerminating()) {
             qCDebug(KWIN_DRM) << "adding placeholder output";
-            m_placeHolderOutput = primaryGpu()->createVirtualOutput({}, m_enabledOutputs.constFirst()->pixelSize(), 1, DrmGpu::Placeholder);
+            m_placeHolderOutput = primaryGpu()->createVirtualOutput({}, m_enabledOutputs.constFirst()->pixelSize(), 1, DrmVirtualOutput::Type::Placeholder);
             // placeholder doesn't actually need to render anything
             m_placeHolderOutput->renderLoop()->inhibit();
             m_placeholderFilter.reset(new PlaceholderInputEventFilter());
@@ -584,15 +606,15 @@ QString DrmBackend::supportInformation() const
     return supportInfo;
 }
 
-AbstractOutput *DrmBackend::createVirtualOutput(const QString &name, const QSize &size, double scale)
+Output *DrmBackend::createVirtualOutput(const QString &name, const QSize &size, double scale)
 {
-    auto output = primaryGpu()->createVirtualOutput(name, size * scale, scale, DrmGpu::Full);
+    auto output = primaryGpu()->createVirtualOutput(name, size * scale, scale, DrmVirtualOutput::Type::Virtual);
     readOutputsConfiguration(m_outputs);
     Q_EMIT screensQueried();
     return output;
 }
 
-void DrmBackend::removeVirtualOutput(AbstractOutput *output)
+void DrmBackend::removeVirtualOutput(Output *output)
 {
     auto virtualOutput = qobject_cast<DrmVirtualOutput *>(output);
     if (!virtualOutput) {
@@ -636,7 +658,7 @@ DrmGpu *DrmBackend::findGpuByFd(int fd) const
     return nullptr;
 }
 
-bool DrmBackend::applyOutputChanges(const WaylandOutputConfig &config)
+bool DrmBackend::applyOutputChanges(const OutputConfiguration &config)
 {
     QVector<DrmOutput *> toBeEnabled;
     QVector<DrmOutput *> toBeDisabled;
@@ -695,4 +717,10 @@ DrmRenderBackend *DrmBackend::renderBackend() const
     return m_renderBackend;
 }
 
+void DrmBackend::releaseBuffers()
+{
+    for (const auto &gpu : qAsConst(m_gpus)) {
+        gpu->releaseBuffers();
+    }
+}
 }

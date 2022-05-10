@@ -7,17 +7,17 @@
 #include "outputscreencastsource.h"
 #include "screencastutils.h"
 
-#include "abstract_output.h"
 #include "composite.h"
 #include "kwingltexture.h"
 #include "kwinglutils.h"
+#include "output.h"
 #include "renderloop.h"
 #include "scene.h"
 
 namespace KWin
 {
 
-OutputScreenCastSource::OutputScreenCastSource(AbstractOutput *output, QObject *parent)
+OutputScreenCastSource::OutputScreenCastSource(Output *output, QObject *parent)
     : ScreenCastSource(parent)
     , m_output(output)
 {
@@ -42,7 +42,7 @@ void OutputScreenCastSource::render(QImage *image)
     }
 }
 
-void OutputScreenCastSource::render(GLRenderTarget *target)
+void OutputScreenCastSource::render(GLFramebuffer *target)
 {
     const QSharedPointer<GLTexture> outputTexture = Compositor::self()->scene()->textureForOutput(m_output);
     if (!outputTexture) {
@@ -56,11 +56,11 @@ void OutputScreenCastSource::render(GLRenderTarget *target)
     projectionMatrix.ortho(geometry);
     shaderBinder.shader()->setUniform(GLShader::ModelViewProjectionMatrix, projectionMatrix);
 
-    GLRenderTarget::pushRenderTarget(target);
+    GLFramebuffer::pushFramebuffer(target);
     outputTexture->bind();
     outputTexture->render(geometry);
     outputTexture->unbind();
-    GLRenderTarget::popRenderTarget();
+    GLFramebuffer::popFramebuffer();
 }
 
 std::chrono::nanoseconds OutputScreenCastSource::clock() const

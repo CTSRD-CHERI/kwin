@@ -13,26 +13,26 @@ using namespace KWaylandServer;
 namespace KWin
 {
 
-static KWaylandServer::OutputDeviceV2Interface::Transform kwinTransformToOutputDeviceTransform(AbstractWaylandOutput::Transform transform)
+static KWaylandServer::OutputDeviceV2Interface::Transform kwinTransformToOutputDeviceTransform(Output::Transform transform)
 {
     return static_cast<KWaylandServer::OutputDeviceV2Interface::Transform>(transform);
 }
 
-static KWaylandServer::OutputDeviceV2Interface::SubPixel kwinSubPixelToOutputDeviceSubPixel(AbstractWaylandOutput::SubPixel subPixel)
+static KWaylandServer::OutputDeviceV2Interface::SubPixel kwinSubPixelToOutputDeviceSubPixel(Output::SubPixel subPixel)
 {
     return static_cast<KWaylandServer::OutputDeviceV2Interface::SubPixel>(subPixel);
 }
 
-static KWaylandServer::OutputDeviceV2Interface::Capabilities kwinCapabilitiesToOutputDeviceCapabilities(AbstractWaylandOutput::Capabilities caps)
+static KWaylandServer::OutputDeviceV2Interface::Capabilities kwinCapabilitiesToOutputDeviceCapabilities(Output::Capabilities caps)
 {
     KWaylandServer::OutputDeviceV2Interface::Capabilities ret;
-    if (caps & AbstractWaylandOutput::Capability::Overscan) {
+    if (caps & Output::Capability::Overscan) {
         ret |= KWaylandServer::OutputDeviceV2Interface::Capability::Overscan;
     }
-    if (caps & AbstractWaylandOutput::Capability::Vrr) {
+    if (caps & Output::Capability::Vrr) {
         ret |= KWaylandServer::OutputDeviceV2Interface::Capability::Vrr;
     }
-    if (caps & AbstractWaylandOutput::Capability::RgbRange) {
+    if (caps & Output::Capability::RgbRange) {
         ret |= KWaylandServer::OutputDeviceV2Interface::Capability::RgbRange;
     }
     return ret;
@@ -43,12 +43,12 @@ static KWaylandServer::OutputDeviceV2Interface::VrrPolicy kwinVrrPolicyToOutputD
     return static_cast<KWaylandServer::OutputDeviceV2Interface::VrrPolicy>(policy);
 }
 
-static KWaylandServer::OutputDeviceV2Interface::RgbRange kwinRgbRangeToOutputDeviceRgbRange(AbstractWaylandOutput::RgbRange range)
+static KWaylandServer::OutputDeviceV2Interface::RgbRange kwinRgbRangeToOutputDeviceRgbRange(Output::RgbRange range)
 {
     return static_cast<KWaylandServer::OutputDeviceV2Interface::RgbRange>(range);
 }
 
-WaylandOutputDevice::WaylandOutputDevice(AbstractWaylandOutput *output, QObject *parent)
+WaylandOutputDevice::WaylandOutputDevice(Output *output, QObject *parent)
     : QObject(parent)
     , m_platformOutput(output)
     , m_outputDeviceV2(new KWaylandServer::OutputDeviceV2Interface(waylandServer()->display()))
@@ -72,45 +72,45 @@ WaylandOutputDevice::WaylandOutputDevice(AbstractWaylandOutput *output, QObject 
 
     updateModes(output);
 
-    connect(output, &AbstractWaylandOutput::geometryChanged,
+    connect(output, &Output::geometryChanged,
             this, &WaylandOutputDevice::handleGeometryChanged);
-    connect(output, &AbstractWaylandOutput::scaleChanged,
+    connect(output, &Output::scaleChanged,
             this, &WaylandOutputDevice::handleScaleChanged);
-    connect(output, &AbstractWaylandOutput::enabledChanged,
+    connect(output, &Output::enabledChanged,
             this, &WaylandOutputDevice::handleEnabledChanged);
-    connect(output, &AbstractWaylandOutput::transformChanged,
+    connect(output, &Output::transformChanged,
             this, &WaylandOutputDevice::handleTransformChanged);
-    connect(output, &AbstractWaylandOutput::currentModeChanged,
+    connect(output, &Output::currentModeChanged,
             this, &WaylandOutputDevice::handleCurrentModeChanged);
-    connect(output, &AbstractWaylandOutput::capabilitiesChanged,
+    connect(output, &Output::capabilitiesChanged,
             this, &WaylandOutputDevice::handleCapabilitiesChanged);
-    connect(output, &AbstractWaylandOutput::overscanChanged,
+    connect(output, &Output::overscanChanged,
             this, &WaylandOutputDevice::handleOverscanChanged);
-    connect(output, &AbstractWaylandOutput::vrrPolicyChanged,
+    connect(output, &Output::vrrPolicyChanged,
             this, &WaylandOutputDevice::handleVrrPolicyChanged);
-    connect(output, &AbstractWaylandOutput::modesChanged,
+    connect(output, &Output::modesChanged,
             this, &WaylandOutputDevice::handleModesChanged);
-    connect(output, &AbstractWaylandOutput::rgbRangeChanged,
+    connect(output, &Output::rgbRangeChanged,
             this, &WaylandOutputDevice::handleRgbRangeChanged);
 }
 
-void WaylandOutputDevice::updateModes(AbstractWaylandOutput *output)
+void WaylandOutputDevice::updateModes(Output *output)
 {
     QList<OutputDeviceModeV2Interface *> deviceModes;
 
     const auto modes = output->modes();
     deviceModes.reserve(modes.size());
-    for (const AbstractWaylandOutput::Mode &mode : modes) {
+    for (const QSharedPointer<OutputMode> &mode : modes) {
         OutputDeviceModeV2Interface::ModeFlags flags;
 
-        if (mode.flags & AbstractWaylandOutput::ModeFlag::Current) {
+        if (output->currentMode() == mode) {
             flags |= OutputDeviceModeV2Interface::ModeFlag::Current;
         }
-        if (mode.flags & AbstractWaylandOutput::ModeFlag::Preferred) {
+        if (mode->flags() & OutputMode::Flag::Preferred) {
             flags |= OutputDeviceModeV2Interface::ModeFlag::Preferred;
         }
 
-        OutputDeviceModeV2Interface *deviceMode = new OutputDeviceModeV2Interface(mode.size, mode.refreshRate, flags);
+        OutputDeviceModeV2Interface *deviceMode = new OutputDeviceModeV2Interface(mode->size(), mode->refreshRate(), flags);
         deviceModes << deviceMode;
     }
     m_outputDeviceV2->setModes(deviceModes);

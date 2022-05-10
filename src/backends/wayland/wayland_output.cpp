@@ -25,16 +25,18 @@ using namespace KWayland::Client;
 static const int s_refreshRate = 60000; // TODO: can we get refresh rate data from Wayland host?
 
 WaylandOutput::WaylandOutput(Surface *surface, WaylandBackend *backend)
-    : AbstractWaylandOutput(backend)
+    : Output(backend)
     , m_renderLoop(new RenderLoop(this))
     , m_surface(surface)
     , m_backend(backend)
 {
     static int identifier = -1;
     identifier++;
-    setName("WL-" + QString::number(identifier));
+    setInformation(Information{
+        .name = QStringLiteral("WL-%1").arg(identifier),
+        .capabilities = Capability::Dpms,
+    });
 
-    setCapabilityInternal(Capability::Dpms);
     connect(surface, &Surface::frameRendered, this, [this] {
         m_rendered = true;
         Q_EMIT frameRendered();
@@ -61,40 +63,20 @@ void WaylandOutput::init(const QPoint &logicalPosition, const QSize &pixelSize)
 {
     m_renderLoop->setRefreshRate(s_refreshRate);
 
-    const Mode mode{
-        .size = pixelSize,
-        .refreshRate = s_refreshRate,
-        .flags = ModeFlag::Current,
-        .id = 0,
-    };
-
-    static uint i = 0;
-    initialize(QStringLiteral("model_%1").arg(i++), "manufacturer_TODO", "eisa_TODO", "serial_TODO", pixelSize, {mode}, {});
+    auto mode = QSharedPointer<OutputMode>::create(pixelSize, s_refreshRate);
+    setModesInternal({mode}, mode);
 
     moveTo(logicalPosition);
-    setCurrentModeInternal(mode.size, mode.refreshRate);
     setScale(backend()->initialOutputScale());
 }
 
 void WaylandOutput::setGeometry(const QPoint &logicalPosition, const QSize &pixelSize)
 {
-    const Mode mode{
-        .size = pixelSize,
-        .refreshRate = s_refreshRate,
-        .flags = ModeFlag::Current,
-        .id = 0,
-    };
-
-    setModes({mode});
-    setCurrentModeInternal(mode.size, mode.refreshRate);
+    auto mode = QSharedPointer<OutputMode>::create(pixelSize, s_refreshRate);
+    setModesInternal({mode}, mode);
 
     moveTo(logicalPosition);
     Q_EMIT m_backend->screensQueried();
-}
-
-void WaylandOutput::updateTransform(Transform transform)
-{
-    setTransformInternal(transform);
 }
 
 void WaylandOutput::updateEnablement(bool enable)
@@ -102,7 +84,7 @@ void WaylandOutput::updateEnablement(bool enable)
     setDpmsMode(enable ? DpmsMode::On : DpmsMode::Off);
 }
 
-void WaylandOutput::setDpmsMode(KWin::AbstractWaylandOutput::DpmsMode mode)
+void WaylandOutput::setDpmsMode(DpmsMode mode)
 {
     if (mode == DpmsMode::Off) {
         if (!m_turnOffTimer.isActive()) {

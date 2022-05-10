@@ -7,10 +7,9 @@
 
 #pragma once
 
-#include "abstract_wayland_output.h"
-
-#include <KWaylandServer/outputdevice_v2_interface.h>
-#include <KWaylandServer/utils.h>
+#include "output.h"
+#include "wayland/outputdevice_v2_interface.h"
+#include "wayland/utils.h"
 
 namespace KWin
 {
@@ -20,7 +19,7 @@ class WaylandOutputDevice : public QObject
     Q_OBJECT
 
 public:
-    explicit WaylandOutputDevice(AbstractWaylandOutput *output, QObject *parent = nullptr);
+    explicit WaylandOutputDevice(Output *output, QObject *parent = nullptr);
 
 private Q_SLOTS:
     void handleGeometryChanged();
@@ -35,9 +34,9 @@ private Q_SLOTS:
     void handleRgbRangeChanged();
 
 private:
-    void updateModes(AbstractWaylandOutput *output);
+    void updateModes(Output *output);
 
-    AbstractWaylandOutput *m_platformOutput;
+    Output *m_platformOutput;
     KWaylandServer::ScopedGlobalPointer<KWaylandServer::OutputDeviceV2Interface> m_outputDeviceV2;
 };
 

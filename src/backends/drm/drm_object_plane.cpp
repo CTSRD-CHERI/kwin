@@ -67,29 +67,26 @@ bool DrmPlane::init()
         checkSupport(5, Transformation::ReflectY);
 
         // read formats from blob if available and if modifiers are supported, and from the plane object if not
-        if (auto formatProp = getProp(PropertyIndex::In_Formats); formatProp && gpu()->addFB2ModifiersSupported()) {
-            DrmScopedPointer<drmModePropertyBlobRes> propertyBlob(drmModeGetPropertyBlob(gpu()->fd(), formatProp->current()));
-            if (propertyBlob && propertyBlob->data) {
-                auto blob = static_cast<drm_format_modifier_blob *>(propertyBlob->data);
-                auto modifiers = reinterpret_cast<drm_format_modifier *>(reinterpret_cast<uint8_t *>(blob) + blob->modifiers_offset);
-                uint32_t *formatarr = reinterpret_cast<uint32_t *>(reinterpret_cast<uint8_t *>(blob) + blob->formats_offset);
+        if (const auto formatProp = getProp(PropertyIndex::In_Formats); formatProp && formatProp->immutableBlob() && gpu()->addFB2ModifiersSupported()) {
+            auto blob = static_cast<drm_format_modifier_blob *>(formatProp->immutableBlob()->data);
+            auto modifiers = reinterpret_cast<drm_format_modifier *>(reinterpret_cast<uint8_t *>(blob) + blob->modifiers_offset);
+            uint32_t *formatarr = reinterpret_cast<uint32_t *>(reinterpret_cast<uint8_t *>(blob) + blob->formats_offset);
 
-                for (uint32_t f = 0; f < blob->count_formats; f++) {
-                    auto format = formatarr[f];
-                    QVector<uint64_t> mods;
-                    for (uint32_t m = 0; m < blob->count_modifiers; m++) {
-                        auto modifier = &modifiers[m];
-                        // The modifier advertisement blob is partitioned into groups of 64 formats
-                        if (m < modifier->offset || m > modifier->offset + 63) {
-                            continue;
-                        }
-                        if (!(modifier->formats & (1 << (f - modifier->offset)))) {
-                            continue;
-                        }
-                        mods << modifier->modifier;
+            for (uint32_t f = 0; f < blob->count_formats; f++) {
+                auto format = formatarr[f];
+                QVector<uint64_t> mods;
+                for (uint32_t m = 0; m < blob->count_modifiers; m++) {
+                    auto modifier = &modifiers[m];
+                    // The modifier advertisement blob is partitioned into groups of 64 formats
+                    if (m < modifier->offset || m > modifier->offset + 63) {
+                        continue;
                     }
-                    m_supportedFormats.insert(format, mods);
+                    if (!(modifier->formats & (1 << (f - modifier->offset)))) {
+                        continue;
+                    }
+                    mods << modifier->modifier;
                 }
+                m_supportedFormats.insert(format, mods);
             }
         } else {
             for (uint32_t i = 0; i < p->count_formats; i++) {
@@ -110,7 +107,7 @@ DrmPlane::TypeIndex DrmPlane::type() const
     return prop->enumForValue<DrmPlane::TypeIndex>(prop->current());
 }
 
-void DrmPlane::setNext(const QSharedPointer<DrmBuffer> &b)
+void DrmPlane::setNext(const std::shared_ptr<DrmFramebuffer> &b)
 {
     m_next = b;
 }
@@ -151,9 +148,9 @@ void DrmPlane::set(const QPoint &srcPos, const QSize &srcSize, const QPoint &dst
     setPending(PropertyIndex::CrtcH, dstSize.height());
 }
 
-void DrmPlane::setBuffer(DrmBuffer *buffer)
+void DrmPlane::setBuffer(DrmFramebuffer *buffer)
 {
-    setPending(PropertyIndex::FbId, buffer ? buffer->bufferId() : 0);
+    setPending(PropertyIndex::FbId, buffer ? buffer->framebufferId() : 0);
 }
 
 bool DrmPlane::needsModeset() const
@@ -178,17 +175,17 @@ QMap<uint32_t, QVector<uint64_t>> DrmPlane::formats() const
     return m_supportedFormats;
 }
 
-QSharedPointer<DrmBuffer> DrmPlane::current() const
+std::shared_ptr<DrmFramebuffer> DrmPlane::current() const
 {
     return m_current;
 }
 
-QSharedPointer<DrmBuffer> DrmPlane::next() const
+std::shared_ptr<DrmFramebuffer> DrmPlane::next() const
 {
     return m_next;
 }
 
-void DrmPlane::setCurrent(const QSharedPointer<DrmBuffer> &b)
+void DrmPlane::setCurrent(const std::shared_ptr<DrmFramebuffer> &b)
 {
     m_current = b;
 }
@@ -204,4 +201,13 @@ void DrmPlane::disable()
     setPending(PropertyIndex::FbId, 0);
 }
 
+void DrmPlane::releaseBuffers()
+{
+    if (m_next) {
+        m_next->releaseBuffer();
+    }
+    if (m_current) {
+        m_current->releaseBuffer();
+    }
+}
 }

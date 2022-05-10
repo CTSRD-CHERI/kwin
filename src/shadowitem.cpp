@@ -11,12 +11,12 @@
 namespace KWin
 {
 
-ShadowItem::ShadowItem(Shadow *shadow, Toplevel *window, Item *parent)
+ShadowItem::ShadowItem(Shadow *shadow, Window *window, Item *parent)
     : Item(parent)
     , m_window(window)
     , m_shadow(shadow)
 {
-    connect(window, &Toplevel::windowClosed, this, &ShadowItem::handleWindowClosed);
+    connect(window, &Window::windowClosed, this, &ShadowItem::handleWindowClosed);
 
     connect(shadow, &Shadow::offsetChanged, this, &ShadowItem::updateGeometry);
     connect(shadow, &Shadow::rectChanged, this, &ShadowItem::updateGeometry);
@@ -50,7 +50,7 @@ void ShadowItem::handleTextureChanged()
     discardQuads();
 }
 
-void ShadowItem::handleWindowClosed(Toplevel *original, Deleted *deleted)
+void ShadowItem::handleWindowClosed(Window *original, Deleted *deleted)
 {
     Q_UNUSED(original)
     m_window = deleted;

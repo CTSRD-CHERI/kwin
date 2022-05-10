@@ -5,8 +5,6 @@
 */
 
 #include "overvieweffect.h"
-#include "expoarea.h"
-#include "expolayout.h"
 #include "overviewconfig.h"
 
 #include <KGlobalAccel>
@@ -23,12 +21,20 @@ namespace KWin
 OverviewEffect::OverviewEffect()
     : m_shutdownTimer(new QTimer(this))
 {
-    qmlRegisterType<ExpoArea>("org.kde.kwin.private.overview", 1, 0, "ExpoArea");
-    qmlRegisterType<ExpoLayout>("org.kde.kwin.private.overview", 1, 0, "ExpoLayout");
-    qmlRegisterType<ExpoCell>("org.kde.kwin.private.overview", 1, 0, "ExpoCell");
-
     m_shutdownTimer->setSingleShot(true);
     connect(m_shutdownTimer, &QTimer::timeout, this, &OverviewEffect::realDeactivate);
+
+    m_realtimeToggleAction = new QAction(this);
+    connect(m_realtimeToggleAction, &QAction::triggered, this, [this]() {
+        if (isRunning() && m_partialActivationFactor > 0.5) {
+            activate();
+        } else {
+            deactivate();
+        }
+        m_partialActivationFactor = 0;
+        Q_EMIT gestureInProgressChanged();
+        Q_EMIT partialActivationFactorChanged();
+    });
 
     const QKeySequence defaultToggleShortcut = Qt::META | Qt::Key_W;
     m_toggleAction = new QAction(this);
@@ -39,9 +45,25 @@ OverviewEffect::OverviewEffect()
     KGlobalAccel::self()->setShortcut(m_toggleAction, {defaultToggleShortcut});
     m_toggleShortcut = KGlobalAccel::self()->shortcut(m_toggleAction);
     effects->registerGlobalShortcut({defaultToggleShortcut}, m_toggleAction);
-    effects->registerTouchpadSwipeShortcut(SwipeDirection::Up, 4, m_toggleAction);
     effects->registerTouchscreenSwipeShortcut(SwipeDirection::Up, 3, m_toggleAction);
     effects->registerTouchscreenSwipeShortcut(SwipeDirection::Down, 3, m_toggleAction);
+
+    auto progressCallback = [this](qreal progress) {
+        if (m_status == Status::Active) {
+            return;
+        }
+        const bool wasInProgress = m_partialActivationFactor > 0;
+        m_partialActivationFactor = progress;
+        Q_EMIT partialActivationFactorChanged();
+        if (!wasInProgress) {
+            Q_EMIT gestureInProgressChanged();
+        }
+        if (!isRunning()) {
+            partialActivate();
+        }
+    };
+
+    effects->registerRealtimeTouchpadSwipeShortcut(SwipeDirection::Up, 4, m_realtimeToggleAction, progressCallback);
 
     connect(effects, &EffectsHandler::screenAboutToLock, this, &OverviewEffect::realDeactivate);
 
@@ -66,7 +88,7 @@ QVariantMap OverviewEffect::initialProperties(EffectScreen *screen)
 void OverviewEffect::reconfigure(ReconfigureFlags)
 {
     OverviewConfig::self()->read();
-    setLayout(ExpoLayout::LayoutMode(OverviewConfig::layoutMode()));
+    setLayout(OverviewConfig::layoutMode());
     setAnimationDuration(animationTime(200));
     setBlurBackground(OverviewConfig::blurBackground());
 
@@ -90,7 +112,7 @@ void OverviewEffect::reconfigure(ReconfigureFlags)
     const QList<int> touchActivateBorders = OverviewConfig::touchBorderActivate();
     for (const int &border : touchActivateBorders) {
         m_touchBorderActivate.append(ElectricBorder(border));
-        effects->registerRealtimeTouchBorder(ElectricBorder(border), m_toggleAction, [this](ElectricBorder border, const QSizeF &deltaProgress, const EffectScreen *screen) {
+        effects->registerRealtimeTouchBorder(ElectricBorder(border), m_realtimeToggleAction, [this](ElectricBorder border, const QSizeF &deltaProgress, const EffectScreen *screen) {
             Q_UNUSED(screen)
             if (m_status == Status::Active) {
                 return;
@@ -126,12 +148,17 @@ void OverviewEffect::setAnimationDuration(int duration)
     }
 }
 
-ExpoLayout::LayoutMode OverviewEffect::layout() const
+int OverviewEffect::layout() const
 {
     return m_layout;
 }
 
-void OverviewEffect::setLayout(ExpoLayout::LayoutMode layout)
+bool OverviewEffect::ignoreMinimized() const
+{
+    return OverviewConfig::ignoreMinimized();
+}
+
+void OverviewEffect::setLayout(int layout)
 {
     if (m_layout != layout) {
         m_layout = layout;

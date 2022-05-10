@@ -8,12 +8,12 @@
 */
 #include "kwin_wayland_test.h"
 
-#include "abstract_client.h"
-#include "abstract_output.h"
 #include "cursor.h"
+#include "output.h"
 #include "platform.h"
 #include "screens.h"
 #include "wayland_server.h"
+#include "window.h"
 #include "workspace.h"
 
 #include <KConfigGroup>
@@ -45,7 +45,7 @@ private Q_SLOTS:
 
 void ScreensTest::initTestCase()
 {
-    qRegisterMetaType<KWin::AbstractClient *>();
+    qRegisterMetaType<KWin::Window *>();
     QSignalSpy applicationStartedSpy(kwinApp(), &Application::started);
     QVERIFY(applicationStartedSpy.isValid());
     kwinApp()->platform()->setInitialWindowSize(QSize(1280, 1024));
@@ -81,7 +81,7 @@ static void purge(KConfig *config)
 
 void ScreensTest::cleanup()
 {
-    // Destroy the wayland connection of the test client.
+    // Destroy the wayland connection of the test window.
     Test::destroyWaylandConnection();
 
     // Wipe the screens config clean.
@@ -152,7 +152,7 @@ void ScreensTest::testCurrent_data()
 void ScreensTest::testCurrent()
 {
     QFETCH(int, currentId);
-    AbstractOutput *output = kwinApp()->platform()->findOutput(currentId);
+    Output *output = kwinApp()->platform()->findOutput(currentId);
 
     // Disable "active screen follows mouse"
     auto group = kwinApp()->config()->group("Windows");
@@ -197,7 +197,7 @@ void ScreensTest::testCurrentWithFollowsMouse()
     KWin::Cursors::self()->mouse()->setPos(cursorPos);
 
     QFETCH(int, expectedId);
-    AbstractOutput *expected = kwinApp()->platform()->findOutput(expectedId);
+    Output *expected = kwinApp()->platform()->findOutput(expectedId);
     QCOMPARE(workspace()->activeOutput(), expected);
 }
 
@@ -234,7 +234,7 @@ void ScreensTest::testCurrentPoint()
     workspace()->setActiveOutput(cursorPos);
 
     QFETCH(int, expectedId);
-    AbstractOutput *expected = kwinApp()->platform()->findOutput(expectedId);
+    Output *expected = kwinApp()->platform()->findOutput(expectedId);
     QCOMPARE(workspace()->activeOutput(), expected);
 }
 

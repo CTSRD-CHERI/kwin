@@ -6,18 +6,18 @@
 
 #include "kwin_wayland_test.h"
 
-#include "abstract_output.h"
 #include "composite.h"
 #include "main.h"
+#include "output.h"
 #include "platform.h"
 #include "scene.h"
 #include "screens.h"
 #include "unmanaged.h"
 #include "wayland_server.h"
 #include "workspace.h"
-#include "x11client.h"
-#include "xwl/xwayland.h"
-#include "xwl/xwaylandlauncher.h"
+#include "x11window.h"
+#include "xwayland/xwayland.h"
+#include "xwayland/xwaylandlauncher.h"
 
 #include <xcb/xcb_icccm.h>
 
@@ -46,7 +46,7 @@ private Q_SLOTS:
 void XwaylandServerCrashTest::initTestCase()
 {
     qRegisterMetaType<Unmanaged *>();
-    qRegisterMetaType<X11Client *>();
+    qRegisterMetaType<X11Window *>();
     QSignalSpy applicationStartedSpy(kwinApp(), &Application::started);
     QVERIFY(applicationStartedSpy.isValid());
     kwinApp()->platform()->setInitialWindowSize(QSize(1280, 1024));
@@ -76,8 +76,8 @@ void XwaylandServerCrashTest::testCrash()
     QScopedPointer<xcb_connection_t, XcbConnectionDeleter> c(xcb_connect(nullptr, nullptr));
     QVERIFY(!xcb_connection_has_error(c.data()));
     const QRect windowGeometry(0, 0, 100, 200);
-    xcb_window_t window1 = xcb_generate_id(c.data());
-    xcb_create_window(c.data(), XCB_COPY_FROM_PARENT, window1, rootWindow(),
+    xcb_window_t windowId1 = xcb_generate_id(c.data());
+    xcb_create_window(c.data(), XCB_COPY_FROM_PARENT, windowId1, rootWindow(),
                       windowGeometry.x(),
                       windowGeometry.y(),
                       windowGeometry.width(),
@@ -88,26 +88,26 @@ void XwaylandServerCrashTest::testCrash()
     xcb_icccm_size_hints_set_position(&hints, 1, windowGeometry.x(), windowGeometry.y());
     xcb_icccm_size_hints_set_size(&hints, 1, windowGeometry.width(), windowGeometry.height());
     xcb_icccm_size_hints_set_min_size(&hints, windowGeometry.width(), windowGeometry.height());
-    xcb_icccm_set_wm_normal_hints(c.data(), window1, &hints);
-    xcb_map_window(c.data(), window1);
+    xcb_icccm_set_wm_normal_hints(c.data(), windowId1, &hints);
+    xcb_map_window(c.data(), windowId1);
     xcb_flush(c.data());
 
-    QSignalSpy windowCreatedSpy(workspace(), &Workspace::clientAdded);
+    QSignalSpy windowCreatedSpy(workspace(), &Workspace::windowAdded);
     QVERIFY(windowCreatedSpy.isValid());
     QVERIFY(windowCreatedSpy.wait());
-    QPointer<X11Client> client = windowCreatedSpy.last().first().value<X11Client *>();
-    QVERIFY(client);
-    QVERIFY(client->isDecorated());
+    QPointer<X11Window> window = windowCreatedSpy.last().first().value<X11Window *>();
+    QVERIFY(window);
+    QVERIFY(window->isDecorated());
 
     // Create an override-redirect window.
-    xcb_window_t window2 = xcb_generate_id(c.data());
+    xcb_window_t windowId2 = xcb_generate_id(c.data());
     const uint32_t values[] = {true};
-    xcb_create_window(c.data(), XCB_COPY_FROM_PARENT, window2, rootWindow(),
+    xcb_create_window(c.data(), XCB_COPY_FROM_PARENT, windowId2, rootWindow(),
                       windowGeometry.x(), windowGeometry.y(),
                       windowGeometry.width(), windowGeometry.height(), 0,
                       XCB_WINDOW_CLASS_INPUT_OUTPUT, XCB_COPY_FROM_PARENT,
                       XCB_CW_OVERRIDE_REDIRECT, values);
-    xcb_map_window(c.data(), window2);
+    xcb_map_window(c.data(), windowId2);
     xcb_flush(c.data());
 
     QSignalSpy unmanagedAddedSpy(workspace(), &Workspace::unmanagedAdded);
@@ -125,7 +125,7 @@ void XwaylandServerCrashTest::testCrash()
 
     // When Xwayland crashes, the compositor should tear down the XCB connection and destroy
     // all connected X11 clients.
-    QTRY_VERIFY(!client);
+    QTRY_VERIFY(!window);
     QTRY_VERIFY(!unmanaged);
     QCOMPARE(kwinApp()->x11Connection(), nullptr);
     QCOMPARE(kwinApp()->x11DefaultScreen(), nullptr);

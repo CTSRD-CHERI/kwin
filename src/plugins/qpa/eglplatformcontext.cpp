@@ -10,7 +10,7 @@
 
 #include "eglplatformcontext.h"
 #include "eglhelpers.h"
-#include "internal_client.h"
+#include "internalwindow.h"
 #include "offscreensurface.h"
 #include "platform.h"
 #include "utils/egl_context_attribute_builder.h"
@@ -114,13 +114,13 @@ void EGLPlatformContext::swapBuffers(QPlatformSurface *surface)
 {
     if (surface->surface()->surfaceClass() == QSurface::Window) {
         Window *window = static_cast<Window *>(surface);
-        InternalClient *client = window->client();
-        if (!client) {
+        InternalWindow *internalWindow = window->internalWindow();
+        if (!internalWindow) {
             return;
         }
         context()->makeCurrent(surface->surface());
         glFlush();
-        client->present(window->swapFBO());
+        internalWindow->present(window->swapFBO());
         window->bindContentFBO();
     }
 }

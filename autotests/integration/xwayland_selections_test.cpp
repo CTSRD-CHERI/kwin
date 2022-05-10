@@ -9,14 +9,13 @@
 */
 #include "kwin_wayland_test.h"
 
-#include "abstract_client.h"
-#include "abstract_output.h"
+#include "output.h"
 #include "platform.h"
+#include "wayland/seat_interface.h"
 #include "wayland_server.h"
+#include "window.h"
 #include "workspace.h"
-#include "xwl/databridge.h"
-
-#include <KWaylandServer/seat_interface.h>
+#include "xwayland/databridge.h"
 
 #include <QProcess>
 #include <QProcessEnvironment>
@@ -48,7 +47,7 @@ private Q_SLOTS:
 void XwaylandSelectionsTest::initTestCase()
 {
     //    QSKIP("Skipped as it fails for unknown reasons on build.kde.org");
-    qRegisterMetaType<KWin::AbstractClient *>();
+    qRegisterMetaType<KWin::Window *>();
     qRegisterMetaType<QProcess::ExitStatus>();
     QSignalSpy applicationStartedSpy(kwinApp(), &Application::started);
     QVERIFY(applicationStartedSpy.isValid());
@@ -88,8 +87,8 @@ void XwaylandSelectionsTest::testSync()
     const QString paste = QFINDTESTDATA(QStringLiteral("paste"));
     QVERIFY(!paste.isEmpty());
 
-    QSignalSpy clientAddedSpy(workspace(), &Workspace::clientAdded);
-    QVERIFY(clientAddedSpy.isValid());
+    QSignalSpy windowAddedSpy(workspace(), &Workspace::windowAdded);
+    QVERIFY(windowAddedSpy.isValid());
     QSignalSpy clipboardChangedSpy(waylandServer()->seat(), &KWaylandServer::SeatInterface::selectionChanged);
     QVERIFY(clipboardChangedSpy.isValid());
 
@@ -106,14 +105,14 @@ void XwaylandSelectionsTest::testSync()
     copyProcess->start();
     QVERIFY(copyProcess->waitForStarted());
 
-    AbstractClient *copyClient = nullptr;
-    QVERIFY(clientAddedSpy.wait());
-    copyClient = clientAddedSpy.first().first().value<AbstractClient *>();
-    QVERIFY(copyClient);
-    if (workspace()->activeClient() != copyClient) {
-        workspace()->activateClient(copyClient);
+    Window *copyWindow = nullptr;
+    QVERIFY(windowAddedSpy.wait());
+    copyWindow = windowAddedSpy.first().first().value<Window *>();
+    QVERIFY(copyWindow);
+    if (workspace()->activeWindow() != copyWindow) {
+        workspace()->activateWindow(copyWindow);
     }
-    QCOMPARE(workspace()->activeClient(), copyClient);
+    QCOMPARE(workspace()->activeWindow(), copyWindow);
     clipboardChangedSpy.wait();
 
     // start the paste process
@@ -128,20 +127,20 @@ void XwaylandSelectionsTest::testSync()
     pasteProcess->start();
     QVERIFY(pasteProcess->waitForStarted());
 
-    clientAddedSpy.clear();
-    AbstractClient *pasteClient = nullptr;
-    QVERIFY(clientAddedSpy.wait());
-    pasteClient = clientAddedSpy.last().first().value<AbstractClient *>();
-    QCOMPARE(clientAddedSpy.count(), 1);
-    QVERIFY(pasteClient);
+    windowAddedSpy.clear();
+    Window *pasteWindow = nullptr;
+    QVERIFY(windowAddedSpy.wait());
+    pasteWindow = windowAddedSpy.last().first().value<Window *>();
+    QCOMPARE(windowAddedSpy.count(), 1);
+    QVERIFY(pasteWindow);
 
-    if (workspace()->activeClient() != pasteClient) {
-        QSignalSpy clientActivatedSpy(workspace(), &Workspace::clientActivated);
-        QVERIFY(clientActivatedSpy.isValid());
-        workspace()->activateClient(pasteClient);
-        QVERIFY(clientActivatedSpy.wait());
+    if (workspace()->activeWindow() != pasteWindow) {
+        QSignalSpy windowActivatedSpy(workspace(), &Workspace::windowActivated);
+        QVERIFY(windowActivatedSpy.isValid());
+        workspace()->activateWindow(pasteWindow);
+        QVERIFY(windowActivatedSpy.wait());
     }
-    QTRY_COMPARE(workspace()->activeClient(), pasteClient);
+    QTRY_COMPARE(workspace()->activeWindow(), pasteWindow);
     QVERIFY(finishedSpy.wait());
     QCOMPARE(finishedSpy.first().first().toInt(), 0);
 }

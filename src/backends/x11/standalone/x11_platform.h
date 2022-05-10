@@ -46,7 +46,7 @@ public:
     QString compositingNotPossibleReason() const override;
     bool openGLCompositingIsBroken() const override;
     void createOpenGLSafePoint(OpenGLSafePoint safePoint) override;
-    void startInteractiveWindowSelection(std::function<void(KWin::Toplevel *)> callback, const QByteArray &cursorName = QByteArray()) override;
+    void startInteractiveWindowSelection(std::function<void(KWin::Window *)> callback, const QByteArray &cursorName = QByteArray()) override;
     void startInteractivePositionSelection(std::function<void(const QPoint &)> callback) override;
 
     PlatformCursorImage cursorImage() const override;
@@ -97,7 +97,7 @@ private:
     QScopedPointer<X11EventFilter> m_screenEdgesFilter;
     QScopedPointer<X11EventFilter> m_randrEventFilter;
     RenderLoop *m_renderLoop;
-    QVector<AbstractOutput *> m_outputs;
+    QVector<Output *> m_outputs;
 };
 
 }

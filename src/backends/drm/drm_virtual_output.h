@@ -24,14 +24,17 @@ class DrmPipelineLayer;
 class DrmVirtualOutput : public DrmAbstractOutput
 {
     Q_OBJECT
+
 public:
-    DrmVirtualOutput(const QString &name, DrmGpu *gpu, const QSize &size);
-    DrmVirtualOutput(DrmGpu *gpu, const QSize &size);
+    enum class Type {
+        Virtual,
+        Placeholder,
+    };
+
+    DrmVirtualOutput(const QString &name, DrmGpu *gpu, const QSize &size, Type type);
     ~DrmVirtualOutput() override;
 
     bool present() override;
-    int gammaRampSize() const override;
-    bool setGammaRamp(const GammaRamp &gamma) override;
     DrmOutputLayer *outputLayer() const override;
     void recreateSurface();
 
@@ -42,7 +45,6 @@ private:
 
     QSharedPointer<DrmOutputLayer> m_layer;
     bool m_pageFlipPending = true;
-    int m_modeIndex = 0;
 
     SoftwareVsyncMonitor *m_vsyncMonitor;
 };

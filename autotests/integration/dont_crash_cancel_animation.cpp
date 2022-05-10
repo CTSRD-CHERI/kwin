@@ -8,7 +8,6 @@
 */
 #include "kwin_wayland_test.h"
 
-#include "abstract_client.h"
 #include "composite.h"
 #include "deleted.h"
 #include "effectloader.h"
@@ -16,8 +15,9 @@
 #include "platform.h"
 #include "scripting/scriptedeffect.h"
 #include "wayland_server.h"
+#include "window.h"
 #include "workspace.h"
-#include "x11client.h"
+#include "x11window.h"
 
 #include <KDecoration2/Decoration>
 
@@ -44,7 +44,7 @@ private Q_SLOTS:
 void DontCrashCancelAnimationFromAnimationEndedTest::initTestCase()
 {
     qRegisterMetaType<KWin::Deleted *>();
-    qRegisterMetaType<KWin::AbstractClient *>();
+    qRegisterMetaType<KWin::Window *>();
     kwinApp()->platform()->setInitialWindowSize(QSize(1280, 1024));
     QVERIFY(waylandServer()->init(s_socketName));
     kwinApp()->start();
@@ -68,7 +68,7 @@ void DontCrashCancelAnimationFromAnimationEndedTest::cleanup()
 void DontCrashCancelAnimationFromAnimationEndedTest::testScript()
 {
     // load a scripted effect which deletes animation data
-    ScriptedEffect *effect = ScriptedEffect::create(QStringLiteral("crashy"), QFINDTESTDATA("data/anim-data-delete-effect/effect.js"), 10);
+    ScriptedEffect *effect = ScriptedEffect::create(QStringLiteral("crashy"), QFINDTESTDATA("data/anim-data-delete-effect/effect.js"), 10, QString());
     QVERIFY(effect);
 
     const auto children = effects->children();
@@ -88,15 +88,15 @@ void DontCrashCancelAnimationFromAnimationEndedTest::testScript()
     Test::XdgToplevel *shellSurface = Test::createXdgToplevelSurface(surface, surface);
     QVERIFY(shellSurface);
     // let's render
-    auto c = Test::renderAndWaitForShown(surface, QSize(100, 50), Qt::blue);
-    QVERIFY(c);
-    QCOMPARE(workspace()->activeClient(), c);
+    auto window = Test::renderAndWaitForShown(surface, QSize(100, 50), Qt::blue);
+    QVERIFY(window);
+    QCOMPARE(workspace()->activeWindow(), window);
 
     // make sure we animate
     QTest::qWait(200);
 
     // wait for the window to be passed to Deleted
-    QSignalSpy windowDeletedSpy(c, &AbstractClient::windowClosed);
+    QSignalSpy windowDeletedSpy(window, &Window::windowClosed);
     QVERIFY(windowDeletedSpy.isValid());
 
     surface->deleteLater();

@@ -10,21 +10,19 @@
 
 #include <config-kwin.h>
 
-#include "abstract_client.h"
 #include "input_event.h"
 #include "input_event_spy.h"
 #include "inputmethod.h"
 #include "keyboard_layout.h"
 #include "keyboard_repeat.h"
 #include "modifier_only_shortcuts.h"
-#include "toplevel.h"
 #include "utils/common.h"
+#include "wayland/datadevice_interface.h"
+#include "wayland/keyboard_interface.h"
+#include "wayland/seat_interface.h"
 #include "wayland_server.h"
+#include "window.h"
 #include "workspace.h"
-// KWayland
-#include <KWaylandServer/datadevice_interface.h>
-#include <KWaylandServer/keyboard_interface.h>
-#include <KWaylandServer/seat_interface.h>
 // screenlocker
 #if KWIN_BUILD_SCREENLOCKER
 #include <KScreenLocker/KsldApp>
@@ -138,12 +136,12 @@ void KeyboardInputRedirection::init()
     connect(waylandServer(), &QObject::destroyed, this, [this] {
         m_inited = false;
     });
-    connect(workspace(), &Workspace::clientActivated, this, [this] {
-        disconnect(m_activeClientSurfaceChangedConnection);
-        if (auto c = workspace()->activeClient()) {
-            m_activeClientSurfaceChangedConnection = connect(c, &Toplevel::surfaceChanged, this, &KeyboardInputRedirection::update);
+    connect(workspace(), &Workspace::windowActivated, this, [this] {
+        disconnect(m_activeWindowSurfaceChangedConnection);
+        if (auto window = workspace()->activeWindow()) {
+            m_activeWindowSurfaceChangedConnection = connect(window, &Window::surfaceChanged, this, &KeyboardInputRedirection::update);
         } else {
-            m_activeClientSurfaceChangedConnection = QMetaObject::Connection();
+            m_activeWindowSurfaceChangedConnection = QMetaObject::Connection();
         }
         update();
     });
@@ -178,14 +176,14 @@ void KeyboardInputRedirection::update()
     }
     auto seat = waylandServer()->seat();
     // TODO: this needs better integration
-    Toplevel *found = nullptr;
+    Window *found = nullptr;
     if (waylandServer()->isScreenLocked()) {
-        const QList<Toplevel *> &stacking = Workspace::self()->stackingOrder();
+        const QList<Window *> &stacking = Workspace::self()->stackingOrder();
         if (!stacking.isEmpty()) {
             auto it = stacking.end();
             do {
                 --it;
-                Toplevel *t = (*it);
+                Window *t = (*it);
                 if (t->isDeleted()) {
                     // a deleted window doesn't get mouse events
                     continue;
@@ -201,7 +199,7 @@ void KeyboardInputRedirection::update()
             } while (it != stacking.begin());
         }
     } else if (!input()->isSelectingWindow()) {
-        found = workspace()->activeClient();
+        found = workspace()->activeWindow();
     }
     if (found && found->surface()) {
         if (found->surface() != seat->focusedKeyboardSurface()) {

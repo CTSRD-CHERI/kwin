@@ -26,9 +26,25 @@
 namespace KWin
 {
 
+EglLayer::EglLayer(EglBackend *backend)
+    : m_backend(backend)
+{
+}
+
+OutputLayerBeginFrameInfo EglLayer::beginFrame()
+{
+    return m_backend->beginFrame();
+}
+
+void EglLayer::endFrame(const QRegion &renderedRegion, const QRegion &damagedRegion)
+{
+    m_backend->endFrame(renderedRegion, damagedRegion);
+}
+
 EglBackend::EglBackend(Display *display, X11StandalonePlatform *backend)
     : EglOnXBackend(display)
     , m_backend(backend)
+    , m_layer(new EglLayer(this))
 {
     // There is no any way to determine when a buffer swap completes with EGL. Fallback
     // to software vblank events. Could we use the Present extension to get notified when
@@ -89,7 +105,7 @@ void EglBackend::init()
         return;
     }
 
-    m_renderTarget.reset(new GLRenderTarget(0, screens()->size()));
+    m_fbo.reset(new GLFramebuffer(0, screens()->size()));
 
     kwinApp()->platform()->setSceneEglDisplay(shareDisplay);
     kwinApp()->platform()->setSceneEglGlobalShareContext(shareContext);
@@ -102,57 +118,62 @@ void EglBackend::screenGeometryChanged()
 
     // The back buffer contents are now undefined
     m_bufferAge = 0;
-    m_renderTarget.reset(new GLRenderTarget(0, screens()->size()));
+    m_fbo.reset(new GLFramebuffer(0, screens()->size()));
 }
 
-QRegion EglBackend::beginFrame(AbstractOutput *output)
+OutputLayerBeginFrameInfo EglBackend::beginFrame()
 {
-    Q_UNUSED(output)
     makeCurrent();
 
     QRegion repaint;
     if (supportsBufferAge()) {
-        repaint = m_damageJournal.accumulate(m_bufferAge, screens()->geometry());
+        repaint = m_damageJournal.accumulate(m_bufferAge, infiniteRegion());
     }
 
     eglWaitNative(EGL_CORE_NATIVE_ENGINE);
 
     // Push the default framebuffer to the render target stack.
-    GLRenderTarget::pushRenderTarget(m_renderTarget.data());
-    return repaint;
+    GLFramebuffer::pushFramebuffer(m_fbo.data());
+    return OutputLayerBeginFrameInfo{
+        .renderTarget = RenderTarget(m_fbo.data()),
+        .repaint = repaint,
+    };
 }
 
-void EglBackend::endFrame(AbstractOutput *output, const QRegion &renderedRegion, const QRegion &damagedRegion)
+void EglBackend::endFrame(const QRegion &renderedRegion, const QRegion &damagedRegion)
+{
+    // Save the damaged region to history
+    if (supportsBufferAge()) {
+        m_damageJournal.add(damagedRegion);
+    }
+    m_lastRenderedRegion = renderedRegion;
+}
+
+void EglBackend::present(Output *output)
 {
     Q_UNUSED(output)
-
     // Start the software vsync monitor. There is no any reliable way to determine when
     // eglSwapBuffers() or eglSwapBuffersWithDamageEXT() completes.
     m_vsyncMonitor->arm();
 
-    QRegion effectiveRenderedRegion = renderedRegion;
+    QRegion effectiveRenderedRegion = m_lastRenderedRegion;
     if (!GLPlatform::instance()->isGLES()) {
         const QRegion displayRegion(screens()->geometry());
-        if (!supportsBufferAge() && options->glPreferBufferSwap() == Options::CopyFrontBuffer && renderedRegion != displayRegion) {
+        if (!supportsBufferAge() && options->glPreferBufferSwap() == Options::CopyFrontBuffer && m_lastRenderedRegion != displayRegion) {
             glReadBuffer(GL_FRONT);
-            copyPixels(displayRegion - renderedRegion);
+            copyPixels(displayRegion - m_lastRenderedRegion);
             glReadBuffer(GL_BACK);
             effectiveRenderedRegion = displayRegion;
         }
     }
 
     // Pop the default render target from the render target stack.
-    GLRenderTarget::popRenderTarget();
+    GLFramebuffer::popFramebuffer();
 
     presentSurface(surface(), effectiveRenderedRegion, screens()->geometry());
 
     if (overlayWindow() && overlayWindow()->window()) { // show the window only after the first pass,
         overlayWindow()->show(); // since that pass may take long
-    }
-
-    // Save the damaged region to history
-    if (supportsBufferAge()) {
-        m_damageJournal.add(damagedRegion);
     }
 }
 
@@ -172,6 +193,12 @@ void EglBackend::presentSurface(EGLSurface surface, const QRegion &damage, const
             eglPostSubBufferNV(eglDisplay(), surface, r.left(), screenGeometry.height() - r.bottom() - 1, r.width(), r.height());
         }
     }
+}
+
+OutputLayer *EglBackend::primaryLayer(Output *output)
+{
+    Q_UNUSED(output)
+    return m_layer.get();
 }
 
 void EglBackend::vblank(std::chrono::nanoseconds timestamp)

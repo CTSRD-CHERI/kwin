@@ -103,6 +103,21 @@ bool SwapEventFilter::event(xcb_generic_event_t *event)
     return true;
 }
 
+GlxLayer::GlxLayer(GlxBackend *backend)
+    : m_backend(backend)
+{
+}
+
+OutputLayerBeginFrameInfo GlxLayer::beginFrame()
+{
+    return m_backend->beginFrame();
+}
+
+void GlxLayer::endFrame(const QRegion &renderedRegion, const QRegion &damagedRegion)
+{
+    m_backend->endFrame(renderedRegion, damagedRegion);
+}
+
 GlxBackend::GlxBackend(Display *display, X11StandalonePlatform *backend)
     : OpenGLBackend()
     , m_overlayWindow(kwinApp()->platform()->createOverlayWindow())
@@ -113,6 +128,7 @@ GlxBackend::GlxBackend(Display *display, X11StandalonePlatform *backend)
     , m_bufferAge(0)
     , m_x11Display(display)
     , m_backend(backend)
+    , m_layer(new GlxLayer(this))
 {
     // Force initialization of GLX integration in the Qt's xcb backend
     // to make it call XESetWireToEvent callbacks, which is required
@@ -214,7 +230,7 @@ void GlxBackend::init()
     glPlatform->printResults();
     initGL(&getProcAddress);
 
-    m_renderTarget.reset(new GLRenderTarget(0, screens()->size()));
+    m_fbo.reset(new GLFramebuffer(0, screens()->size()));
 
     bool supportsSwapEvent = false;
 
@@ -755,7 +771,7 @@ void GlxBackend::screenGeometryChanged()
 
     // The back buffer contents are now undefined
     m_bufferAge = 0;
-    m_renderTarget.reset(new GLRenderTarget(0, size));
+    m_fbo.reset(new GLFramebuffer(0, size));
 }
 
 SurfaceTexture *GlxBackend::createSurfaceTextureX11(SurfacePixmapX11 *pixmap)
@@ -763,24 +779,34 @@ SurfaceTexture *GlxBackend::createSurfaceTextureX11(SurfacePixmapX11 *pixmap)
     return new GlxSurfaceTextureX11(this, pixmap);
 }
 
-QRegion GlxBackend::beginFrame(AbstractOutput *output)
+OutputLayerBeginFrameInfo GlxBackend::beginFrame()
 {
-    Q_UNUSED(output)
-
     QRegion repaint;
     makeCurrent();
 
-    GLRenderTarget::pushRenderTarget(m_renderTarget.data());
+    GLFramebuffer::pushFramebuffer(m_fbo.data());
     if (supportsBufferAge()) {
-        repaint = m_damageJournal.accumulate(m_bufferAge, screens()->geometry());
+        repaint = m_damageJournal.accumulate(m_bufferAge, infiniteRegion());
     }
 
     glXWaitX();
 
-    return repaint;
+    return OutputLayerBeginFrameInfo{
+        .renderTarget = RenderTarget(m_fbo.data()),
+        .repaint = repaint,
+    };
 }
 
-void GlxBackend::endFrame(AbstractOutput *output, const QRegion &renderedRegion, const QRegion &damagedRegion)
+void GlxBackend::endFrame(const QRegion &renderedRegion, const QRegion &damagedRegion)
+{
+    // Save the damaged region to history
+    if (supportsBufferAge()) {
+        m_damageJournal.add(damagedRegion);
+    }
+    m_lastRenderedRegion = renderedRegion;
+}
+
+void GlxBackend::present(Output *output)
 {
     Q_UNUSED(output)
 
@@ -792,25 +818,20 @@ void GlxBackend::endFrame(AbstractOutput *output, const QRegion &renderedRegion,
 
     const QRegion displayRegion(screens()->geometry());
 
-    QRegion effectiveRenderedRegion = renderedRegion;
-    if (!supportsBufferAge() && options->glPreferBufferSwap() == Options::CopyFrontBuffer && renderedRegion != displayRegion) {
+    QRegion effectiveRenderedRegion = m_lastRenderedRegion;
+    if (!supportsBufferAge() && options->glPreferBufferSwap() == Options::CopyFrontBuffer && m_lastRenderedRegion != displayRegion) {
         glReadBuffer(GL_FRONT);
-        copyPixels(displayRegion - renderedRegion);
+        copyPixels(displayRegion - m_lastRenderedRegion);
         glReadBuffer(GL_BACK);
         effectiveRenderedRegion = displayRegion;
     }
 
-    GLRenderTarget::popRenderTarget();
+    GLFramebuffer::popFramebuffer();
 
     present(effectiveRenderedRegion);
 
     if (overlayWindow()->window()) { // show the window only after the first pass,
         overlayWindow()->show(); // since that pass may take long
-    }
-
-    // Save the damaged region to history
-    if (supportsBufferAge()) {
-        m_damageJournal.add(damagedRegion);
     }
 }
 
@@ -838,6 +859,12 @@ void GlxBackend::doneCurrent()
 OverlayWindow *GlxBackend::overlayWindow() const
 {
     return m_overlayWindow;
+}
+
+OutputLayer *GlxBackend::primaryLayer(Output *output)
+{
+    Q_UNUSED(output)
+    return m_layer.get();
 }
 
 GlxSurfaceTextureX11::GlxSurfaceTextureX11(GlxBackend *backend, SurfacePixmapX11 *texture)

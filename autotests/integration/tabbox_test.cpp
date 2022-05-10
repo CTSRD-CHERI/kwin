@@ -8,12 +8,12 @@
 */
 #include "kwin_wayland_test.h"
 
-#include "abstract_client.h"
 #include "cursor.h"
 #include "input.h"
 #include "platform.h"
 #include "tabbox/tabbox.h"
 #include "wayland_server.h"
+#include "window.h"
 #include "workspace.h"
 
 #include <KConfigGroup>
@@ -41,7 +41,7 @@ private Q_SLOTS:
 
 void TabBoxTest::initTestCase()
 {
-    qRegisterMetaType<KWin::AbstractClient *>();
+    qRegisterMetaType<KWin::Window *>();
     QSignalSpy applicationStartedSpy(kwinApp(), &Application::started);
     QVERIFY(applicationStartedSpy.isValid());
     kwinApp()->platform()->setInitialWindowSize(QSize(1280, 1024));
@@ -124,7 +124,7 @@ void TabBoxTest::testCapsLock()
     QCOMPARE(input()->keyboardModifiers(), Qt::NoModifier);
     QCOMPARE(tabboxClosedSpy.count(), 1);
     QCOMPARE(TabBox::TabBox::self()->isGrabbed(), false);
-    QCOMPARE(workspace()->activeClient(), c2);
+    QCOMPARE(workspace()->activeWindow(), c2);
 
     surface3.reset();
     QVERIFY(Test::waitForWindowDestroyed(c3));
@@ -175,7 +175,7 @@ void TabBoxTest::testMoveForward()
     Test::keyboardKeyReleased(KEY_LEFTALT, timestamp++);
     QCOMPARE(tabboxClosedSpy.count(), 1);
     QCOMPARE(TabBox::TabBox::self()->isGrabbed(), false);
-    QCOMPARE(workspace()->activeClient(), c2);
+    QCOMPARE(workspace()->activeWindow(), c2);
 
     surface3.reset();
     QVERIFY(Test::waitForWindowDestroyed(c3));
@@ -230,7 +230,7 @@ void TabBoxTest::testMoveBackward()
     Test::keyboardKeyReleased(KEY_LEFTALT, timestamp++);
     QCOMPARE(tabboxClosedSpy.count(), 1);
     QCOMPARE(TabBox::TabBox::self()->isGrabbed(), false);
-    QCOMPARE(workspace()->activeClient(), c1);
+    QCOMPARE(workspace()->activeWindow(), c1);
 
     surface3.reset();
     QVERIFY(Test::waitForWindowDestroyed(c3));

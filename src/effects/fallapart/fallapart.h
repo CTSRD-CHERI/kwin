@@ -17,6 +17,8 @@ namespace KWin
 
 struct FallApartAnimation
 {
+    EffectWindowDeletedRef deletedRef;
+    EffectWindowVisibleRef visibleRef;
     std::chrono::milliseconds lastPresentTime = std::chrono::milliseconds::zero();
     qreal progress = 0;
 };

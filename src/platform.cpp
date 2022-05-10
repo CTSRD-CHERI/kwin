@@ -11,24 +11,22 @@
 
 #include <config-kwin.h>
 
-#include "abstract_output.h"
 #include "composite.h"
 #include "cursor.h"
 #include "effects.h"
-#include "keyboard_input.h"
 #include "outline.h"
+#include "output.h"
+#include "outputconfiguration.h"
 #include "overlaywindow.h"
 #include "pointer_input.h"
 #include "scene.h"
 #include "screenedge.h"
 #include "screens.h"
-#include "touch_input.h"
+#include "wayland/outputchangeset_v2.h"
+#include "wayland/outputconfiguration_v2_interface.h"
 #include "wayland_server.h"
-#include "waylandoutputconfig.h"
-#include <KCoreAddons>
 
-#include <KWaylandServer/outputchangeset_v2.h>
-#include <KWaylandServer/outputconfiguration_v2_interface.h>
+#include <KCoreAddons>
 
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
 #include <private/qtx11extras_p.h>
@@ -45,12 +43,12 @@ Platform::Platform(QObject *parent)
     : QObject(parent)
     , m_eglDisplay(EGL_NO_DISPLAY)
 {
-    connect(this, &Platform::outputDisabled, this, [this](AbstractOutput *output) {
+    connect(this, &Platform::outputDisabled, this, [this](Output *output) {
         if (m_primaryOutput == output) {
             setPrimaryOutput(enabledOutputs().value(0, nullptr));
         }
     });
-    connect(this, &Platform::outputEnabled, this, [this](AbstractOutput *output) {
+    connect(this, &Platform::outputEnabled, this, [this](Output *output) {
         if (!m_primaryOutput) {
             setPrimaryOutput(output);
         }
@@ -100,11 +98,11 @@ void Platform::requestOutputsChange(KWaylandServer::OutputConfigurationV2Interfa
         return;
     }
 
-    WaylandOutputConfig cfg;
+    OutputConfiguration cfg;
     const auto changes = config->changes();
     for (auto it = changes.begin(); it != changes.end(); it++) {
         const KWaylandServer::OutputChangeSetV2 *changeset = it.value();
-        auto output = qobject_cast<AbstractWaylandOutput *>(findOutput(it.key()->uuid()));
+        auto output = findOutput(it.key()->uuid());
         if (!output) {
             qCWarning(KWIN_CORE) << "Could NOT find output matching " << it.key()->uuid();
             continue;
@@ -115,20 +113,15 @@ void Platform::requestOutputsChange(KWaylandServer::OutputConfigurationV2Interfa
         props->scale = changeset->scale();
         props->modeSize = changeset->size();
         props->refreshRate = changeset->refreshRate();
-        props->transform = static_cast<AbstractWaylandOutput::Transform>(changeset->transform());
+        props->transform = static_cast<Output::Transform>(changeset->transform());
         props->overscan = changeset->overscan();
-        props->rgbRange = static_cast<AbstractWaylandOutput::RgbRange>(changeset->rgbRange());
+        props->rgbRange = static_cast<Output::RgbRange>(changeset->rgbRange());
         props->vrrPolicy = static_cast<RenderLoop::VrrPolicy>(changeset->vrrPolicy());
     }
 
     const auto allOutputs = outputs();
     bool allDisabled = !std::any_of(allOutputs.begin(), allOutputs.end(), [&cfg](const auto &output) {
-        auto o = qobject_cast<AbstractWaylandOutput *>(output);
-        if (!o) {
-            qCWarning(KWIN_CORE) << "Platform::requestOutputsChange should only be called for Wayland platforms!";
-            return false;
-        }
-        return cfg.changeSet(o)->enabled;
+        return cfg.changeSet(output)->enabled;
     });
     if (allDisabled) {
         qCWarning(KWIN_CORE) << "Disabling all outputs through configuration changes is not allowed";
@@ -155,37 +148,37 @@ void Platform::requestOutputsChange(KWaylandServer::OutputConfigurationV2Interfa
     }
 }
 
-bool Platform::applyOutputChanges(const WaylandOutputConfig &config)
+bool Platform::applyOutputChanges(const OutputConfiguration &config)
 {
     const auto availableOutputs = outputs();
-    QVector<AbstractOutput *> toBeEnabledOutputs;
-    QVector<AbstractOutput *> toBeDisabledOutputs;
+    QVector<Output *> toBeEnabledOutputs;
+    QVector<Output *> toBeDisabledOutputs;
     for (const auto &output : availableOutputs) {
-        if (config.constChangeSet(qobject_cast<AbstractWaylandOutput *>(output))->enabled) {
+        if (config.constChangeSet(output)->enabled) {
             toBeEnabledOutputs << output;
         } else {
             toBeDisabledOutputs << output;
         }
     }
     for (const auto &output : toBeEnabledOutputs) {
-        static_cast<AbstractWaylandOutput *>(output)->applyChanges(config);
+        output->applyChanges(config);
     }
     for (const auto &output : toBeDisabledOutputs) {
-        static_cast<AbstractWaylandOutput *>(output)->applyChanges(config);
+        output->applyChanges(config);
     }
     return true;
 }
 
-AbstractOutput *Platform::findOutput(int screenId) const
+Output *Platform::findOutput(int screenId) const
 {
     return enabledOutputs().value(screenId);
 }
 
-AbstractOutput *Platform::findOutput(const QUuid &uuid) const
+Output *Platform::findOutput(const QUuid &uuid) const
 {
     const auto outs = outputs();
     auto it = std::find_if(outs.constBegin(), outs.constEnd(),
-                           [uuid](AbstractOutput *output) {
+                           [uuid](Output *output) {
                                return output->uuid() == uuid;
                            });
     if (it != outs.constEnd()) {
@@ -194,10 +187,10 @@ AbstractOutput *Platform::findOutput(const QUuid &uuid) const
     return nullptr;
 }
 
-AbstractOutput *Platform::findOutput(const QString &name) const
+Output *Platform::findOutput(const QString &name) const
 {
     const auto candidates = outputs();
-    for (AbstractOutput *candidate : candidates) {
+    for (Output *candidate : candidates) {
         if (candidate->name() == name) {
             return candidate;
         }
@@ -205,12 +198,12 @@ AbstractOutput *Platform::findOutput(const QString &name) const
     return nullptr;
 }
 
-AbstractOutput *Platform::outputAt(const QPoint &pos) const
+Output *Platform::outputAt(const QPoint &pos) const
 {
-    AbstractOutput *bestOutput = nullptr;
+    Output *bestOutput = nullptr;
     int minDistance = INT_MAX;
     const auto candidates = enabledOutputs();
-    for (AbstractOutput *output : candidates) {
+    for (Output *output : candidates) {
         const QRect &geo = output->geometry();
         if (geo.contains(pos)) {
             return output;
@@ -225,190 +218,6 @@ AbstractOutput *Platform::outputAt(const QPoint &pos) const
         }
     }
     return bestOutput;
-}
-
-void Platform::keyboardKeyPressed(quint32 key, quint32 time)
-{
-    if (!input()) {
-        return;
-    }
-    input()->keyboard()->processKey(key, InputRedirection::KeyboardKeyPressed, time);
-}
-
-void Platform::keyboardKeyReleased(quint32 key, quint32 time)
-{
-    if (!input()) {
-        return;
-    }
-    input()->keyboard()->processKey(key, InputRedirection::KeyboardKeyReleased, time);
-}
-
-void Platform::keyboardModifiers(uint32_t modsDepressed, uint32_t modsLatched, uint32_t modsLocked, uint32_t group)
-{
-    if (!input()) {
-        return;
-    }
-    input()->keyboard()->processModifiers(modsDepressed, modsLatched, modsLocked, group);
-}
-
-void Platform::keymapChange(int fd, uint32_t size)
-{
-    if (!input()) {
-        return;
-    }
-    input()->keyboard()->processKeymapChange(fd, size);
-}
-
-void Platform::pointerAxisHorizontal(qreal delta, quint32 time, qint32 discreteDelta, InputRedirection::PointerAxisSource source)
-{
-    if (!input()) {
-        return;
-    }
-    input()->pointer()->processAxis(InputRedirection::PointerAxisHorizontal, delta, discreteDelta, source, time);
-}
-
-void Platform::pointerAxisVertical(qreal delta, quint32 time, qint32 discreteDelta, InputRedirection::PointerAxisSource source)
-{
-    if (!input()) {
-        return;
-    }
-    input()->pointer()->processAxis(InputRedirection::PointerAxisVertical, delta, discreteDelta, source, time);
-}
-
-void Platform::pointerButtonPressed(quint32 button, quint32 time)
-{
-    if (!input()) {
-        return;
-    }
-    input()->pointer()->processButton(button, InputRedirection::PointerButtonPressed, time);
-}
-
-void Platform::pointerButtonReleased(quint32 button, quint32 time)
-{
-    if (!input()) {
-        return;
-    }
-    input()->pointer()->processButton(button, InputRedirection::PointerButtonReleased, time);
-}
-
-void Platform::pointerMotion(const QPointF &position, quint32 time)
-{
-    if (!input()) {
-        return;
-    }
-    input()->pointer()->processMotionAbsolute(position, time);
-}
-
-void Platform::cancelTouchSequence()
-{
-    if (!input()) {
-        return;
-    }
-    input()->touch()->cancel();
-}
-
-void Platform::touchCancel()
-{
-    if (!input()) {
-        return;
-    }
-    input()->touch()->cancel();
-}
-
-void Platform::touchDown(qint32 id, const QPointF &pos, quint32 time)
-{
-    if (!input()) {
-        return;
-    }
-    input()->touch()->processDown(id, pos, time);
-}
-
-void Platform::touchFrame()
-{
-    if (!input()) {
-        return;
-    }
-    input()->touch()->frame();
-}
-
-void Platform::touchMotion(qint32 id, const QPointF &pos, quint32 time)
-{
-    if (!input()) {
-        return;
-    }
-    input()->touch()->processMotion(id, pos, time);
-}
-
-void Platform::touchUp(qint32 id, quint32 time)
-{
-    if (!input()) {
-        return;
-    }
-    input()->touch()->processUp(id, time);
-}
-
-void Platform::processSwipeGestureBegin(int fingerCount, quint32 time)
-{
-    if (!input()) {
-        return;
-    }
-    input()->pointer()->processSwipeGestureBegin(fingerCount, time);
-}
-
-void Platform::processSwipeGestureUpdate(const QSizeF &delta, quint32 time)
-{
-    if (!input()) {
-        return;
-    }
-    input()->pointer()->processSwipeGestureUpdate(delta, time);
-}
-
-void Platform::processSwipeGestureEnd(quint32 time)
-{
-    if (!input()) {
-        return;
-    }
-    input()->pointer()->processSwipeGestureEnd(time);
-}
-
-void Platform::processSwipeGestureCancelled(quint32 time)
-{
-    if (!input()) {
-        return;
-    }
-    input()->pointer()->processSwipeGestureCancelled(time);
-}
-
-void Platform::processPinchGestureBegin(int fingerCount, quint32 time)
-{
-    if (!input()) {
-        return;
-    }
-    input()->pointer()->processPinchGestureBegin(fingerCount, time);
-}
-
-void Platform::processPinchGestureUpdate(qreal scale, qreal angleDelta, const QSizeF &delta, quint32 time)
-{
-    if (!input()) {
-        return;
-    }
-    input()->pointer()->processPinchGestureUpdate(scale, angleDelta, delta, time);
-}
-
-void Platform::processPinchGestureEnd(quint32 time)
-{
-    if (!input()) {
-        return;
-    }
-    input()->pointer()->processPinchGestureEnd(time);
-}
-
-void Platform::processPinchGestureCancelled(quint32 time)
-{
-    if (!input()) {
-        return;
-    }
-    input()->pointer()->processPinchGestureCancelled(time);
 }
 
 void Platform::repaint(const QRect &rect)
@@ -427,7 +236,7 @@ void Platform::setReady(bool ready)
     Q_EMIT readyChanged(m_ready);
 }
 
-AbstractOutput *Platform::createVirtualOutput(const QString &name, const QSize &size, double scale)
+Output *Platform::createVirtualOutput(const QString &name, const QSize &size, double scale)
 {
     Q_UNUSED(name);
     Q_UNUSED(size);
@@ -435,7 +244,7 @@ AbstractOutput *Platform::createVirtualOutput(const QString &name, const QSize &
     return nullptr;
 }
 
-void Platform::removeVirtualOutput(AbstractOutput *output)
+void Platform::removeVirtualOutput(Output *output)
 {
     Q_ASSERT(!output);
 }
@@ -463,11 +272,6 @@ void Platform::setSceneEglDisplay(EGLDisplay display)
     m_eglDisplay = display;
 }
 
-QSize Platform::screenSize() const
-{
-    return QSize();
-}
-
 bool Platform::requiresCompositing() const
 {
     return true;
@@ -493,7 +297,7 @@ void Platform::createOpenGLSafePoint(OpenGLSafePoint safePoint)
     Q_UNUSED(safePoint)
 }
 
-void Platform::startInteractiveWindowSelection(std::function<void(KWin::Toplevel *)> callback, const QByteArray &cursorName)
+void Platform::startInteractiveWindowSelection(std::function<void(KWin::Window *)> callback, const QByteArray &cursorName)
 {
     if (!input()) {
         callback(nullptr);
@@ -588,7 +392,7 @@ void Platform::setSceneEglGlobalShareContext(EGLContext context)
     m_globalShareContext = context;
 }
 
-void Platform::setPrimaryOutput(AbstractOutput *primary)
+void Platform::setPrimaryOutput(Output *primary)
 {
     if (primary == m_primaryOutput) {
         return;

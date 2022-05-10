@@ -17,6 +17,33 @@
 
 namespace KWin
 {
+
+VirtualQPainterLayer::VirtualQPainterLayer(Output *output)
+    : m_output(output)
+    , m_image(output->pixelSize(), QImage::Format_RGB32)
+{
+    m_image.fill(Qt::black);
+}
+
+OutputLayerBeginFrameInfo VirtualQPainterLayer::beginFrame()
+{
+    return OutputLayerBeginFrameInfo{
+        .renderTarget = RenderTarget(&m_image),
+        .repaint = m_output->rect(),
+    };
+}
+
+void VirtualQPainterLayer::endFrame(const QRegion &renderedRegion, const QRegion &damagedRegion)
+{
+    Q_UNUSED(renderedRegion)
+    Q_UNUSED(damagedRegion)
+}
+
+QImage *VirtualQPainterLayer::image()
+{
+    return &m_image;
+}
+
 VirtualQPainterBackend::VirtualQPainterBackend(VirtualBackend *backend)
     : QPainterBackend()
     , m_backend(backend)
@@ -27,37 +54,26 @@ VirtualQPainterBackend::VirtualQPainterBackend(VirtualBackend *backend)
 
 VirtualQPainterBackend::~VirtualQPainterBackend() = default;
 
-QImage *VirtualQPainterBackend::bufferForScreen(AbstractOutput *output)
-{
-    return &m_backBuffers[output];
-}
-
-QRegion VirtualQPainterBackend::beginFrame(AbstractOutput *output)
-{
-    return output->geometry();
-}
-
 void VirtualQPainterBackend::createOutputs()
 {
-    m_backBuffers.clear();
+    m_outputs.clear();
     const auto outputs = m_backend->enabledOutputs();
     for (const auto &output : outputs) {
-        QImage buffer(output->pixelSize(), QImage::Format_RGB32);
-        buffer.fill(Qt::black);
-        m_backBuffers.insert(output, buffer);
+        m_outputs.insert(output, QSharedPointer<VirtualQPainterLayer>::create(output));
     }
 }
 
-void VirtualQPainterBackend::endFrame(AbstractOutput *output, const QRegion &renderedRegion, const QRegion &damagedRegion)
+void VirtualQPainterBackend::present(Output *output)
 {
-    Q_UNUSED(renderedRegion)
-    Q_UNUSED(damagedRegion)
-
     static_cast<VirtualOutput *>(output)->vsyncMonitor()->arm();
 
     if (m_backend->saveFrames()) {
-        m_backBuffers[output].save(QStringLiteral("%1/%s-%3.png").arg(m_backend->screenshotDirPath(), output->name(), QString::number(m_frameCounter++)));
+        m_outputs[output]->image()->save(QStringLiteral("%1/%s-%3.png").arg(m_backend->screenshotDirPath(), output->name(), QString::number(m_frameCounter++)));
     }
 }
 
+VirtualQPainterLayer *VirtualQPainterBackend::primaryLayer(Output *output)
+{
+    return m_outputs[output].get();
+}
 }

@@ -15,8 +15,8 @@
 #include "screen.h"
 #include "window.h"
 
-#include "abstract_output.h"
 #include "main.h"
+#include "output.h"
 #include "platform.h"
 #include "screens.h"
 
@@ -26,9 +26,16 @@
 #include <qpa/qplatformwindow.h>
 #include <qpa/qwindowsysteminterface.h>
 
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
 #include <QtEventDispatcherSupport/private/qunixeventdispatcher_qpa_p.h>
 #include <QtFontDatabaseSupport/private/qgenericunixfontdatabase_p.h>
 #include <QtThemeSupport/private/qgenericunixthemes_p.h>
+#else
+#include <QtGui/private/qgenericunixeventdispatcher_p.h>
+#include <QtGui/private/qgenericunixfontdatabase_p.h>
+#include <QtGui/private/qgenericunixthemes_p.h>
+#include <QtGui/private/qunixeventdispatcher_qpa_p.h>
+#endif
 
 namespace KWin
 {
@@ -54,7 +61,7 @@ Integration::~Integration()
     }
 }
 
-QHash<AbstractOutput *, Screen *> Integration::screens() const
+QHash<Output *, Screen *> Integration::screens() const
 {
     return m_screens;
 }
@@ -157,13 +164,13 @@ void Integration::handlePlatformCreated()
     connect(kwinApp()->platform(), &Platform::outputDisabled,
             this, &Integration::handleOutputDisabled);
 
-    const QVector<AbstractOutput *> outputs = kwinApp()->platform()->enabledOutputs();
-    for (AbstractOutput *output : outputs) {
+    const QVector<Output *> outputs = kwinApp()->platform()->enabledOutputs();
+    for (Output *output : outputs) {
         handleOutputEnabled(output);
     }
 }
 
-void Integration::handleOutputEnabled(AbstractOutput *output)
+void Integration::handleOutputEnabled(Output *output)
 {
     Screen *platformScreen = new Screen(output, this);
     QWindowSystemInterface::handleScreenAdded(platformScreen);
@@ -175,7 +182,7 @@ void Integration::handleOutputEnabled(AbstractOutput *output)
     }
 }
 
-void Integration::handleOutputDisabled(AbstractOutput *output)
+void Integration::handleOutputDisabled(Output *output)
 {
     Screen *platformScreen = m_screens.take(output);
     if (!platformScreen) {

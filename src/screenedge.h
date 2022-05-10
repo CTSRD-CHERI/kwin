@@ -34,8 +34,8 @@ class QMouseEvent;
 namespace KWin
 {
 
-class AbstractClient;
-class AbstractOutput;
+class Window;
+class Output;
 class GestureRecognizer;
 class ScreenEdges;
 class SwipeGesture;
@@ -43,12 +43,12 @@ class SwipeGesture;
 class TouchCallback
 {
 public:
-    using CallbackFunction = std::function<void(ElectricBorder border, const QSizeF &, AbstractOutput *output)>;
+    using CallbackFunction = std::function<void(ElectricBorder border, const QSizeF &, Output *output)>;
     explicit TouchCallback(QAction *touchUpAction, TouchCallback::CallbackFunction progressCallback);
     ~TouchCallback();
 
     QAction *touchUpAction() const;
-    void progressCallback(ElectricBorder border, const QSizeF &deltaProgress, AbstractOutput *output) const;
+    void progressCallback(ElectricBorder border, const QSizeF &deltaProgress, Output *output) const;
     bool hasProgressCallback() const;
 
 private:
@@ -82,10 +82,10 @@ public:
     void startApproaching();
     void stopApproaching();
     bool isApproaching() const;
-    void setClient(AbstractClient *client);
-    AbstractClient *client() const;
-    void setOutput(AbstractOutput *output);
-    AbstractOutput *output() const;
+    void setClient(Window *client);
+    Window *client() const;
+    void setOutput(Output *output);
+    Output *output() const;
     const QRect &geometry() const;
     void setTouchAction(ElectricBorderAction action);
 
@@ -167,8 +167,8 @@ private:
     int m_lastApproachingFactor;
     bool m_blocked;
     bool m_pushBackBlocked;
-    AbstractClient *m_client;
-    AbstractOutput *m_output;
+    Window *m_client;
+    Output *m_output;
     SwipeGesture *m_gesture;
     QVector<TouchCallback> m_touchCallbacks;
     friend class ScreenEdges;
@@ -299,7 +299,7 @@ public:
      * @param client The Client for which an Edge should be reserved
      * @param border The border which the client wants to use, only proper borders are supported (no corners)
      */
-    void reserve(KWin::AbstractClient *client, ElectricBorder border);
+    void reserve(KWin::Window *client, ElectricBorder border);
 
     /**
      * Mark the specified screen edge as reserved for touch gestures. This method is provided for
@@ -358,6 +358,8 @@ public:
     ElectricBorderAction actionBottomLeft() const;
     ElectricBorderAction actionLeft() const;
 
+    ElectricBorderAction actionForTouchBorder(ElectricBorder border) const;
+
     GestureRecognizer *gestureRecognizer() const
     {
         return m_gestureRecognizer;
@@ -398,15 +400,15 @@ private:
     void setCursorPushBackDistance(const QSize &distance);
     void setTimeThreshold(int threshold);
     void setReActivationThreshold(int threshold);
-    void createHorizontalEdge(ElectricBorder border, const QRect &screen, const QRect &fullArea, AbstractOutput *output);
-    void createVerticalEdge(ElectricBorder border, const QRect &screen, const QRect &fullArea, AbstractOutput *output);
-    Edge *createEdge(ElectricBorder border, int x, int y, int width, int height, AbstractOutput *output, bool createAction = true);
+    void createHorizontalEdge(ElectricBorder border, const QRect &screen, const QRect &fullArea, Output *output);
+    void createVerticalEdge(ElectricBorder border, const QRect &screen, const QRect &fullArea, Output *output);
+    Edge *createEdge(ElectricBorder border, int x, int y, int width, int height, Output *output, bool createAction = true);
     void setActionForBorder(ElectricBorder border, ElectricBorderAction *oldValue, ElectricBorderAction newValue);
     void setActionForTouchBorder(ElectricBorder border, ElectricBorderAction newValue);
     ElectricBorderAction actionForEdge(Edge *edge) const;
     ElectricBorderAction actionForTouchEdge(Edge *edge) const;
-    void createEdgeForClient(AbstractClient *client, ElectricBorder border);
-    void deleteEdgeForClient(AbstractClient *client);
+    void createEdgeForClient(Window *client, ElectricBorder border);
+    void deleteEdgeForClient(Window *client);
     bool m_desktopSwitching;
     bool m_desktopSwitchingMovingClients;
     QSize m_cursorPushBackDistance;
@@ -515,7 +517,7 @@ inline bool Edge::isBlocked() const
     return m_blocked;
 }
 
-inline AbstractClient *Edge::client() const
+inline Window *Edge::client() const
 {
     return m_client;
 }

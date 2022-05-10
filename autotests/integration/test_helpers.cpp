@@ -14,6 +14,7 @@
 #include "screenlockerwatcher.h"
 #endif
 #include "inputmethod.h"
+#include "wayland/display.h"
 #include "wayland_server.h"
 #include "workspace.h"
 
@@ -34,7 +35,6 @@
 #include <KWayland/Client/subsurface.h>
 #include <KWayland/Client/surface.h>
 #include <KWayland/Client/textinput.h>
-#include <KWaylandServer/display.h>
 
 // screenlocker
 #if KWIN_BUILD_SCREENLOCKER
@@ -242,7 +242,7 @@ static struct
     Registry *registry = nullptr;
     WaylandOutputManagementV2 *outputManagementV2 = nullptr;
     QThread *thread = nullptr;
-    QVector<Output *> outputs;
+    QVector<KWayland::Client::Output *> outputs;
     QVector<WaylandOutputDeviceV2 *> outputDevicesV2;
     IdleInhibitManagerV1 *idleInhibitManagerV1 = nullptr;
     AppMenuManager *appMenu = nullptr;
@@ -255,9 +255,9 @@ static struct
     TextInputManagerV3 *textInputManagerV3 = nullptr;
 } s_waylandConnection;
 
-AbstractClient *inputPanelClient()
+Window *inputPanelWindow()
 {
-    return s_waylandConnection.inputMethodV1->client();
+    return s_waylandConnection.inputMethodV1->window();
 }
 
 MockInputMethod *inputMethod()
@@ -286,7 +286,7 @@ void MockInputMethod::zwp_input_method_v1_activate(struct ::zwp_input_method_con
         m_inputMethodSurface = Test::createInputPanelSurfaceV1(m_inputSurface, s_waylandConnection.outputs.first());
     }
     m_context = context;
-    m_client = Test::renderAndWaitForShown(m_inputSurface, QSize(1280, 400), Qt::blue);
+    m_window = Test::renderAndWaitForShown(m_inputSurface, QSize(1280, 400), Qt::blue);
 
     Q_EMIT activate();
 }
@@ -346,13 +346,13 @@ bool setupWaylandConnection(AdditionalWaylandInterfaces flags)
     registry->setEventQueue(s_waylandConnection.queue);
 
     QObject::connect(registry, &Registry::outputAnnounced, [=](quint32 name, quint32 version) {
-        Output *output = registry->createOutput(name, version, s_waylandConnection.registry);
+        KWayland::Client::Output *output = registry->createOutput(name, version, s_waylandConnection.registry);
         s_waylandConnection.outputs << output;
-        QObject::connect(output, &Output::removed, [=]() {
+        QObject::connect(output, &KWayland::Client::Output::removed, [=]() {
             output->deleteLater();
             s_waylandConnection.outputs.removeOne(output);
         });
-        QObject::connect(output, &Output::destroyed, [=]() {
+        QObject::connect(output, &KWayland::Client::Output::destroyed, [=]() {
             s_waylandConnection.outputs.removeOne(output);
         });
     });
@@ -646,12 +646,12 @@ QVector<KWin::Test::WaylandOutputDeviceV2 *> waylandOutputDevicesV2()
     return s_waylandConnection.outputDevicesV2;
 }
 
-bool waitForWaylandSurface(AbstractClient *client)
+bool waitForWaylandSurface(Window *window)
 {
-    if (client->surface()) {
+    if (window->surface()) {
         return true;
     }
-    QSignalSpy surfaceChangedSpy(client, &Toplevel::surfaceChanged);
+    QSignalSpy surfaceChangedSpy(window, &Window::surfaceChanged);
     return surfaceChangedSpy.wait();
 }
 
@@ -705,30 +705,30 @@ void render(KWayland::Client::Surface *surface, const QImage &img)
     surface->commit(KWayland::Client::Surface::CommitFlag::None);
 }
 
-AbstractClient *waitForWaylandWindowShown(int timeout)
+Window *waitForWaylandWindowShown(int timeout)
 {
-    QSignalSpy clientAddedSpy(workspace(), &Workspace::clientAdded);
-    if (!clientAddedSpy.isValid()) {
+    QSignalSpy windowAddedSpy(workspace(), &Workspace::windowAdded);
+    if (!windowAddedSpy.isValid()) {
         return nullptr;
     }
-    if (!clientAddedSpy.wait(timeout)) {
+    if (!windowAddedSpy.wait(timeout)) {
         return nullptr;
     }
-    return clientAddedSpy.first().first().value<AbstractClient *>();
+    return windowAddedSpy.first().first().value<Window *>();
 }
 
-AbstractClient *renderAndWaitForShown(KWayland::Client::Surface *surface, const QSize &size, const QColor &color, const QImage::Format &format, int timeout)
+Window *renderAndWaitForShown(KWayland::Client::Surface *surface, const QSize &size, const QColor &color, const QImage::Format &format, int timeout)
 {
-    QSignalSpy clientAddedSpy(workspace(), &Workspace::clientAdded);
-    if (!clientAddedSpy.isValid()) {
+    QSignalSpy windowAddedSpy(workspace(), &Workspace::windowAdded);
+    if (!windowAddedSpy.isValid()) {
         return nullptr;
     }
     render(surface, size, color, format);
     flushWaylandConnection();
-    if (!clientAddedSpy.wait(timeout)) {
+    if (!windowAddedSpy.wait(timeout)) {
         return nullptr;
     }
-    return clientAddedSpy.first().first().value<AbstractClient *>();
+    return windowAddedSpy.first().first().value<Window *>();
 }
 
 void flushWaylandConnection()
@@ -764,7 +764,7 @@ SubSurface *createSubSurface(KWayland::Client::Surface *surface, KWayland::Clien
     return s;
 }
 
-LayerSurfaceV1 *createLayerSurfaceV1(KWayland::Client::Surface *surface, const QString &scope, Output *output, LayerShellV1::layer layer)
+LayerSurfaceV1 *createLayerSurfaceV1(KWayland::Client::Surface *surface, const QString &scope, KWayland::Client::Output *output, LayerShellV1::layer layer)
 {
     LayerShellV1 *shell = s_waylandConnection.layerShellV1;
     if (!shell) {
@@ -783,7 +783,7 @@ LayerSurfaceV1 *createLayerSurfaceV1(KWayland::Client::Surface *surface, const Q
     return shellSurface;
 }
 
-QtWayland::zwp_input_panel_surface_v1 *createInputPanelSurfaceV1(KWayland::Client::Surface *surface, Output *output)
+QtWayland::zwp_input_panel_surface_v1 *createInputPanelSurfaceV1(KWayland::Client::Surface *surface, KWayland::Client::Output *output)
 {
     if (!s_waylandConnection.inputPanelV1) {
         qWarning() << "Unable to create the input panel surface. The interface input_panel global is not bound";
@@ -891,9 +891,9 @@ IdleInhibitorV1 *createIdleInhibitorV1(KWayland::Client::Surface *surface)
     return new IdleInhibitorV1(manager, surface);
 }
 
-bool waitForWindowDestroyed(AbstractClient *client)
+bool waitForWindowDestroyed(Window *window)
 {
-    QSignalSpy destroyedSpy(client, &QObject::destroyed);
+    QSignalSpy destroyedSpy(window, &QObject::destroyed);
     if (!destroyedSpy.isValid()) {
         return false;
     }

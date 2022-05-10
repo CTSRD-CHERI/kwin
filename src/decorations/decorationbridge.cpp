@@ -14,17 +14,15 @@
 #include "decorations_logging.h"
 #include "settings.h"
 // KWin core
-#include "abstract_client.h"
+#include "wayland/server_decoration_interface.h"
 #include "wayland_server.h"
+#include "window.h"
 #include "workspace.h"
 
 // KDecoration
 #include <KDecoration2/DecoratedClient>
 #include <KDecoration2/Decoration>
 #include <KDecoration2/DecorationSettings>
-
-// KWayland
-#include <KWaylandServer/server_decoration_interface.h>
 
 // Frameworks
 #include <KPluginFactory>
@@ -142,8 +140,8 @@ void DecorationBridge::initPlugin()
 
 static void recreateDecorations()
 {
-    Workspace::self()->forEachAbstractClient([](AbstractClient *c) {
-        c->invalidateDecoration();
+    Workspace::self()->forEachAbstractClient([](Window *window) {
+        window->invalidateDecoration();
     });
 }
 
@@ -232,7 +230,7 @@ void DecorationBridge::findTheme(const QVariantMap &map)
 
 std::unique_ptr<KDecoration2::DecoratedClientPrivate> DecorationBridge::createClient(KDecoration2::DecoratedClient *client, KDecoration2::Decoration *decoration)
 {
-    return std::unique_ptr<DecoratedClientImpl>(new DecoratedClientImpl(static_cast<AbstractClient *>(decoration->parent()), client, decoration));
+    return std::unique_ptr<DecoratedClientImpl>(new DecoratedClientImpl(static_cast<Window *>(decoration->parent()), client, decoration));
 }
 
 std::unique_ptr<KDecoration2::DecorationSettingsPrivate> DecorationBridge::settings(KDecoration2::DecorationSettings *parent)
@@ -240,7 +238,7 @@ std::unique_ptr<KDecoration2::DecorationSettingsPrivate> DecorationBridge::setti
     return std::unique_ptr<SettingsImpl>(new SettingsImpl(parent));
 }
 
-KDecoration2::Decoration *DecorationBridge::createDecoration(AbstractClient *client)
+KDecoration2::Decoration *DecorationBridge::createDecoration(Window *window)
 {
     if (m_noPlugin) {
         return nullptr;
@@ -253,7 +251,7 @@ KDecoration2::Decoration *DecorationBridge::createDecoration(AbstractClient *cli
     if (!m_theme.isEmpty()) {
         args.insert(QStringLiteral("theme"), m_theme);
     }
-    auto deco = m_factory->create<KDecoration2::Decoration>(client, QVariantList({args}));
+    auto deco = m_factory->create<KDecoration2::Decoration>(window, QVariantList({args}));
     deco->setSettings(m_settings);
     deco->init();
     return deco;

@@ -15,13 +15,13 @@ class Decoration;
 
 namespace KWin
 {
+class Window;
 class DecorationItem;
 class Deleted;
-class InternalClient;
+class InternalWindow;
 class Shadow;
 class ShadowItem;
 class SurfaceItem;
-class Toplevel;
 
 /**
  * The WindowItem class represents a window in the scene.
@@ -34,27 +34,46 @@ class KWIN_EXPORT WindowItem : public Item
     Q_OBJECT
 
 public:
+    enum {
+        PAINT_DISABLED_BY_HIDDEN = 1 << 0,
+        PAINT_DISABLED_BY_DELETE = 1 << 1,
+        PAINT_DISABLED_BY_DESKTOP = 1 << 2,
+        PAINT_DISABLED_BY_MINIMIZE = 1 << 3,
+        PAINT_DISABLED_BY_ACTIVITY = 1 << 5
+    };
+
     SurfaceItem *surfaceItem() const;
     DecorationItem *decorationItem() const;
     ShadowItem *shadowItem() const;
-    Toplevel *window() const;
+    Window *window() const;
+
+    void refVisible(int reason);
+    void unrefVisible(int reason);
 
 protected:
-    explicit WindowItem(Toplevel *window, Item *parent = nullptr);
+    explicit WindowItem(Window *window, Item *parent = nullptr);
     void updateSurfaceItem(SurfaceItem *surfaceItem);
 
 private Q_SLOTS:
-    void handleWindowClosed(Toplevel *original, Deleted *deleted);
+    void handleWindowClosed(Window *original, Deleted *deleted);
     void updateDecorationItem();
     void updateShadowItem();
     void updateSurfacePosition();
     void updateSurfaceVisibility();
 
 private:
-    Toplevel *m_window;
+    bool computeVisibility() const;
+    void updateVisibility();
+
+    Window *m_window;
     QScopedPointer<SurfaceItem> m_surfaceItem;
     QScopedPointer<DecorationItem> m_decorationItem;
     QScopedPointer<ShadowItem> m_shadowItem;
+    int m_forceVisibleByHiddenCount = 0;
+    int m_forceVisibleByDeleteCount = 0;
+    int m_forceVisibleByDesktopCount = 0;
+    int m_forceVisibleByMinimizeCount = 0;
+    int m_forceVisibleByActivityCount = 0;
 };
 
 /**
@@ -68,7 +87,7 @@ class KWIN_EXPORT WindowItemX11 : public WindowItem
     Q_OBJECT
 
 public:
-    explicit WindowItemX11(Toplevel *window, Item *parent = nullptr);
+    explicit WindowItemX11(Window *window, Item *parent = nullptr);
 
 private Q_SLOTS:
     void initialize();
@@ -82,7 +101,7 @@ class KWIN_EXPORT WindowItemWayland : public WindowItem
     Q_OBJECT
 
 public:
-    explicit WindowItemWayland(Toplevel *window, Item *parent = nullptr);
+    explicit WindowItemWayland(Window *window, Item *parent = nullptr);
 };
 
 /**
@@ -94,7 +113,7 @@ class KWIN_EXPORT WindowItemInternal : public WindowItem
     Q_OBJECT
 
 public:
-    explicit WindowItemInternal(InternalClient *window, Item *parent = nullptr);
+    explicit WindowItemInternal(InternalWindow *window, Item *parent = nullptr);
 };
 
 } // namespace KWin

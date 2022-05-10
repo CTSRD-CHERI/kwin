@@ -9,13 +9,13 @@
 
 #include "kwin_wayland_test.h"
 
-#include "abstract_client.h"
 #include "composite.h"
 #include "effectloader.h"
 #include "effects.h"
 #include "platform.h"
 #include "renderbackend.h"
 #include "wayland_server.h"
+#include "window.h"
 #include "workspace.h"
 
 #include <KWayland/Client/plasmashell.h>
@@ -43,7 +43,7 @@ void MinimizeAnimationTest::initTestCase()
 {
     qputenv("XDG_DATA_DIRS", QCoreApplication::applicationDirPath().toUtf8());
 
-    qRegisterMetaType<KWin::AbstractClient *>();
+    qRegisterMetaType<KWin::Window *>();
     QSignalSpy applicationStartedSpy(kwinApp(), &Application::started);
     QVERIFY(applicationStartedSpy.isValid());
     kwinApp()->platform()->setInitialWindowSize(QSize(1280, 1024));
@@ -94,7 +94,7 @@ void MinimizeAnimationTest::testMinimizeUnminimize_data()
 
 void MinimizeAnimationTest::testMinimizeUnminimize()
 {
-    // This test verifies that a minimize effect tries to animate a client
+    // This test verifies that a minimize effect tries to animate a window
     // when it's minimized or unminimized.
 
     using namespace KWayland::Client;
@@ -113,31 +113,31 @@ void MinimizeAnimationTest::testMinimizeUnminimize()
     plasmaPanelShellSurface->setRole(PlasmaShellSurface::Role::Panel);
     plasmaPanelShellSurface->setPosition(panelRect.topLeft());
     plasmaPanelShellSurface->setPanelBehavior(PlasmaShellSurface::PanelBehavior::AlwaysVisible);
-    AbstractClient *panel = Test::renderAndWaitForShown(panelSurface.data(), panelRect.size(), Qt::blue);
+    Window *panel = Test::renderAndWaitForShown(panelSurface.data(), panelRect.size(), Qt::blue);
     QVERIFY(panel);
     QVERIFY(panel->isDock());
     QCOMPARE(panel->frameGeometry(), panelRect);
     QVERIFY(plasmaWindowCreatedSpy.wait());
     QCOMPARE(plasmaWindowCreatedSpy.count(), 1);
 
-    // Create the test client.
+    // Create the test window.
     QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
     QVERIFY(!surface.isNull());
     QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
     QVERIFY(!shellSurface.isNull());
-    AbstractClient *client = Test::renderAndWaitForShown(surface.data(), QSize(100, 50), Qt::red);
-    QVERIFY(client);
+    Window *window = Test::renderAndWaitForShown(surface.data(), QSize(100, 50), Qt::red);
+    QVERIFY(window);
     QVERIFY(plasmaWindowCreatedSpy.wait());
     QCOMPARE(plasmaWindowCreatedSpy.count(), 2);
 
     // We have to set the minimized geometry because the squash effect needs it,
     // otherwise it won't start animation.
-    auto window = plasmaWindowCreatedSpy.last().first().value<PlasmaWindow *>();
-    QVERIFY(window);
+    auto plasmaWindow = plasmaWindowCreatedSpy.last().first().value<PlasmaWindow *>();
+    QVERIFY(plasmaWindow);
     const QRect iconRect = QRect(0, 0, 42, 36);
-    window->setMinimizedGeometry(panelSurface.data(), iconRect);
+    plasmaWindow->setMinimizedGeometry(panelSurface.data(), iconRect);
     Test::flushWaylandConnection();
-    QTRY_COMPARE(client->iconGeometry(), iconRect.translated(panel->frameGeometry().topLeft()));
+    QTRY_COMPARE(window->iconGeometry(), iconRect.translated(panel->frameGeometry().topLeft()));
 
     // Load effect that will be tested.
     QFETCH(QString, effectName);
@@ -151,14 +151,14 @@ void MinimizeAnimationTest::testMinimizeUnminimize()
     QVERIFY(!effect->isActive());
 
     // Start the minimize animation.
-    client->minimize();
+    window->minimize();
     QVERIFY(effect->isActive());
 
     // Eventually, the animation will be complete.
     QTRY_VERIFY(!effect->isActive());
 
     // Start the unminimize animation.
-    client->unminimize();
+    window->unminimize();
     QVERIFY(effect->isActive());
 
     // Eventually, the animation will be complete.
@@ -168,9 +168,9 @@ void MinimizeAnimationTest::testMinimizeUnminimize()
     panelSurface.reset();
     QVERIFY(Test::waitForWindowDestroyed(panel));
 
-    // Destroy the test client.
+    // Destroy the test window.
     surface.reset();
-    QVERIFY(Test::waitForWindowDestroyed(client));
+    QVERIFY(Test::waitForWindowDestroyed(window));
 }
 
 WAYLANDTEST_MAIN(MinimizeAnimationTest)

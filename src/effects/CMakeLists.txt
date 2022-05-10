@@ -3,6 +3,9 @@ add_definitions(-DTRANSLATION_DOMAIN=\"kwin_effects\" -DEFFECT_BUILTINS)
 
 include_directories(${KWin_SOURCE_DIR}/src) # for xcbutils.h
 
+add_subdirectory(private)
+
+
 function(kwin_add_effect_config name)
     list(REMOVE_ITEM ARGV ${name})
     kcoreaddons_add_plugin(${name} INSTALL_NAMESPACE "kwin/effects/configs" SOURCES ${ARGV})
@@ -74,7 +77,6 @@ add_subdirectory(kscreen)
 add_subdirectory(screentransform)
 add_subdirectory(magiclamp)
 add_subdirectory(overview)
-add_subdirectory(presentwindows)
 add_subdirectory(screenedge)
 add_subdirectory(showfps)
 add_subdirectory(showpaint)
@@ -83,6 +85,7 @@ add_subdirectory(slideback)
 add_subdirectory(slidingpopups)
 add_subdirectory(thumbnailaside)
 add_subdirectory(touchpoints)
+add_subdirectory(windowview)
 add_subdirectory(zoom)
 
 # OpenGL-specific effects

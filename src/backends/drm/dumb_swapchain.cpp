@@ -9,22 +9,21 @@
 
 #include "dumb_swapchain.h"
 #include "drm_buffer.h"
+#include "drm_dumb_buffer.h"
 #include "drm_gpu.h"
+#include "kwineffects.h"
 #include "logging.h"
 
 namespace KWin
 {
 
-DumbSwapchain::DumbSwapchain(DrmGpu *gpu, const QSize &size, uint32_t drmFormat, QImage::Format imageFormat)
+DumbSwapchain::DumbSwapchain(DrmGpu *gpu, const QSize &size, uint32_t drmFormat)
     : m_size(size)
     , m_format(drmFormat)
 {
     for (int i = 0; i < 2; i++) {
-        auto buffer = QSharedPointer<DrmDumbBuffer>::create(gpu, size, drmFormat);
-        if (!buffer->bufferId()) {
-            break;
-        }
-        if (!buffer->map(imageFormat)) {
+        auto buffer = DrmDumbBuffer::createDumbBuffer(gpu, size, drmFormat);
+        if (!buffer->map(QImage::Format::Format_ARGB32)) {
             break;
         }
         buffer->image()->fill(Qt::black);
@@ -40,24 +39,24 @@ DumbSwapchain::DumbSwapchain(DrmGpu *gpu, const QSize &size, uint32_t drmFormat,
     }
 }
 
-QSharedPointer<DrmDumbBuffer> DumbSwapchain::acquireBuffer(const QRect &geometry, QRegion *needsRepaint)
+std::shared_ptr<DrmDumbBuffer> DumbSwapchain::acquireBuffer(QRegion *needsRepaint)
 {
     if (m_slots.isEmpty()) {
         return {};
     }
     index = (index + 1) % m_slots.count();
     if (needsRepaint) {
-        *needsRepaint = m_damageJournal.accumulate(m_slots[index].age, geometry);
+        *needsRepaint = m_damageJournal.accumulate(m_slots[index].age, infiniteRegion());
     }
     return m_slots[index].buffer;
 }
 
-QSharedPointer<DrmDumbBuffer> DumbSwapchain::currentBuffer() const
+std::shared_ptr<DrmDumbBuffer> DumbSwapchain::currentBuffer() const
 {
     return m_slots[index].buffer;
 }
 
-void DumbSwapchain::releaseBuffer(QSharedPointer<DrmDumbBuffer> buffer, const QRegion &damage)
+void DumbSwapchain::releaseBuffer(const std::shared_ptr<DrmDumbBuffer> &buffer, const QRegion &damage)
 {
     Q_ASSERT(m_slots[index].buffer == buffer);
 

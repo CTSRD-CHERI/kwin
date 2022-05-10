@@ -6,16 +6,16 @@
 
 #include "surfaceitem_internal.h"
 #include "composite.h"
-#include "internal_client.h"
+#include "internalwindow.h"
 #include "scene.h"
 
 namespace KWin
 {
 
-SurfaceItemInternal::SurfaceItemInternal(InternalClient *window, Item *parent)
+SurfaceItemInternal::SurfaceItemInternal(InternalWindow *window, Item *parent)
     : SurfaceItem(window, parent)
 {
-    connect(window, &Toplevel::bufferGeometryChanged,
+    connect(window, &Window::bufferGeometryChanged,
             this, &SurfaceItemInternal::handleBufferGeometryChanged);
 
     setSize(window->bufferGeometry().size());
@@ -36,12 +36,12 @@ SurfacePixmap *SurfaceItemInternal::createPixmap()
     return new SurfacePixmapInternal(this);
 }
 
-void SurfaceItemInternal::handleBufferGeometryChanged(Toplevel *toplevel, const QRect &old)
+void SurfaceItemInternal::handleBufferGeometryChanged(Window *window, const QRect &old)
 {
-    if (toplevel->bufferGeometry().size() != old.size()) {
+    if (window->bufferGeometry().size() != old.size()) {
         discardPixmap();
     }
-    setSize(toplevel->bufferGeometry().size());
+    setSize(window->bufferGeometry().size());
 }
 
 SurfacePixmapInternal::SurfacePixmapInternal(SurfaceItemInternal *item, QObject *parent)
@@ -67,7 +67,7 @@ void SurfacePixmapInternal::create()
 
 void SurfacePixmapInternal::update()
 {
-    const Toplevel *window = m_item->window();
+    const Window *window = m_item->window();
 
     if (window->internalFramebufferObject()) {
         m_fbo = window->internalFramebufferObject();

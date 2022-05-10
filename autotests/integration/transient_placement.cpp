@@ -8,12 +8,14 @@
 */
 #include "kwin_wayland_test.h"
 
-#include "abstract_client.h"
-#include "abstract_output.h"
 #include "cursor.h"
+#include "output.h"
 #include "platform.h"
 #include "screens.h"
+#include "wayland/seat_interface.h"
+#include "wayland/surface_interface.h"
 #include "wayland_server.h"
+#include "window.h"
 #include "workspace.h"
 #include <kwineffects.h>
 
@@ -29,8 +31,6 @@
 #include <KWayland/Client/shm_pool.h>
 #include <KWayland/Client/surface.h>
 #include <KWayland/Client/touch.h>
-#include <KWaylandServer/seat_interface.h>
-#include <KWaylandServer/surface_interface.h>
 
 struct PopupLayout
 {
@@ -61,7 +61,7 @@ private Q_SLOTS:
 
 void TransientPlacementTest::initTestCase()
 {
-    qRegisterMetaType<KWin::AbstractClient *>();
+    qRegisterMetaType<KWin::Window *>();
     QSignalSpy applicationStartedSpy(kwinApp(), &Application::started);
     QVERIFY(applicationStartedSpy.isValid());
     kwinApp()->platform()->setInitialWindowSize(QSize(1280, 1024));
@@ -526,7 +526,7 @@ void TransientPlacementTest::testXdgPopupWithPanel()
     parent->setFullScreen(true);
     QVERIFY(surfaceConfigureRequestedSpy.wait());
     parentShellSurface->xdgSurface()->ack_configure(surfaceConfigureRequestedSpy.last().at(0).value<quint32>());
-    QSignalSpy frameGeometryChangedSpy{parent, &AbstractClient::frameGeometryChanged};
+    QSignalSpy frameGeometryChangedSpy{parent, &Window::frameGeometryChanged};
     QVERIFY(frameGeometryChangedSpy.isValid());
     Test::render(parentSurface.data(), toplevelConfigureRequestedSpy.last().at(0).toSize(), Qt::red);
     QVERIFY(frameGeometryChangedSpy.wait());

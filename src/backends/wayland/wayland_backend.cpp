@@ -24,6 +24,7 @@
 #include "cursor.h"
 #include "dpmsinputeventfilter.h"
 #include "input.h"
+#include "keyboard_input.h"
 #include "main.h"
 #include "pointer_input.h"
 #include "scene.h"
@@ -223,11 +224,11 @@ WaylandInputDevice::WaylandInputDevice(KWayland::Client::Keyboard *keyboard, Way
         }
         Q_EMIT keyChanged(key, state, time, this);
     });
-    connect(keyboard, &Keyboard::modifiersChanged, this, [this](quint32 depressed, quint32 latched, quint32 locked, quint32 group) {
-        m_seat->backend()->keyboardModifiers(depressed, latched, locked, group);
+    connect(keyboard, &Keyboard::modifiersChanged, this, [](quint32 depressed, quint32 latched, quint32 locked, quint32 group) {
+        input()->keyboard()->processModifiers(depressed, latched, locked, group);
     });
-    connect(keyboard, &Keyboard::keymapChanged, this, [this](int fd, quint32 size) {
-        m_seat->backend()->keymapChange(fd, size);
+    connect(keyboard, &Keyboard::keymapChanged, this, [](int fd, quint32 size) {
+        input()->keyboard()->processKeymapChange(fd, size);
     });
 }
 
@@ -1014,13 +1015,13 @@ void WaylandBackend::clearDpmsFilter()
     m_dpmsFilter.reset();
 }
 
-AbstractOutput *WaylandBackend::createVirtualOutput(const QString &name, const QSize &size, double scale)
+Output *WaylandBackend::createVirtualOutput(const QString &name, const QSize &size, double scale)
 {
     Q_UNUSED(name);
     return createOutput(m_outputs.constLast()->geometry().topRight(), size * scale);
 }
 
-void WaylandBackend::removeVirtualOutput(AbstractOutput *output)
+void WaylandBackend::removeVirtualOutput(Output *output)
 {
     WaylandOutput *waylandOutput = dynamic_cast<WaylandOutput *>(output);
     if (waylandOutput && m_outputs.removeAll(waylandOutput)) {

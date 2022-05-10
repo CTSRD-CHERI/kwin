@@ -9,8 +9,10 @@
 */
 
 #include "kwinanimationeffect.h"
+#include "kwinglutils.h"
 #include "anidata_p.h"
 
+#include <QAction>
 #include <QDateTime>
 #include <QTimer>
 #include <QVector3D>
@@ -206,7 +208,7 @@ void AnimationEffect::validate(Attribute a, uint &meta, FPx2 *from, FPx2 *to, co
     }
 }
 
-quint64 AnimationEffect::p_animate(EffectWindow *w, Attribute a, uint meta, int ms, FPx2 to, const QEasingCurve &curve, int delay, FPx2 from, bool keepAtTarget, bool fullScreenEffect, bool keepAlive)
+quint64 AnimationEffect::p_animate(EffectWindow *w, Attribute a, uint meta, int ms, FPx2 to, const QEasingCurve &curve, int delay, FPx2 from, bool keepAtTarget, bool fullScreenEffect, bool keepAlive, GLShader *shader)
 {
     const bool waitAtSource = from.isValid();
     validate(a, meta, &from, &to, w);
@@ -248,13 +250,15 @@ quint64 AnimationEffect::p_animate(EffectWindow *w, Attribute a, uint meta, int 
         waitAtSource, // Whether the animation should be kept at source
         fullscreen, // Full screen effect lock
         keepAlive, // Keep alive flag
-        previousPixmap // Previous window pixmap lock
+        previousPixmap, // Previous window pixmap lock
+        shader
         ));
 
     const quint64 ret_id = ++d->m_animCounter;
     AniData &animation = it->first.last();
     animation.id = ret_id;
 
+    animation.visibleRef = EffectWindowVisibleRef(w, EffectWindow::PAINT_DISABLED_BY_MINIMIZE | EffectWindow::PAINT_DISABLED_BY_DESKTOP | EffectWindow::PAINT_DISABLED_BY_DELETE);
     animation.timeLine.setDirection(TimeLine::Forward);
     animation.timeLine.setDuration(std::chrono::milliseconds(ms));
     animation.timeLine.setEasingCurve(curve);
@@ -278,6 +282,9 @@ quint64 AnimationEffect::p_animate(EffectWindow *w, Attribute a, uint meta, int 
         }
     } else {
         triggerRepaint();
+    }
+    if (shader) {
+        DeformEffect::redirect(w);
     }
     return ret_id;
 }
@@ -303,6 +310,31 @@ bool AnimationEffect::retarget(quint64 animationId, FPx2 newTarget, int newRemai
                 anim->timeLine.setDuration(std::chrono::milliseconds(newRemainingTime));
                 anim->timeLine.reset();
 
+                return true;
+            }
+        }
+    }
+    return false; // no animation found
+}
+
+bool AnimationEffect::freezeInTime(quint64 animationId, qint64 frozenTime)
+{
+    Q_D(AnimationEffect);
+
+    if (animationId == d->m_justEndedAnimation) {
+        return false; // this is just ending, do not try to retarget it
+    }
+    for (AniMap::iterator entry = d->m_animations.begin(),
+                          mapEnd = d->m_animations.end();
+         entry != mapEnd; ++entry) {
+        for (QList<AniData>::iterator anim = entry->first.begin(),
+                                      animEnd = entry->first.end();
+             anim != animEnd; ++anim) {
+            if (anim->id == animationId) {
+                if (frozenTime >= 0) {
+                    anim->timeLine.setElapsed(std::chrono::milliseconds(frozenTime));
+                }
+                anim->frozenTime = frozenTime;
                 return true;
             }
         }
@@ -379,6 +411,9 @@ bool AnimationEffect::cancel(quint64 animationId)
     for (AniMap::iterator entry = d->m_animations.begin(), mapEnd = d->m_animations.end(); entry != mapEnd; ++entry) {
         for (QList<AniData>::iterator anim = entry->first.begin(), animEnd = entry->first.end(); anim != animEnd; ++anim) {
             if (anim->id == animationId) {
+                if (anim->shader && std::none_of(entry->first.begin(), entry->first.end(), [animationId] (const auto &anim) { return anim.id != animationId && anim.shader; })) {
+                    unredirect(entry.key());
+                }
                 entry->first.erase(anim); // remove the animation
                 if (entry->first.isEmpty()) { // no other animations on the window, release it.
                     d->m_animations.erase(entry);
@@ -405,7 +440,7 @@ void AnimationEffect::prePaintScreen(ScreenPrePaintData &data, std::chrono::mill
     for (auto entry = d->m_animations.begin(); entry != d->m_animations.end(); ++entry) {
         for (auto anim = entry->first.begin(); anim != entry->first.end(); ++anim) {
             if (anim->startTime <= clock()) {
-                if (anim->lastPresentTime.count()) {
+                if (anim->lastPresentTime.count() && anim->frozenTime < 0) {
                     anim->timeLine.update(presentTime - anim->lastPresentTime);
                 }
                 anim->lastPresentTime = presentTime;
@@ -470,32 +505,16 @@ void AnimationEffect::prePaintWindow(EffectWindow *w, WindowPrePaintData &data, 
     Q_D(AnimationEffect);
     AniMap::const_iterator entry = d->m_animations.constFind(w);
     if (entry != d->m_animations.constEnd()) {
-        bool isUsed = false;
-        bool paintDeleted = false;
         for (QList<AniData>::const_iterator anim = entry->first.constBegin(); anim != entry->first.constEnd(); ++anim) {
             if (anim->startTime > clock() && !anim->waitAtSource) {
                 continue;
             }
 
-            isUsed = true;
             if (anim->attribute == Opacity || anim->attribute == CrossFadePrevious) {
                 data.setTranslucent();
             } else if (!(anim->attribute == Brightness || anim->attribute == Saturation)) {
                 data.setTransformed();
             }
-
-            paintDeleted |= anim->keepAlive;
-        }
-        if (isUsed) {
-            if (w->isMinimized()) {
-                w->enablePainting(EffectWindow::PAINT_DISABLED_BY_MINIMIZE);
-            } else if (w->isDeleted() && paintDeleted) {
-                w->enablePainting(EffectWindow::PAINT_DISABLED_BY_DELETE);
-            } else if (!w->isOnCurrentDesktop()) {
-                w->enablePainting(EffectWindow::PAINT_DISABLED_BY_DESKTOP);
-            }
-            //            if( !w->isPaintingEnabled() && !effects->activeFullScreenEffect() )
-            //                effects->addLayerRepaint(w->expandedGeometry());
         }
     }
     effects->prePaintWindow(w, data, presentTime);
@@ -616,11 +635,27 @@ void AnimationEffect::paintWindow(EffectWindow *w, int mask, QRegion region, Win
             case CrossFadePrevious:
                 data.setCrossFadeProgress(progress(*anim));
                 break;
+            case Shader:
+                if (anim->shader && anim->shader->isValid()) {
+                    ShaderBinder binder{anim->shader};
+                    anim->shader->setUniform("animationProgress", progress(*anim));
+                    setShader(w, anim->shader);
+                }
+                break;
+            case ShaderUniform:
+                if (anim->shader && anim->shader->isValid()) {
+                    ShaderBinder binder{anim->shader};
+                    anim->shader->setUniform("animationProgress", progress(*anim));
+                    anim->shader->setUniform(anim->meta, interpolated(*anim));
+                    setShader(w, anim->shader);
+                }
+                break;
             default:
                 break;
             }
         }
     }
+
     effects->paintWindow(w, mask, region, data);
 }
 
@@ -641,6 +676,9 @@ void AnimationEffect::postPaintScreen()
             }
             EffectWindow *window = entry.key();
             d->m_justEndedAnimation = anim->id;
+            if (anim->shader && std::none_of(entry->first.begin(), entry->first.end(), [anim] (const auto &other) { return anim->id != other.id && other.shader; })) {
+                unredirect(window);
+            }
             animationEnded(window, anim->attribute, anim->meta);
             d->m_justEndedAnimation = 0;
             // NOTICE animationEnded is an external call and might have called "::animate"
@@ -828,6 +866,8 @@ void AnimationEffect::updateLayerRepaints()
             case Brightness:
             case Saturation:
             case CrossFadePrevious:
+            case Shader:
+            case ShaderUniform:
                 createRegion = true;
                 break;
             case Rotation:
@@ -943,21 +983,11 @@ void AnimationEffect::_windowClosed(EffectWindow *w)
         return;
     }
 
-    KeepAliveLockPtr keepAliveLock;
-
     QList<AniData> &animations = (*it).first;
-    for (auto animationIt = animations.begin();
-         animationIt != animations.end();
-         ++animationIt) {
-        if (!(*animationIt).keepAlive) {
-            continue;
+    for (auto animationIt = animations.begin(); animationIt != animations.end(); ++animationIt) {
+        if (animationIt->keepAlive) {
+            animationIt->deletedRef = EffectWindowDeletedRef(w);
         }
-
-        if (keepAliveLock.isNull()) {
-            keepAliveLock = KeepAliveLockPtr::create(w);
-        }
-
-        (*animationIt).keepAliveLock = keepAliveLock;
     }
 }
 

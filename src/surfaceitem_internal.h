@@ -13,7 +13,7 @@ class QOpenGLFramebufferObject;
 namespace KWin
 {
 
-class InternalClient;
+class InternalWindow;
 
 /**
  * The SurfaceItemInternal class represents an internal surface in the scene.
@@ -23,12 +23,12 @@ class KWIN_EXPORT SurfaceItemInternal : public SurfaceItem
     Q_OBJECT
 
 public:
-    explicit SurfaceItemInternal(InternalClient *window, Item *parent = nullptr);
+    explicit SurfaceItemInternal(InternalWindow *window, Item *parent = nullptr);
 
     QRegion shape() const override;
 
 private Q_SLOTS:
-    void handleBufferGeometryChanged(Toplevel *toplevel, const QRect &old);
+    void handleBufferGeometryChanged(Window *window, const QRect &old);
 
 protected:
     SurfacePixmap *createPixmap() override;

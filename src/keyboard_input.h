@@ -32,11 +32,11 @@ typedef uint32_t xkb_layout_index_t;
 namespace KWin
 {
 
+class Window;
 class InputDevice;
 class InputRedirection;
 class KeyboardLayout;
 class ModifiersChangedSpy;
-class Toplevel;
 
 class KWIN_EXPORT KeyboardInputRedirection : public QObject
 {
@@ -83,7 +83,7 @@ private:
     InputRedirection *m_input;
     bool m_inited = false;
     QScopedPointer<Xkb> m_xkb;
-    QMetaObject::Connection m_activeClientSurfaceChangedConnection;
+    QMetaObject::Connection m_activeWindowSurfaceChangedConnection;
     ModifiersChangedSpy *m_modifiersChangedSpy = nullptr;
     KeyboardLayout *m_keyboardLayout = nullptr;
 };

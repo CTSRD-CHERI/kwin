@@ -20,19 +20,18 @@
 #include <kwinglplatform.h>
 #include <kwinoffscreenquickview.h>
 
-#include "abstract_client.h"
-#include "abstract_output.h"
 #include "composite.h"
 #include "cursor.h"
 #include "decorations/decoratedclient.h"
 #include "effects.h"
-#include "lanczosfilter.h"
 #include "main.h"
+#include "output.h"
 #include "overlaywindow.h"
 #include "renderloop.h"
 #include "shadowitem.h"
 #include "surfaceitem.h"
 #include "utils/common.h"
+#include "window.h"
 #include "windowitem.h"
 
 #include <cmath>
@@ -76,11 +75,6 @@ SceneOpenGL::~SceneOpenGL()
     if (init_ok) {
         makeOpenGLContextCurrent();
     }
-    if (m_lanczosFilter) {
-        delete m_lanczosFilter;
-        m_lanczosFilter = nullptr;
-    }
-    SceneOpenGL::EffectFrame::cleanup();
 }
 
 SceneOpenGL *SceneOpenGL::createScene(OpenGLBackend *backend, QObject *parent)
@@ -97,8 +91,9 @@ bool SceneOpenGL::initFailed() const
     return !init_ok;
 }
 
-void SceneOpenGL::paint(const QRegion &region)
+void SceneOpenGL::paint(RenderTarget *renderTarget, const QRegion &region)
 {
+    Q_UNUSED(renderTarget)
     GLVertexBuffer::streamingBuffer()->beginFrame();
     paintScreen(region);
     GLVertexBuffer::streamingBuffer()->endOfFrame();
@@ -151,15 +146,6 @@ void SceneOpenGL::paintBackground(const QRegion &region)
     }
 }
 
-void SceneOpenGL::paintDesktop(int desktop, int mask, const QRegion &region, ScreenPaintData &data)
-{
-    const QRect r = region.boundingRect();
-    glEnable(GL_SCISSOR_TEST);
-    glScissor(r.x(), geometry().size().height() - r.y() - r.height(), r.width(), r.height());
-    KWin::Scene::paintDesktop(desktop, mask, region, data);
-    glDisable(GL_SCISSOR_TEST);
-}
-
 void SceneOpenGL::paintOffscreenQuickView(OffscreenQuickView *w)
 {
     GLTexture *t = w->bufferAsTexture();
@@ -209,14 +195,9 @@ bool SceneOpenGL::supportsNativeFence() const
     return m_backend->supportsNativeFence();
 }
 
-Scene::EffectFrame *SceneOpenGL::createEffectFrame(EffectFrameImpl *frame)
+Shadow *SceneOpenGL::createShadow(Window *window)
 {
-    return new SceneOpenGL::EffectFrame(frame, this);
-}
-
-Shadow *SceneOpenGL::createShadow(Toplevel *toplevel)
-{
-    return new SceneOpenGLShadow(toplevel);
+    return new SceneOpenGLShadow(window);
 }
 
 DecorationRenderer *SceneOpenGL::createDecorationRenderer(Decoration::DecoratedClientImpl *impl)
@@ -234,7 +215,7 @@ QVector<QByteArray> SceneOpenGL::openGLPlatformInterfaceExtensions() const
     return m_backend->extensions().toVector();
 }
 
-QSharedPointer<GLTexture> SceneOpenGL::textureForOutput(AbstractOutput *output) const
+QSharedPointer<GLTexture> SceneOpenGL::textureForOutput(Output *output) const
 {
     return m_backend->textureForOutput(output);
 }
@@ -305,46 +286,7 @@ void SceneOpenGL::doPaintBackground(const QVector<float> &vertices)
     vbo->render(GL_TRIANGLES);
 }
 
-Scene::Window *SceneOpenGL::createWindow(Toplevel *t)
-{
-    return new OpenGLWindow(t, this);
-}
-
-void SceneOpenGL::finalDrawWindow(EffectWindowImpl *w, int mask, const QRegion &region, WindowPaintData &data)
-{
-    if (waylandServer() && waylandServer()->isScreenLocked() && !w->window()->isLockScreen() && !w->window()->isInputMethod()) {
-        return;
-    }
-    performPaintWindow(w, mask, region, data);
-}
-
-void SceneOpenGL::performPaintWindow(EffectWindowImpl *w, int mask, const QRegion &region, WindowPaintData &data)
-{
-    if (mask & PAINT_WINDOW_LANCZOS) {
-        if (!m_lanczosFilter) {
-            m_lanczosFilter = new LanczosFilter(this);
-        }
-        m_lanczosFilter->performPaint(w, mask, region, data);
-    } else {
-        w->sceneWindow()->performPaint(mask, region, data);
-    }
-}
-
-//****************************************
-// OpenGLWindow
-//****************************************
-
-OpenGLWindow::OpenGLWindow(Toplevel *toplevel, SceneOpenGL *scene)
-    : Scene::Window(toplevel)
-    , m_scene(scene)
-{
-}
-
-OpenGLWindow::~OpenGLWindow()
-{
-}
-
-QVector4D OpenGLWindow::modulate(float opacity, float brightness) const
+QVector4D SceneOpenGL::modulate(float opacity, float brightness) const
 {
     const float a = opacity;
     const float rgb = opacity * brightness;
@@ -352,7 +294,7 @@ QVector4D OpenGLWindow::modulate(float opacity, float brightness) const
     return QVector4D(rgb, rgb, rgb, a);
 }
 
-void OpenGLWindow::setBlendEnabled(bool enabled)
+void SceneOpenGL::setBlendEnabled(bool enabled)
 {
     if (enabled && !m_blendingEnabled) {
         glEnable(GL_BLEND);
@@ -392,7 +334,7 @@ static GLTexture *bindSurfaceTexture(SurfaceItem *surfaceItem)
     return platformSurfaceTexture->texture();
 }
 
-static WindowQuadList clipQuads(const Item *item, const OpenGLWindow::RenderContext *context)
+static WindowQuadList clipQuads(const Item *item, const SceneOpenGL::RenderContext *context)
 {
     const WindowQuadList quads = item->quads();
     if (context->clip != infiniteRegion() && !context->hardwareClipping) {
@@ -423,7 +365,7 @@ static WindowQuadList clipQuads(const Item *item, const OpenGLWindow::RenderCont
     return quads;
 }
 
-void OpenGLWindow::createRenderNode(Item *item, RenderContext *context)
+void SceneOpenGL::createRenderNode(Item *item, RenderContext *context)
 {
     const QList<Item *> sortedChildItems = item->sortedChildItems();
 
@@ -436,7 +378,7 @@ void OpenGLWindow::createRenderNode(Item *item, RenderContext *context)
         if (childItem->z() >= 0) {
             break;
         }
-        if (childItem->isVisible()) {
+        if (childItem->explicitVisible()) {
             createRenderNode(childItem, context);
         }
     }
@@ -491,7 +433,7 @@ void OpenGLWindow::createRenderNode(Item *item, RenderContext *context)
         if (childItem->z() < 0) {
             continue;
         }
-        if (childItem->isVisible()) {
+        if (childItem->explicitVisible()) {
             createRenderNode(childItem, context);
         }
     }
@@ -499,7 +441,7 @@ void OpenGLWindow::createRenderNode(Item *item, RenderContext *context)
     context->transforms.pop();
 }
 
-QMatrix4x4 OpenGLWindow::modelViewProjectionMatrix(int mask, const WindowPaintData &data) const
+QMatrix4x4 SceneOpenGL::modelViewProjectionMatrix(int mask, const WindowPaintData &data) const
 {
     const QMatrix4x4 pMatrix = data.projectionMatrix();
     const QMatrix4x4 mvMatrix = data.modelViewMatrix();
@@ -517,10 +459,10 @@ QMatrix4x4 OpenGLWindow::modelViewProjectionMatrix(int mask, const WindowPaintDa
     // with the default projection matrix.  If the effect hasn't specified a
     // model-view matrix, mvMatrix will be the identity matrix.
     if (mask & Scene::PAINT_SCREEN_TRANSFORMED) {
-        return m_scene->screenProjectionMatrix() * mvMatrix;
+        return screenProjectionMatrix() * mvMatrix;
     }
 
-    return m_scene->renderTargetProjectionMatrix() * mvMatrix;
+    return renderTargetProjectionMatrix() * mvMatrix;
 }
 
 static QMatrix4x4 transformForPaintData(int mask, const WindowPaintData &data)
@@ -550,7 +492,7 @@ static QMatrix4x4 transformForPaintData(int mask, const WindowPaintData &data)
     return matrix;
 }
 
-void OpenGLWindow::performPaint(int mask, const QRegion &region, const WindowPaintData &data)
+void SceneOpenGL::render(Item *item, int mask, const QRegion &region, const WindowPaintData &data)
 {
     if (region.isEmpty()) {
         return;
@@ -564,9 +506,9 @@ void OpenGLWindow::performPaint(int mask, const QRegion &region, const WindowPai
 
     renderContext.transforms.push(QMatrix4x4());
 
-    windowItem()->setTransform(transformForPaintData(mask, data));
+    item->setTransform(transformForPaintData(mask, data));
 
-    createRenderNode(windowItem(), &renderContext);
+    createRenderNode(item, &renderContext);
 
     int quadCount = 0;
     for (const RenderNode &node : qAsConst(renderContext.renderNodes)) {
@@ -638,7 +580,7 @@ void OpenGLWindow::performPaint(int mask, const QRegion &region, const WindowPai
     // The scissor region must be in the render target local coordinate system.
     QRegion scissorRegion = infiniteRegion();
     if (renderContext.hardwareClipping) {
-        scissorRegion = m_scene->mapToRenderTarget(region);
+        scissorRegion = mapToRenderTarget(region);
     }
 
     const QMatrix4x4 modelViewProjection = modelViewProjectionMatrix(mask, data);
@@ -677,441 +619,6 @@ void OpenGLWindow::performPaint(int mask, const QRegion &region, const WindowPai
     if (renderContext.hardwareClipping) {
         glDisable(GL_SCISSOR_TEST);
     }
-}
-
-//****************************************
-// SceneOpenGL::EffectFrame
-//****************************************
-
-GLTexture *SceneOpenGL::EffectFrame::m_unstyledTexture = nullptr;
-QPixmap *SceneOpenGL::EffectFrame::m_unstyledPixmap = nullptr;
-
-SceneOpenGL::EffectFrame::EffectFrame(EffectFrameImpl *frame, SceneOpenGL *scene)
-    : Scene::EffectFrame(frame)
-    , m_texture(nullptr)
-    , m_textTexture(nullptr)
-    , m_oldTextTexture(nullptr)
-    , m_textPixmap(nullptr)
-    , m_iconTexture(nullptr)
-    , m_oldIconTexture(nullptr)
-    , m_selectionTexture(nullptr)
-    , m_unstyledVBO(nullptr)
-    , m_scene(scene)
-{
-}
-
-SceneOpenGL::EffectFrame::~EffectFrame()
-{
-    delete m_texture;
-    delete m_textTexture;
-    delete m_textPixmap;
-    delete m_oldTextTexture;
-    delete m_iconTexture;
-    delete m_oldIconTexture;
-    delete m_selectionTexture;
-    delete m_unstyledVBO;
-}
-
-void SceneOpenGL::EffectFrame::free()
-{
-    glFlush();
-    delete m_texture;
-    m_texture = nullptr;
-    delete m_textTexture;
-    m_textTexture = nullptr;
-    delete m_textPixmap;
-    m_textPixmap = nullptr;
-    delete m_iconTexture;
-    m_iconTexture = nullptr;
-    delete m_selectionTexture;
-    m_selectionTexture = nullptr;
-    delete m_unstyledVBO;
-    m_unstyledVBO = nullptr;
-    delete m_oldIconTexture;
-    m_oldIconTexture = nullptr;
-    delete m_oldTextTexture;
-    m_oldTextTexture = nullptr;
-}
-
-void SceneOpenGL::EffectFrame::freeIconFrame()
-{
-    delete m_iconTexture;
-    m_iconTexture = nullptr;
-}
-
-void SceneOpenGL::EffectFrame::freeTextFrame()
-{
-    delete m_textTexture;
-    m_textTexture = nullptr;
-    delete m_textPixmap;
-    m_textPixmap = nullptr;
-}
-
-void SceneOpenGL::EffectFrame::freeSelection()
-{
-    delete m_selectionTexture;
-    m_selectionTexture = nullptr;
-}
-
-void SceneOpenGL::EffectFrame::crossFadeIcon()
-{
-    delete m_oldIconTexture;
-    m_oldIconTexture = m_iconTexture;
-    m_iconTexture = nullptr;
-}
-
-void SceneOpenGL::EffectFrame::crossFadeText()
-{
-    delete m_oldTextTexture;
-    m_oldTextTexture = m_textTexture;
-    m_textTexture = nullptr;
-}
-
-void SceneOpenGL::EffectFrame::render(const QRegion &_region, double opacity, double frameOpacity)
-{
-    if (m_effectFrame->geometry().isEmpty()) {
-        return; // Nothing to display
-    }
-
-    Q_UNUSED(_region); // TODO: Old region doesn't seem to work with OpenGL
-
-    GLShader *shader = m_effectFrame->shader();
-    if (!shader) {
-        shader = ShaderManager::instance()->pushShader(ShaderTrait::MapTexture | ShaderTrait::Modulate);
-    } else if (shader) {
-        ShaderManager::instance()->pushShader(shader);
-    }
-
-    if (shader) {
-        shader->setUniform(GLShader::ModulationConstant, QVector4D(1.0, 1.0, 1.0, 1.0));
-        shader->setUniform(GLShader::Saturation, 1.0f);
-    }
-    const QMatrix4x4 projection = m_scene->renderTargetProjectionMatrix();
-
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-    // Render the actual frame
-    if (m_effectFrame->style() == EffectFrameUnstyled) {
-        if (!m_unstyledTexture) {
-            updateUnstyledTexture();
-        }
-
-        if (!m_unstyledVBO) {
-            m_unstyledVBO = new GLVertexBuffer(GLVertexBuffer::Static);
-            QRect area = m_effectFrame->geometry();
-            area.moveTo(0, 0);
-            area.adjust(-5, -5, 5, 5);
-
-            const int roundness = 5;
-            QVector<float> verts, texCoords;
-            verts.reserve(84);
-            texCoords.reserve(84);
-
-            // top left
-            verts << area.left() << area.top();
-            texCoords << 0.0f << 0.0f;
-            verts << area.left() << area.top() + roundness;
-            texCoords << 0.0f << 0.5f;
-            verts << area.left() + roundness << area.top();
-            texCoords << 0.5f << 0.0f;
-            verts << area.left() + roundness << area.top() + roundness;
-            texCoords << 0.5f << 0.5f;
-            verts << area.left() << area.top() + roundness;
-            texCoords << 0.0f << 0.5f;
-            verts << area.left() + roundness << area.top();
-            texCoords << 0.5f << 0.0f;
-            // top
-            verts << area.left() + roundness << area.top();
-            texCoords << 0.5f << 0.0f;
-            verts << area.left() + roundness << area.top() + roundness;
-            texCoords << 0.5f << 0.5f;
-            verts << area.right() - roundness << area.top();
-            texCoords << 0.5f << 0.0f;
-            verts << area.left() + roundness << area.top() + roundness;
-            texCoords << 0.5f << 0.5f;
-            verts << area.right() - roundness << area.top() + roundness;
-            texCoords << 0.5f << 0.5f;
-            verts << area.right() - roundness << area.top();
-            texCoords << 0.5f << 0.0f;
-            // top right
-            verts << area.right() - roundness << area.top();
-            texCoords << 0.5f << 0.0f;
-            verts << area.right() - roundness << area.top() + roundness;
-            texCoords << 0.5f << 0.5f;
-            verts << area.right() << area.top();
-            texCoords << 1.0f << 0.0f;
-            verts << area.right() - roundness << area.top() + roundness;
-            texCoords << 0.5f << 0.5f;
-            verts << area.right() << area.top() + roundness;
-            texCoords << 1.0f << 0.5f;
-            verts << area.right() << area.top();
-            texCoords << 1.0f << 0.0f;
-            // bottom left
-            verts << area.left() << area.bottom() - roundness;
-            texCoords << 0.0f << 0.5f;
-            verts << area.left() << area.bottom();
-            texCoords << 0.0f << 1.0f;
-            verts << area.left() + roundness << area.bottom() - roundness;
-            texCoords << 0.5f << 0.5f;
-            verts << area.left() + roundness << area.bottom();
-            texCoords << 0.5f << 1.0f;
-            verts << area.left() << area.bottom();
-            texCoords << 0.0f << 1.0f;
-            verts << area.left() + roundness << area.bottom() - roundness;
-            texCoords << 0.5f << 0.5f;
-            // bottom
-            verts << area.left() + roundness << area.bottom() - roundness;
-            texCoords << 0.5f << 0.5f;
-            verts << area.left() + roundness << area.bottom();
-            texCoords << 0.5f << 1.0f;
-            verts << area.right() - roundness << area.bottom() - roundness;
-            texCoords << 0.5f << 0.5f;
-            verts << area.left() + roundness << area.bottom();
-            texCoords << 0.5f << 1.0f;
-            verts << area.right() - roundness << area.bottom();
-            texCoords << 0.5f << 1.0f;
-            verts << area.right() - roundness << area.bottom() - roundness;
-            texCoords << 0.5f << 0.5f;
-            // bottom right
-            verts << area.right() - roundness << area.bottom() - roundness;
-            texCoords << 0.5f << 0.5f;
-            verts << area.right() - roundness << area.bottom();
-            texCoords << 0.5f << 1.0f;
-            verts << area.right() << area.bottom() - roundness;
-            texCoords << 1.0f << 0.5f;
-            verts << area.right() - roundness << area.bottom();
-            texCoords << 0.5f << 1.0f;
-            verts << area.right() << area.bottom();
-            texCoords << 1.0f << 1.0f;
-            verts << area.right() << area.bottom() - roundness;
-            texCoords << 1.0f << 0.5f;
-            // center
-            verts << area.left() << area.top() + roundness;
-            texCoords << 0.0f << 0.5f;
-            verts << area.left() << area.bottom() - roundness;
-            texCoords << 0.0f << 0.5f;
-            verts << area.right() << area.top() + roundness;
-            texCoords << 1.0f << 0.5f;
-            verts << area.left() << area.bottom() - roundness;
-            texCoords << 0.0f << 0.5f;
-            verts << area.right() << area.bottom() - roundness;
-            texCoords << 1.0f << 0.5f;
-            verts << area.right() << area.top() + roundness;
-            texCoords << 1.0f << 0.5f;
-
-            m_unstyledVBO->setData(verts.count() / 2, 2, verts.data(), texCoords.data());
-        }
-
-        if (shader) {
-            const float a = opacity * frameOpacity;
-            shader->setUniform(GLShader::ModulationConstant, QVector4D(a, a, a, a));
-        }
-
-        m_unstyledTexture->bind();
-        const QPoint pt = m_effectFrame->geometry().topLeft();
-
-        QMatrix4x4 mvp(projection);
-        mvp.translate(pt.x(), pt.y());
-        shader->setUniform(GLShader::ModelViewProjectionMatrix, mvp);
-
-        m_unstyledVBO->render(GL_TRIANGLES);
-        m_unstyledTexture->unbind();
-    } else if (m_effectFrame->style() == EffectFrameStyled) {
-        if (!m_texture) { // Lazy creation
-            updateTexture();
-        }
-
-        if (shader) {
-            const float a = opacity * frameOpacity;
-            shader->setUniform(GLShader::ModulationConstant, QVector4D(a, a, a, a));
-        }
-        m_texture->bind();
-        qreal left, top, right, bottom;
-        m_effectFrame->frame().getMargins(left, top, right, bottom); // m_geometry is the inner geometry
-        const QRect rect = m_effectFrame->geometry().adjusted(-left, -top, right, bottom);
-
-        QMatrix4x4 mvp(projection);
-        mvp.translate(rect.x(), rect.y());
-        shader->setUniform(GLShader::ModelViewProjectionMatrix, mvp);
-
-        m_texture->render(rect);
-        m_texture->unbind();
-    }
-    if (!m_effectFrame->selection().isNull()) {
-        if (!m_selectionTexture) { // Lazy creation
-            QPixmap pixmap = m_effectFrame->selectionFrame().framePixmap();
-            if (!pixmap.isNull()) {
-                m_selectionTexture = new GLTexture(pixmap);
-            }
-        }
-        if (m_selectionTexture) {
-            if (shader) {
-                const float a = opacity * frameOpacity;
-                shader->setUniform(GLShader::ModulationConstant, QVector4D(a, a, a, a));
-            }
-            QMatrix4x4 mvp(projection);
-            mvp.translate(m_effectFrame->selection().x(), m_effectFrame->selection().y());
-            shader->setUniform(GLShader::ModelViewProjectionMatrix, mvp);
-            glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-            m_selectionTexture->bind();
-            m_selectionTexture->render(m_effectFrame->selection());
-            m_selectionTexture->unbind();
-            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        }
-    }
-
-    // Render icon
-    if (!m_effectFrame->icon().isNull() && !m_effectFrame->iconSize().isEmpty()) {
-        QPoint topLeft(m_effectFrame->geometry().x(),
-                       m_effectFrame->geometry().center().y() - m_effectFrame->iconSize().height() / 2);
-
-        QMatrix4x4 mvp(projection);
-        mvp.translate(topLeft.x(), topLeft.y());
-        shader->setUniform(GLShader::ModelViewProjectionMatrix, mvp);
-
-        if (m_effectFrame->isCrossFade() && m_oldIconTexture) {
-            if (shader) {
-                const float a = opacity * (1.0 - m_effectFrame->crossFadeProgress());
-                shader->setUniform(GLShader::ModulationConstant, QVector4D(a, a, a, a));
-            }
-
-            m_oldIconTexture->bind();
-            m_oldIconTexture->render(QRect(topLeft, m_effectFrame->iconSize()));
-            m_oldIconTexture->unbind();
-            if (shader) {
-                const float a = opacity * m_effectFrame->crossFadeProgress();
-                shader->setUniform(GLShader::ModulationConstant, QVector4D(a, a, a, a));
-            }
-        } else {
-            if (shader) {
-                const QVector4D constant(opacity, opacity, opacity, opacity);
-                shader->setUniform(GLShader::ModulationConstant, constant);
-            }
-        }
-
-        if (!m_iconTexture) { // lazy creation
-            m_iconTexture = new GLTexture(m_effectFrame->icon().pixmap(m_effectFrame->iconSize()));
-        }
-        m_iconTexture->bind();
-        m_iconTexture->render(QRect(topLeft, m_effectFrame->iconSize()));
-        m_iconTexture->unbind();
-    }
-
-    // Render text
-    if (!m_effectFrame->text().isEmpty()) {
-        QMatrix4x4 mvp(projection);
-        mvp.translate(m_effectFrame->geometry().x(), m_effectFrame->geometry().y());
-        shader->setUniform(GLShader::ModelViewProjectionMatrix, mvp);
-        if (m_effectFrame->isCrossFade() && m_oldTextTexture) {
-            if (shader) {
-                const float a = opacity * (1.0 - m_effectFrame->crossFadeProgress());
-                shader->setUniform(GLShader::ModulationConstant, QVector4D(a, a, a, a));
-            }
-
-            m_oldTextTexture->bind();
-            m_oldTextTexture->render(m_effectFrame->geometry());
-            m_oldTextTexture->unbind();
-            if (shader) {
-                const float a = opacity * m_effectFrame->crossFadeProgress();
-                shader->setUniform(GLShader::ModulationConstant, QVector4D(a, a, a, a));
-            }
-        } else {
-            if (shader) {
-                const QVector4D constant(opacity, opacity, opacity, opacity);
-                shader->setUniform(GLShader::ModulationConstant, constant);
-            }
-        }
-        if (!m_textTexture) { // Lazy creation
-            updateTextTexture();
-        }
-
-        if (m_textTexture) {
-            m_textTexture->bind();
-            m_textTexture->render(m_effectFrame->geometry());
-            m_textTexture->unbind();
-        }
-    }
-
-    if (shader) {
-        ShaderManager::instance()->popShader();
-    }
-    glDisable(GL_BLEND);
-}
-
-void SceneOpenGL::EffectFrame::updateTexture()
-{
-    delete m_texture;
-    m_texture = nullptr;
-    if (m_effectFrame->style() == EffectFrameStyled) {
-        QPixmap pixmap = m_effectFrame->frame().framePixmap();
-        m_texture = new GLTexture(pixmap);
-    }
-}
-
-void SceneOpenGL::EffectFrame::updateTextTexture()
-{
-    delete m_textTexture;
-    m_textTexture = nullptr;
-    delete m_textPixmap;
-    m_textPixmap = nullptr;
-
-    if (m_effectFrame->text().isEmpty()) {
-        return;
-    }
-
-    // Determine position on texture to paint text
-    QRect rect(QPoint(0, 0), m_effectFrame->geometry().size());
-    if (!m_effectFrame->icon().isNull() && !m_effectFrame->iconSize().isEmpty()) {
-        rect.setLeft(m_effectFrame->iconSize().width());
-    }
-
-    // If static size elide text as required
-    QString text = m_effectFrame->text();
-    if (m_effectFrame->isStatic()) {
-        QFontMetrics metrics(m_effectFrame->font());
-        text = metrics.elidedText(text, Qt::ElideRight, rect.width());
-    }
-
-    m_textPixmap = new QPixmap(m_effectFrame->geometry().size());
-    m_textPixmap->fill(Qt::transparent);
-    QPainter p(m_textPixmap);
-    p.setFont(m_effectFrame->font());
-    if (m_effectFrame->style() == EffectFrameStyled) {
-        p.setPen(m_effectFrame->styledTextColor());
-    } else { // TODO: What about no frame? Custom color setting required
-        p.setPen(Qt::white);
-    }
-    p.drawText(rect, m_effectFrame->alignment(), text);
-    p.end();
-    m_textTexture = new GLTexture(*m_textPixmap);
-}
-
-void SceneOpenGL::EffectFrame::updateUnstyledTexture()
-{
-    delete m_unstyledTexture;
-    m_unstyledTexture = nullptr;
-    delete m_unstyledPixmap;
-    m_unstyledPixmap = nullptr;
-    // Based off circle() from kwinxrenderutils.cpp
-    const int CS = 8;
-    m_unstyledPixmap = new QPixmap(2 * CS, 2 * CS);
-    m_unstyledPixmap->fill(Qt::transparent);
-    QPainter p(m_unstyledPixmap);
-    p.setRenderHint(QPainter::Antialiasing);
-    p.setPen(Qt::NoPen);
-    p.setBrush(Qt::black);
-    p.drawEllipse(m_unstyledPixmap->rect());
-    p.end();
-    m_unstyledTexture = new GLTexture(*m_unstyledPixmap);
-}
-
-void SceneOpenGL::EffectFrame::cleanup()
-{
-    delete m_unstyledTexture;
-    m_unstyledTexture = nullptr;
-    delete m_unstyledPixmap;
-    m_unstyledPixmap = nullptr;
 }
 
 //****************************************
@@ -1190,8 +697,8 @@ QSharedPointer<GLTexture> DecorationShadowTextureCache::getTexture(SceneOpenGLSh
     return d.texture;
 }
 
-SceneOpenGLShadow::SceneOpenGLShadow(Toplevel *toplevel)
-    : Shadow(toplevel)
+SceneOpenGLShadow::SceneOpenGLShadow(Window *window)
+    : Shadow(window)
 {
 }
 
@@ -1365,7 +872,7 @@ void SceneOpenGLDecorationRenderer::render(const QRegion &region)
     }
 
     QRect left, top, right, bottom;
-    client()->client()->layoutDecorationRects(left, top, right, bottom);
+    client()->window()->layoutDecorationRects(left, top, right, bottom);
 
     const qreal devicePixelRatio = effectiveDevicePixelRatio();
     const int topHeight = std::ceil(top.height() * devicePixelRatio);
@@ -1467,7 +974,7 @@ static int align(int value, int align)
 void SceneOpenGLDecorationRenderer::resizeTexture()
 {
     QRect left, top, right, bottom;
-    client()->client()->layoutDecorationRects(left, top, right, bottom);
+    client()->window()->layoutDecorationRects(left, top, right, bottom);
     QSize size;
 
     size.rwidth() = qMax(qMax(top.width(), bottom.width()),

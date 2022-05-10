@@ -8,9 +8,9 @@
 */
 #include "kwin_wayland_test.h"
 
-#include "abstract_client.h"
 #include "platform.h"
 #include "wayland_server.h"
+#include "window.h"
 #include "workspace.h"
 
 #include <KWayland/Client/plasmashell.h>
@@ -35,7 +35,7 @@ private Q_SLOTS:
 
 void ShowingDesktopTest::initTestCase()
 {
-    qRegisterMetaType<KWin::AbstractClient *>();
+    qRegisterMetaType<KWin::Window *>();
     QSignalSpy applicationStartedSpy(kwinApp(), &Application::started);
     QVERIFY(applicationStartedSpy.isValid());
     kwinApp()->platform()->setInitialWindowSize(QSize(1280, 1024));
@@ -60,20 +60,20 @@ void ShowingDesktopTest::testRestoreFocus()
 {
     QScopedPointer<KWayland::Client::Surface> surface1(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface1(Test::createXdgToplevelSurface(surface1.data()));
-    auto client1 = Test::renderAndWaitForShown(surface1.data(), QSize(100, 50), Qt::blue);
+    auto window1 = Test::renderAndWaitForShown(surface1.data(), QSize(100, 50), Qt::blue);
     QScopedPointer<KWayland::Client::Surface> surface2(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface2(Test::createXdgToplevelSurface(surface2.data()));
-    auto client2 = Test::renderAndWaitForShown(surface2.data(), QSize(100, 50), Qt::blue);
-    QVERIFY(client1 != client2);
+    auto window2 = Test::renderAndWaitForShown(surface2.data(), QSize(100, 50), Qt::blue);
+    QVERIFY(window1 != window2);
 
-    QCOMPARE(workspace()->activeClient(), client2);
+    QCOMPARE(workspace()->activeWindow(), window2);
     workspace()->slotToggleShowDesktop();
     QVERIFY(workspace()->showingDesktop());
     workspace()->slotToggleShowDesktop();
     QVERIFY(!workspace()->showingDesktop());
 
-    QVERIFY(workspace()->activeClient());
-    QCOMPARE(workspace()->activeClient(), client2);
+    QVERIFY(workspace()->activeWindow());
+    QCOMPARE(workspace()->activeWindow(), window2);
 }
 
 void ShowingDesktopTest::testRestoreFocusWithDesktopWindow()
@@ -95,21 +95,21 @@ void ShowingDesktopTest::testRestoreFocusWithDesktopWindow()
     // now create some windows
     QScopedPointer<KWayland::Client::Surface> surface1(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface1(Test::createXdgToplevelSurface(surface1.data()));
-    auto client1 = Test::renderAndWaitForShown(surface1.data(), QSize(100, 50), Qt::blue);
+    auto window1 = Test::renderAndWaitForShown(surface1.data(), QSize(100, 50), Qt::blue);
     QScopedPointer<KWayland::Client::Surface> surface2(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface2(Test::createXdgToplevelSurface(surface2.data()));
-    auto client2 = Test::renderAndWaitForShown(surface2.data(), QSize(100, 50), Qt::blue);
-    QVERIFY(client1 != client2);
+    auto window2 = Test::renderAndWaitForShown(surface2.data(), QSize(100, 50), Qt::blue);
+    QVERIFY(window1 != window2);
 
-    QCOMPARE(workspace()->activeClient(), client2);
+    QCOMPARE(workspace()->activeWindow(), window2);
     workspace()->slotToggleShowDesktop();
     QVERIFY(workspace()->showingDesktop());
-    QCOMPARE(workspace()->activeClient(), desktop);
+    QCOMPARE(workspace()->activeWindow(), desktop);
     workspace()->slotToggleShowDesktop();
     QVERIFY(!workspace()->showingDesktop());
 
-    QVERIFY(workspace()->activeClient());
-    QCOMPARE(workspace()->activeClient(), client2);
+    QVERIFY(workspace()->activeWindow());
+    QCOMPARE(workspace()->activeWindow(), window2);
 }
 
 WAYLANDTEST_MAIN(ShowingDesktopTest)

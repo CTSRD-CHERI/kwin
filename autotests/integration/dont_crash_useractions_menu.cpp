@@ -8,14 +8,14 @@
 */
 #include "kwin_wayland_test.h"
 
-#include "abstract_client.h"
-#include "abstract_output.h"
 #include "cursor.h"
 #include "keyboard_input.h"
+#include "output.h"
 #include "platform.h"
 #include "pointer_input.h"
 #include "useractions.h"
 #include "wayland_server.h"
+#include "window.h"
 #include "workspace.h"
 
 #include <KWayland/Client/compositor.h>
@@ -46,7 +46,7 @@ private Q_SLOTS:
 
 void TestDontCrashUseractionsMenu::initTestCase()
 {
-    qRegisterMetaType<KWin::AbstractClient *>();
+    qRegisterMetaType<KWin::Window *>();
     QSignalSpy applicationStartedSpy(kwinApp(), &Application::started);
     QVERIFY(applicationStartedSpy.isValid());
     kwinApp()->platform()->setInitialWindowSize(QSize(1280, 1024));
@@ -83,23 +83,23 @@ void TestDontCrashUseractionsMenu::testShowHideShowUseractionsMenu()
     // this test creates the condition of BUG 382063
     QScopedPointer<KWayland::Client::Surface> surface1(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface1(Test::createXdgToplevelSurface(surface1.data()));
-    auto client = Test::renderAndWaitForShown(surface1.data(), QSize(100, 50), Qt::blue);
-    QVERIFY(client);
+    auto window = Test::renderAndWaitForShown(surface1.data(), QSize(100, 50), Qt::blue);
+    QVERIFY(window);
 
-    workspace()->showWindowMenu(QRect(), client);
+    workspace()->showWindowMenu(QRect(), window);
     auto userActionsMenu = workspace()->userActionsMenu();
     QTRY_VERIFY(userActionsMenu->isShown());
-    QVERIFY(userActionsMenu->hasClient());
+    QVERIFY(userActionsMenu->hasWindow());
 
     Test::keyboardKeyPressed(KEY_ESC, 0);
     Test::keyboardKeyReleased(KEY_ESC, 1);
     QTRY_VERIFY(!userActionsMenu->isShown());
-    QVERIFY(!userActionsMenu->hasClient());
+    QVERIFY(!userActionsMenu->hasWindow());
 
     // and show again, this triggers BUG 382063
-    workspace()->showWindowMenu(QRect(), client);
+    workspace()->showWindowMenu(QRect(), window);
     QTRY_VERIFY(userActionsMenu->isShown());
-    QVERIFY(userActionsMenu->hasClient());
+    QVERIFY(userActionsMenu->hasWindow());
 }
 
 WAYLANDTEST_MAIN(TestDontCrashUseractionsMenu)

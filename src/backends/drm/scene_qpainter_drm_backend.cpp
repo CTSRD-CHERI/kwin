@@ -30,36 +30,32 @@ DrmQPainterBackend::DrmQPainterBackend(DrmBackend *backend)
 
 DrmQPainterBackend::~DrmQPainterBackend()
 {
+    m_backend->releaseBuffers();
     m_backend->setRenderBackend(nullptr);
 }
 
-QImage *DrmQPainterBackend::bufferForScreen(AbstractOutput *output)
+void DrmQPainterBackend::present(Output *output)
 {
-    const auto drmOutput = static_cast<DrmAbstractOutput *>(output);
-    return dynamic_cast<QPainterLayer *>(drmOutput->outputLayer())->image();
-}
-
-QRegion DrmQPainterBackend::beginFrame(AbstractOutput *output)
-{
-    const auto drmOutput = static_cast<DrmAbstractOutput *>(output);
-    return drmOutput->outputLayer()->startRendering().value_or(QRegion());
-}
-
-void DrmQPainterBackend::endFrame(AbstractOutput *output, const QRegion &renderedRegion, const QRegion &damage)
-{
-    Q_UNUSED(renderedRegion)
-    const auto drmOutput = static_cast<DrmAbstractOutput *>(output);
-    drmOutput->outputLayer()->endRendering(damage);
     static_cast<DrmAbstractOutput *>(output)->present();
 }
 
-QSharedPointer<DrmPipelineLayer> DrmQPainterBackend::createDrmPipelineLayer(DrmPipeline *pipeline)
+OutputLayer *DrmQPainterBackend::primaryLayer(Output *output)
+{
+    return static_cast<DrmAbstractOutput *>(output)->outputLayer();
+}
+
+QSharedPointer<DrmPipelineLayer> DrmQPainterBackend::createPrimaryLayer(DrmPipeline *pipeline)
 {
     if (pipeline->output()) {
-        return QSharedPointer<DrmQPainterLayer>::create(this, pipeline);
+        return QSharedPointer<DrmQPainterLayer>::create(pipeline);
     } else {
-        return QSharedPointer<DrmLeaseQPainterLayer>::create(this, pipeline);
+        return QSharedPointer<DrmLeaseQPainterLayer>::create(pipeline);
     }
+}
+
+QSharedPointer<DrmOverlayLayer> DrmQPainterBackend::createCursorLayer(DrmPipeline *pipeline)
+{
+    return QSharedPointer<DrmCursorQPainterLayer>::create(pipeline);
 }
 
 QSharedPointer<DrmOutputLayer> DrmQPainterBackend::createLayer(DrmVirtualOutput *output)

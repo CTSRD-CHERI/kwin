@@ -7,16 +7,15 @@
 #include "surfaceitem_wayland.h"
 #include "composite.h"
 #include "scene.h"
-
-#include <KWaylandServer/clientbuffer.h>
-#include <KWaylandServer/subcompositor_interface.h>
-#include <KWaylandServer/surface_interface.h>
+#include "wayland/clientbuffer.h"
+#include "wayland/subcompositor_interface.h"
+#include "wayland/surface_interface.h"
 
 namespace KWin
 {
 
 SurfaceItemWayland::SurfaceItemWayland(KWaylandServer::SurfaceInterface *surface,
-                                       Toplevel *window, Item *parent)
+                                       Window *window, Item *parent)
     : SurfaceItem(window, parent)
     , m_surface(surface)
 {
@@ -197,10 +196,10 @@ void SurfacePixmapWayland::setBuffer(KWaylandServer::ClientBuffer *buffer)
     }
 }
 
-SurfaceItemXwayland::SurfaceItemXwayland(Toplevel *window, Item *parent)
+SurfaceItemXwayland::SurfaceItemXwayland(Window *window, Item *parent)
     : SurfaceItemWayland(window->surface(), window, parent)
 {
-    connect(window, &Toplevel::geometryShapeChanged, this, &SurfaceItemXwayland::discardQuads);
+    connect(window, &Window::geometryShapeChanged, this, &SurfaceItemXwayland::discardQuads);
 }
 
 QRegion SurfaceItemXwayland::shape() const

@@ -17,8 +17,10 @@ QHash<int, QByteArray> OptionsModel::roleNames() const
         {Qt::DisplayRole, QByteArrayLiteral("display")},
         {Qt::DecorationRole, QByteArrayLiteral("decoration")},
         {Qt::ToolTipRole, QByteArrayLiteral("tooltip")},
-        {Qt::UserRole, QByteArrayLiteral("value")},
-        {Qt::UserRole + 1, QByteArrayLiteral("iconName")},
+        {ValueRole, QByteArrayLiteral("value")},
+        {IconNameRole, QByteArrayLiteral("iconName")},
+        {OptionTypeRole, QByteArrayLiteral("optionType")},
+        {BitMaskRole, QByteArrayLiteral("bitMask")},
     };
 }
 
@@ -36,19 +38,23 @@ QVariant OptionsModel::data(const QModelIndex &index, int role) const
         return QVariant();
     }
 
-    const Data data = m_data.at(index.row());
+    const Data item = m_data.at(index.row());
 
     switch (role) {
     case Qt::DisplayRole:
-        return data.text;
+        return item.text;
     case Qt::UserRole:
-        return data.value;
+        return item.value;
     case Qt::DecorationRole:
-        return data.icon;
-    case Qt::UserRole + 1:
-        return data.icon.name();
+        return item.icon;
+    case IconNameRole:
+        return item.icon.name();
     case Qt::ToolTipRole:
-        return data.description;
+        return item.description;
+    case OptionTypeRole:
+        return item.optionType;
+    case BitMaskRole:
+        return bitMask(index.row());
     }
     return QVariant();
 }
@@ -82,6 +88,9 @@ QVariant OptionsModel::value() const
     if (m_data.isEmpty()) {
         return QVariant();
     }
+    if (m_data.at(m_index).optionType == SelectAllOption) {
+        return allValues();
+    }
     return m_data.at(m_index).value;
 }
 
@@ -103,11 +112,56 @@ void OptionsModel::resetValue()
     Q_EMIT selectedIndexChanged(m_index);
 }
 
+bool OptionsModel::useFlags() const
+{
+    return m_useFlags;
+};
+
+uint OptionsModel::bitMask(int index) const
+{
+    const Data item = m_data.at(index);
+
+    if (item.optionType == SelectAllOption) {
+        return allOptionsMask();
+    }
+    if (m_useFlags) {
+        return item.value.toUInt();
+    }
+    return 1u << index;
+}
+
+QVariant OptionsModel::allValues() const
+{
+    if (m_useFlags) {
+        return allOptionsMask();
+    }
+
+    QVariantList list;
+    for (const Data &item : qAsConst(m_data)) {
+        if (item.optionType == NormalOption) {
+            list << item.value;
+        }
+    }
+    return list;
+}
+
+uint OptionsModel::allOptionsMask() const
+{
+    uint mask = 0;
+    for (int index = 0; index < m_data.count(); index++) {
+        if (m_data.at(index).optionType == NormalOption) {
+            mask += bitMask(index);
+        }
+    }
+    return mask;
+}
+
 void OptionsModel::updateModelData(const QList<Data> &data)
 {
     beginResetModel();
     m_data = data;
     endResetModel();
+    Q_EMIT modelUpdated();
 }
 
 RulePolicy::Type RulePolicy::type() const

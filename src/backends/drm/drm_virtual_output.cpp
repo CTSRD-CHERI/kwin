@@ -20,29 +20,21 @@
 namespace KWin
 {
 
-static int s_serial = 0;
-DrmVirtualOutput::DrmVirtualOutput(DrmGpu *gpu, const QSize &size)
-    : DrmVirtualOutput(QString::number(s_serial++), gpu, size)
-{
-}
-
-DrmVirtualOutput::DrmVirtualOutput(const QString &name, DrmGpu *gpu, const QSize &size)
+DrmVirtualOutput::DrmVirtualOutput(const QString &name, DrmGpu *gpu, const QSize &size, Type type)
     : DrmAbstractOutput(gpu)
     , m_vsyncMonitor(SoftwareVsyncMonitor::create(this))
 {
     connect(m_vsyncMonitor, &VsyncMonitor::vblankOccurred, this, &DrmVirtualOutput::vblank);
 
-    setName("Virtual-" + name);
-    m_modeIndex = 0;
-    QVector<Mode> modes = {{size, 60000, AbstractWaylandOutput::ModeFlags(AbstractWaylandOutput::ModeFlag::Current) | AbstractWaylandOutput::ModeFlag::Preferred, 0}};
-    initialize(QLatin1String("model_") + name,
-               QLatin1String("manufacturer_") + name,
-               QLatin1String("eisa_") + name,
-               QLatin1String("serial_") + name,
-               modes[m_modeIndex].size,
-               modes,
-               QByteArray("EDID_") + name.toUtf8());
-    m_renderLoop->setRefreshRate(modes[m_modeIndex].refreshRate);
+    auto mode = QSharedPointer<OutputMode>::create(size, 60000, OutputMode::Flag::Preferred);
+    setModesInternal({mode}, mode);
+    m_renderLoop->setRefreshRate(mode->refreshRate());
+
+    setInformation(Information{
+        .name = QStringLiteral("Virtual-") + name,
+        .physicalSize = size,
+        .placeholder = type == Type::Placeholder,
+    });
 
     recreateSurface();
 }
@@ -75,17 +67,6 @@ void DrmVirtualOutput::setDpmsMode(DpmsMode mode)
 void DrmVirtualOutput::updateEnablement(bool enable)
 {
     m_gpu->platform()->enableOutput(this, enable);
-}
-
-int DrmVirtualOutput::gammaRampSize() const
-{
-    return 200;
-}
-
-bool DrmVirtualOutput::setGammaRamp(const GammaRamp &gamma)
-{
-    Q_UNUSED(gamma);
-    return true;
 }
 
 DrmOutputLayer *DrmVirtualOutput::outputLayer() const

@@ -9,7 +9,6 @@
 
 #include "deleted.h"
 
-#include "abstract_client.h"
 #include "group.h"
 #include "netinfo.h"
 #include "shadow.h"
@@ -22,7 +21,7 @@ namespace KWin
 {
 
 Deleted::Deleted()
-    : Toplevel()
+    : Window()
     , delete_refcount(1)
     , m_frame(XCB_WINDOW_NONE)
     , m_layer(UnknownLayer)
@@ -49,10 +48,11 @@ Deleted::~Deleted()
         workspace()->removeDeleted(this);
     }
     deleteEffectWindow();
+    deleteSceneWindow();
     deleteShadow();
 }
 
-Deleted *Deleted::create(Toplevel *c)
+Deleted *Deleted::create(Window *c)
 {
     Deleted *d = new Deleted();
     d->copyToDeleted(c);
@@ -67,42 +67,40 @@ void Deleted::discard()
     delete this;
 }
 
-void Deleted::copyToDeleted(Toplevel *c)
+void Deleted::copyToDeleted(Window *window)
 {
-    Q_ASSERT(dynamic_cast<Deleted *>(c) == nullptr);
-    Toplevel::copyToDeleted(c);
-    m_frameMargins = c->frameMargins();
-    desk = c->desktop();
-    m_desktops = c->desktops();
-    activityList = c->activities();
-    contentsRect = QRect(c->clientPos(), c->clientSize());
-    m_layer = c->layer();
-    m_frame = c->frameId();
-    m_type = c->windowType();
-    m_windowRole = c->windowRole();
-    m_shade = c->isShade();
+    Q_ASSERT(!window->isDeleted());
+    Window::copyToDeleted(window);
+    m_frameMargins = window->frameMargins();
+    desk = window->desktop();
+    m_desktops = window->desktops();
+    activityList = window->activities();
+    contentsRect = QRect(window->clientPos(), window->clientSize());
+    m_layer = window->layer();
+    m_frame = window->frameId();
+    m_type = window->windowType();
+    m_windowRole = window->windowRole();
+    m_shade = window->isShade();
     if (WinInfo *cinfo = dynamic_cast<WinInfo *>(info)) {
         cinfo->disable();
     }
-    if (AbstractClient *client = dynamic_cast<AbstractClient *>(c)) {
-        if (client->isDecorated()) {
-            client->layoutDecorationRects(decoration_left,
-                                          decoration_top,
-                                          decoration_right,
-                                          decoration_bottom);
-        }
-        m_wasClient = true;
-        m_minimized = client->isMinimized();
-        m_modal = client->isModal();
-        m_mainClients = client->mainClients();
-        for (AbstractClient *c : qAsConst(m_mainClients)) {
-            connect(c, &AbstractClient::windowClosed, this, &Deleted::mainClientClosed);
-        }
-        m_fullscreen = client->isFullScreen();
-        m_keepAbove = client->keepAbove();
-        m_keepBelow = client->keepBelow();
-        m_caption = client->caption();
+    if (window->isDecorated()) {
+        window->layoutDecorationRects(decoration_left,
+                                      decoration_top,
+                                      decoration_right,
+                                      decoration_bottom);
     }
+    m_wasClient = true;
+    m_minimized = window->isMinimized();
+    m_modal = window->isModal();
+    m_mainWindows = window->mainWindows();
+    for (Window *w : qAsConst(m_mainWindows)) {
+        connect(w, &Window::windowClosed, this, &Deleted::mainWindowClosed);
+    }
+    m_fullscreen = window->isFullScreen();
+    m_keepAbove = window->keepAbove();
+    m_keepBelow = window->keepBelow();
+    m_caption = window->caption();
 
     for (auto vd : qAsConst(m_desktops)) {
         connect(vd, &QObject::destroyed, this, [=] {
@@ -110,9 +108,9 @@ void Deleted::copyToDeleted(Toplevel *c)
         });
     }
 
-    m_wasPopupWindow = c->isPopupWindow();
-    m_wasOutline = c->isOutline();
-    m_wasLockScreen = c->isLockScreen();
+    m_wasPopupWindow = window->isPopupWindow();
+    m_wasOutline = window->isOutline();
+    m_wasLockScreen = window->isLockScreen();
 }
 
 void Deleted::unrefWindow()
@@ -172,11 +170,9 @@ NET::WindowType Deleted::windowType(bool direct, int supportedTypes) const
     return m_type;
 }
 
-void Deleted::mainClientClosed(Toplevel *client)
+void Deleted::mainWindowClosed(Window *window)
 {
-    if (AbstractClient *c = dynamic_cast<AbstractClient *>(client)) {
-        m_mainClients.removeAll(c);
-    }
+    m_mainWindows.removeAll(window);
 }
 
 xcb_window_t Deleted::frameId() const

@@ -7,6 +7,7 @@
     SPDX-License-Identifier: GPL-2.0-or-later
 */
 #include "drm_lease_egl_gbm_layer.h"
+#include "drm_buffer.h"
 #include "drm_buffer_gbm.h"
 #include "drm_gpu.h"
 #include "drm_pipeline.h"
@@ -19,19 +20,16 @@
 namespace KWin
 {
 
-DrmLeaseEglGbmLayer::DrmLeaseEglGbmLayer(EglGbmBackend *backend, DrmPipeline *pipeline)
+DrmLeaseEglGbmLayer::DrmLeaseEglGbmLayer(DrmPipeline *pipeline)
     : DrmPipelineLayer(pipeline)
 {
-    connect(backend, &EglGbmBackend::aboutToBeDestroyed, this, [this]() {
-        m_buffer.reset();
-    });
 }
 
-QSharedPointer<DrmBuffer> DrmLeaseEglGbmLayer::testBuffer()
+bool DrmLeaseEglGbmLayer::checkTestBuffer()
 {
-    const auto mods = m_pipeline->supportedModifiers(DRM_FORMAT_XRGB8888);
-    const auto size = m_pipeline->sourceSize();
-    if (!m_buffer || m_buffer->size() != size || !(mods.isEmpty() || mods.contains(m_buffer->modifier()))) {
+    const auto mods = m_pipeline->formats().value(DRM_FORMAT_XRGB8888);
+    const auto size = m_pipeline->bufferSize();
+    if (!m_framebuffer || m_framebuffer->buffer()->size() != size || !(mods.isEmpty() || mods.contains(m_framebuffer->buffer()->modifier()))) {
         gbm_bo *newBo;
         if (mods.isEmpty()) {
             newBo = gbm_bo_create(m_pipeline->gpu()->gbmDevice(), size.width(), size.height(), DRM_FORMAT_XRGB8888, GBM_BO_USE_SCANOUT);
@@ -44,17 +42,32 @@ QSharedPointer<DrmBuffer> DrmLeaseEglGbmLayer::testBuffer()
             newBo = gbm_bo_create_with_modifiers(m_pipeline->gpu()->gbmDevice(), size.width(), size.height(), DRM_FORMAT_XRGB8888, modifiers.constData(), mods.count());
         }
         if (newBo) {
-            m_buffer = QSharedPointer<DrmGbmBuffer>::create(m_pipeline->gpu(), nullptr, newBo);
+            m_framebuffer = DrmFramebuffer::createFramebuffer(std::make_shared<GbmBuffer>(m_pipeline->gpu(), newBo));
         } else {
             qCWarning(KWIN_DRM) << "Failed to create gbm_bo for lease output";
         }
     }
-    return m_buffer;
+    return m_framebuffer != nullptr;
 }
 
-QSharedPointer<DrmBuffer> DrmLeaseEglGbmLayer::currentBuffer() const
+std::shared_ptr<DrmFramebuffer> DrmLeaseEglGbmLayer::currentBuffer() const
 {
-    return m_buffer;
+    return m_framebuffer;
 }
 
+OutputLayerBeginFrameInfo DrmLeaseEglGbmLayer::beginFrame()
+{
+    return {};
+}
+
+void DrmLeaseEglGbmLayer::endFrame(const QRegion &damagedRegion, const QRegion &renderedRegion)
+{
+    Q_UNUSED(damagedRegion)
+    Q_UNUSED(renderedRegion)
+}
+
+void DrmLeaseEglGbmLayer::releaseBuffers()
+{
+    m_framebuffer.reset();
+}
 }

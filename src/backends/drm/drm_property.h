@@ -9,12 +9,13 @@
 */
 
 #pragma once
-
-#include <xf86drmMode.h>
+#include "drm_pointer.h"
 
 #include <QByteArray>
 #include <QMap>
 #include <QVector>
+
+#include <xf86drmMode.h>
 
 namespace KWin
 {
@@ -61,6 +62,7 @@ public:
 
     void setCurrent(uint64_t value);
     uint64_t current() const;
+    drmModePropertyBlobRes *immutableBlob() const;
 
     uint64_t minValue() const;
     uint64_t maxValue() const;
@@ -81,6 +83,8 @@ public:
     }
 
 private:
+    void updateBlob();
+
     uint32_t m_propId = 0;
     QByteArray m_propName;
 
@@ -92,6 +96,7 @@ private:
     uint64_t m_next = 0;
     // the value currently set for or by the kernel
     uint64_t m_current = 0;
+    DrmScopedPointer<drmModePropertyBlobRes> m_immutableBlob;
 
     uint64_t m_minValue = -1;
     uint64_t m_maxValue = -1;
@@ -99,6 +104,7 @@ private:
     QMap<uint32_t, uint64_t> m_enumMap;
     QVector<QByteArray> m_enumNames;
     const bool m_immutable;
+    const bool m_isBlob;
     bool m_legacy = false;
     const DrmObject *m_obj;
 };

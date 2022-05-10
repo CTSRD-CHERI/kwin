@@ -14,10 +14,10 @@
 
 #include <QSize>
 
-#include "abstract_wayland_output.h"
 #include "drm_object.h"
 #include "drm_pointer.h"
 #include "edid.h"
+#include "output.h"
 
 namespace KWin
 {
@@ -29,25 +29,20 @@ class DrmCrtc;
 /**
  * The DrmConnectorMode class represents a native mode and the associated blob.
  */
-class DrmConnectorMode
+class DrmConnectorMode : public OutputMode
 {
 public:
     DrmConnectorMode(DrmConnector *connector, drmModeModeInfo nativeMode);
-    ~DrmConnectorMode();
+    ~DrmConnectorMode() override;
 
     uint32_t blobId();
-
     drmModeModeInfo *nativeMode();
-    QSize size() const;
-    uint32_t refreshRate() const;
 
     bool operator==(const DrmConnectorMode &otherMode);
 
 private:
     DrmConnector *m_connector;
     drmModeModeInfo m_nativeMode;
-    QSize m_size;
-    uint32_t m_refreshRate;
     uint32_t m_blobId = 0;
 };
 
@@ -98,23 +93,27 @@ public:
     QString modelName() const;
     QSize physicalSize() const;
 
-    QVector<QSharedPointer<DrmConnectorMode>> modes() const;
+    QList<QSharedPointer<DrmConnectorMode>> modes() const;
     QSharedPointer<DrmConnectorMode> findMode(const drmModeModeInfo &modeInfo) const;
 
-    AbstractWaylandOutput::SubPixel subpixel() const;
+    Output::SubPixel subpixel() const;
     bool hasOverscan() const;
     uint32_t overscan() const;
     bool vrrCapable() const;
     bool hasRgbRange() const;
-    AbstractWaylandOutput::RgbRange rgbRange() const;
+    Output::RgbRange rgbRange() const;
     LinkStatus linkStatus() const;
 
 private:
+    QList<QSharedPointer<DrmConnectorMode>> generateCommonModes();
+    QSharedPointer<DrmConnectorMode> generateMode(const QSize &size, uint32_t refreshRate);
+
     QScopedPointer<DrmPipeline> m_pipeline;
     DrmScopedPointer<drmModeConnector> m_conn;
     Edid m_edid;
     QSize m_physicalSize = QSize(-1, -1);
-    QVector<QSharedPointer<DrmConnectorMode>> m_modes;
+    QList<QSharedPointer<DrmConnectorMode>> m_driverModes;
+    QList<QSharedPointer<DrmConnectorMode>> m_modes;
     uint32_t m_possibleCrtcs = 0;
 
     friend QDebug &operator<<(QDebug &s, const KWin::DrmConnector *obj);

@@ -12,13 +12,13 @@
 namespace KWin
 {
 
-SurfaceItemX11::SurfaceItemX11(Toplevel *window, Item *parent)
+SurfaceItemX11::SurfaceItemX11(Window *window, Item *parent)
     : SurfaceItem(window, parent)
 {
-    connect(window, &Toplevel::bufferGeometryChanged,
+    connect(window, &Window::bufferGeometryChanged,
             this, &SurfaceItemX11::handleBufferGeometryChanged);
-    connect(window, &Toplevel::geometryShapeChanged,
-            this, &SurfaceItemX11::discardQuads);
+    connect(window, &Window::geometryShapeChanged,
+            this, &SurfaceItemX11::handleGeometryShapeChanged);
 
     m_damageHandle = xcb_generate_id(kwinApp()->x11Connection());
     xcb_damage_create(kwinApp()->x11Connection(), m_damageHandle, window->frameId(),
@@ -29,7 +29,7 @@ SurfaceItemX11::SurfaceItemX11(Toplevel *window, Item *parent)
 
 SurfaceItemX11::~SurfaceItemX11()
 {
-    // destroyDamage() will be called by the associated Toplevel.
+    // destroyDamage() will be called by the associated Window.
 }
 
 void SurfaceItemX11::preprocess()
@@ -115,12 +115,18 @@ void SurfaceItemX11::destroyDamage()
     }
 }
 
-void SurfaceItemX11::handleBufferGeometryChanged(Toplevel *toplevel, const QRect &old)
+void SurfaceItemX11::handleBufferGeometryChanged(Window *window, const QRect &old)
 {
-    if (toplevel->bufferGeometry().size() != old.size()) {
+    if (window->bufferGeometry().size() != old.size()) {
         discardPixmap();
     }
-    setSize(toplevel->bufferGeometry().size());
+    setSize(window->bufferGeometry().size());
+}
+
+void SurfaceItemX11::handleGeometryShapeChanged()
+{
+    scheduleRepaint(boundingRect());
+    discardQuads();
 }
 
 QRegion SurfaceItemX11::shape() const
@@ -171,14 +177,14 @@ xcb_visualid_t SurfacePixmapX11::visual() const
 
 void SurfacePixmapX11::create()
 {
-    const Toplevel *toplevel = m_item->window();
-    if (toplevel->isDeleted()) {
+    const Window *window = m_item->window();
+    if (window->isDeleted()) {
         return;
     }
 
     XServerGrabber grabber;
     xcb_connection_t *connection = kwinApp()->x11Connection();
-    xcb_window_t frame = toplevel->frameId();
+    xcb_window_t frame = window->frameId();
     xcb_pixmap_t pixmap = xcb_generate_id(connection);
     xcb_void_cookie_t namePixmapCookie = xcb_composite_name_window_pixmap_checked(connection,
                                                                                   frame,
@@ -187,7 +193,7 @@ void SurfacePixmapX11::create()
     Xcb::WindowGeometry windowGeometry(frame);
     if (xcb_generic_error_t *error = xcb_request_check(connection, namePixmapCookie)) {
         qCDebug(KWIN_CORE, "Failed to create window pixmap for window 0x%x (error code %d)",
-                toplevel->window(), error->error_code);
+                window->window(), error->error_code);
         free(error);
         return;
     }
@@ -195,22 +201,22 @@ void SurfacePixmapX11::create()
     // know about the window (i.e. size)
     if (!windowAttributes || windowAttributes->map_state != XCB_MAP_STATE_VIEWABLE) {
         qCDebug(KWIN_CORE, "Failed to create window pixmap for window 0x%x (not viewable)",
-                toplevel->window());
+                window->window());
         xcb_free_pixmap(connection, pixmap);
         return;
     }
-    const QRect bufferGeometry = toplevel->bufferGeometry();
+    const QRect bufferGeometry = window->bufferGeometry();
     if (windowGeometry.size() != bufferGeometry.size()) {
         qCDebug(KWIN_CORE, "Failed to create window pixmap for window 0x%x (mismatched geometry)",
-                toplevel->window());
+                window->window());
         xcb_free_pixmap(connection, pixmap);
         return;
     }
 
     m_pixmap = pixmap;
-    m_hasAlphaChannel = toplevel->hasAlpha();
+    m_hasAlphaChannel = window->hasAlpha();
     m_size = bufferGeometry.size();
-    m_contentsRect = QRect(toplevel->clientPos(), toplevel->clientSize());
+    m_contentsRect = QRect(window->clientPos(), window->clientSize());
 }
 
 } // namespace KWin

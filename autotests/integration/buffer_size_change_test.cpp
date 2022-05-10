@@ -8,10 +8,10 @@
 */
 #include "generic_scene_opengl_test.h"
 
-#include "abstract_client.h"
 #include "composite.h"
 #include "scene.h"
 #include "wayland_server.h"
+#include "window.h"
 
 #include <KWayland/Client/subsurface.h>
 #include <KWayland/Client/surface.h>
@@ -53,8 +53,8 @@ void BufferSizeChangeTest::testShmBufferSizeChange()
     QVERIFY(!shellSurface.isNull());
 
     // set buffer size
-    AbstractClient *client = Test::renderAndWaitForShown(surface.data(), QSize(100, 50), Qt::blue);
-    QVERIFY(client);
+    Window *window = Test::renderAndWaitForShown(surface.data(), QSize(100, 50), Qt::blue);
+    QVERIFY(window);
 
     // add a first repaint
     QSignalSpy frameRenderedSpy(Compositor::self()->scene(), &Scene::frameRendered);
@@ -65,7 +65,7 @@ void BufferSizeChangeTest::testShmBufferSizeChange()
     // now change buffer size
     Test::render(surface.data(), QSize(30, 10), Qt::red);
 
-    QSignalSpy damagedSpy(client, &AbstractClient::damaged);
+    QSignalSpy damagedSpy(window, &Window::damaged);
     QVERIFY(damagedSpy.isValid());
     QVERIFY(damagedSpy.wait());
     KWin::Compositor::self()->scene()->addRepaintFull();
@@ -90,7 +90,7 @@ void BufferSizeChangeTest::testShmBufferSizeChangeOnSubSurface()
 
     // set buffer sizes
     Test::render(surface.data(), QSize(30, 10), Qt::red);
-    AbstractClient *parent = Test::renderAndWaitForShown(parentSurface.data(), QSize(100, 50), Qt::blue);
+    Window *parent = Test::renderAndWaitForShown(parentSurface.data(), QSize(100, 50), Qt::blue);
     QVERIFY(parent);
 
     // add a first repaint
@@ -100,7 +100,7 @@ void BufferSizeChangeTest::testShmBufferSizeChangeOnSubSurface()
     QVERIFY(frameRenderedSpy.wait());
 
     // change buffer size of sub surface
-    QSignalSpy damagedParentSpy(parent, &AbstractClient::damaged);
+    QSignalSpy damagedParentSpy(parent, &Window::damaged);
     QVERIFY(damagedParentSpy.isValid());
     Test::render(surface.data(), QSize(20, 10), Qt::red);
     parentSurface->commit(KWayland::Client::Surface::CommitFlag::None);

@@ -9,15 +9,15 @@
 
 #include "kwin_wayland_test.h"
 
-#include "abstract_client.h"
-#include "abstract_output.h"
 #include "composite.h"
 #include "deleted.h"
 #include "effectloader.h"
 #include "effects.h"
+#include "output.h"
 #include "platform.h"
 #include "renderbackend.h"
 #include "wayland_server.h"
+#include "window.h"
 #include "workspace.h"
 
 #include <KWayland/Client/surface.h>
@@ -44,7 +44,7 @@ void DontCrashReinitializeCompositorTest::initTestCase()
 {
     qputenv("XDG_DATA_DIRS", QCoreApplication::applicationDirPath().toUtf8());
 
-    qRegisterMetaType<KWin::AbstractClient *>();
+    qRegisterMetaType<KWin::Window *>();
     qRegisterMetaType<KWin::Deleted *>();
     QSignalSpy applicationStartedSpy(kwinApp(), &Application::started);
     QVERIFY(applicationStartedSpy.isValid());
@@ -110,15 +110,15 @@ void DontCrashReinitializeCompositorTest::testReinitializeCompositor()
     auto effectsImpl = qobject_cast<EffectsHandlerImpl *>(effects);
     QVERIFY(effectsImpl);
 
-    // Create the test client.
+    // Create the test window.
     using namespace KWayland::Client;
 
     QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
     QVERIFY(!surface.isNull());
     QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
     QVERIFY(!shellSurface.isNull());
-    AbstractClient *client = Test::renderAndWaitForShown(surface.data(), QSize(100, 50), Qt::blue);
-    QVERIFY(client);
+    Window *window = Test::renderAndWaitForShown(surface.data(), QSize(100, 50), Qt::blue);
+    QVERIFY(window);
 
     // Make sure that only the test effect is loaded.
     QFETCH(QString, effectName);
@@ -129,15 +129,15 @@ void DontCrashReinitializeCompositorTest::testReinitializeCompositor()
     QVERIFY(effect);
     QVERIFY(!effect->isActive());
 
-    // Close the test client.
-    QSignalSpy windowClosedSpy(client, &AbstractClient::windowClosed);
+    // Close the test window.
+    QSignalSpy windowClosedSpy(window, &Window::windowClosed);
     QVERIFY(windowClosedSpy.isValid());
     shellSurface.reset();
     surface.reset();
     QVERIFY(windowClosedSpy.wait());
 
-    // The test effect should start animating the test client. Is there a better
-    // way to verify that the test effect actually animates the test client?
+    // The test effect should start animating the test window. Is there a better
+    // way to verify that the test effect actually animates the test window?
     QVERIFY(effect->isActive());
 
     // Re-initialize the compositor, effects will be destroyed and created again.

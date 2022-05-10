@@ -86,7 +86,6 @@ class KWIN_EXPORT X11WindowedBackend : public Platform
     Q_OBJECT
     Q_INTERFACES(KWin::Platform)
     Q_PLUGIN_METADATA(IID "org.kde.kwin.Platform" FILE "x11.json")
-    Q_PROPERTY(QSize size READ screenSize NOTIFY sizeChanged)
 public:
     X11WindowedBackend(QObject *parent = nullptr);
     ~X11WindowedBackend() override;
@@ -106,7 +105,7 @@ public:
         return m_screenNumber;
     }
     xcb_window_t window() const;
-    xcb_window_t windowForScreen(AbstractOutput *output) const;
+    xcb_window_t windowForScreen(Output *output) const;
     Display *display() const
     {
         return m_display;

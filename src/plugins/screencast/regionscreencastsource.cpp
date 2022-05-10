@@ -7,10 +7,10 @@
 #include "regionscreencastsource.h"
 #include "screencastutils.h"
 
-#include <abstract_wayland_output.h>
 #include <composite.h>
 #include <kwingltexture.h>
 #include <kwinglutils.h>
+#include <output.h>
 #include <platform.h>
 #include <scene.h>
 
@@ -38,7 +38,7 @@ bool RegionScreenCastSource::hasAlphaChannel() const
     return true;
 }
 
-void RegionScreenCastSource::updateOutput(AbstractWaylandOutput *output)
+void RegionScreenCastSource::updateOutput(Output *output)
 {
     m_last = output->renderLoop()->lastPresentationTimestamp();
 
@@ -49,7 +49,7 @@ void RegionScreenCastSource::updateOutput(AbstractWaylandOutput *output)
             return;
         }
 
-        GLRenderTarget::pushRenderTarget(m_target.data());
+        GLFramebuffer::pushFramebuffer(m_target.data());
         const QRect geometry({0, 0}, m_target->size());
 
         ShaderBinder shaderBinder(ShaderTrait::MapTexture);
@@ -64,7 +64,7 @@ void RegionScreenCastSource::updateOutput(AbstractWaylandOutput *output)
         outputTexture->bind();
         outputTexture->render(output->geometry());
         outputTexture->unbind();
-        GLRenderTarget::popRenderTarget();
+        GLFramebuffer::popFramebuffer();
     }
 }
 
@@ -73,21 +73,20 @@ std::chrono::nanoseconds RegionScreenCastSource::clock() const
     return m_last;
 }
 
-void RegionScreenCastSource::render(GLRenderTarget *target)
+void RegionScreenCastSource::render(GLFramebuffer *target)
 {
     if (!m_renderedTexture) {
         m_renderedTexture.reset(new GLTexture(hasAlphaChannel() ? GL_RGBA8 : GL_RGB8, textureSize()));
-        m_target.reset(new GLRenderTarget(m_renderedTexture.data()));
+        m_target.reset(new GLFramebuffer(m_renderedTexture.data()));
         const auto allOutputs = kwinApp()->platform()->enabledOutputs();
         for (auto output : allOutputs) {
-            AbstractWaylandOutput *streamOutput = qobject_cast<AbstractWaylandOutput *>(output);
-            if (streamOutput->geometry().intersects(m_region)) {
-                updateOutput(streamOutput);
+            if (output->geometry().intersects(m_region)) {
+                updateOutput(output);
             }
         }
     }
 
-    GLRenderTarget::pushRenderTarget(target);
+    GLFramebuffer::pushFramebuffer(target);
     QRect r(QPoint(), target->size());
     auto shader = ShaderManager::instance()->pushShader(ShaderTrait::MapTexture);
 
@@ -100,13 +99,13 @@ void RegionScreenCastSource::render(GLRenderTarget *target)
     m_renderedTexture->unbind();
 
     ShaderManager::instance()->popShader();
-    GLRenderTarget::popRenderTarget();
+    GLFramebuffer::popFramebuffer();
 }
 
 void RegionScreenCastSource::render(QImage *image)
 {
     GLTexture offscreenTexture(hasAlphaChannel() ? GL_RGBA8 : GL_RGB8, textureSize());
-    GLRenderTarget offscreenTarget(&offscreenTexture);
+    GLFramebuffer offscreenTarget(&offscreenTexture);
 
     render(&offscreenTarget);
     grabTexture(&offscreenTexture, image);

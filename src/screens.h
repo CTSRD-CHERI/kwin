@@ -22,8 +22,8 @@
 
 namespace KWin
 {
-class AbstractClient;
-class AbstractOutput;
+class Window;
+class Output;
 class Platform;
 
 class KWIN_EXPORT Screens : public QObject
@@ -103,7 +103,7 @@ private Q_SLOTS:
     void updateSize();
 
 private:
-    AbstractOutput *findOutput(int screenId) const;
+    Output *findOutput(int screenId) const;
 
     int m_count;
     QSize m_boundingSize;

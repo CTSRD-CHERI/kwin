@@ -5,11 +5,10 @@
 */
 
 #include "inputpanelv1integration.h"
-#include "inputpanelv1client.h"
+#include "inputpanelv1window.h"
+#include "wayland/display.h"
+#include "wayland/inputmethod_v1_interface.h"
 #include "wayland_server.h"
-
-#include <KWaylandServer/display.h>
-#include <KWaylandServer/inputmethod_v1_interface.h>
 
 using namespace KWaylandServer;
 
@@ -22,12 +21,12 @@ InputPanelV1Integration::InputPanelV1Integration(QObject *parent)
     InputPanelV1Interface *shell = new InputPanelV1Interface(waylandServer()->display(), this);
 
     connect(shell, &InputPanelV1Interface::inputPanelSurfaceAdded,
-            this, &InputPanelV1Integration::createClient);
+            this, &InputPanelV1Integration::createWindow);
 }
 
-void InputPanelV1Integration::createClient(InputPanelSurfaceV1Interface *shellSurface)
+void InputPanelV1Integration::createWindow(InputPanelSurfaceV1Interface *shellSurface)
 {
-    Q_EMIT clientCreated(new InputPanelV1Client(shellSurface));
+    Q_EMIT windowCreated(new InputPanelV1Window(shellSurface));
 }
 
 } // namespace KWin

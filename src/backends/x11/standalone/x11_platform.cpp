@@ -22,7 +22,6 @@
 #if HAVE_X11_XINPUT
 #include "xinputintegration.h"
 #endif
-#include "abstract_client.h"
 #include "effects_x11.h"
 #include "eglbackend.h"
 #include "keyboard_input.h"
@@ -33,6 +32,7 @@
 #include "renderloop.h"
 #include "screenedges_filter.h"
 #include "utils/xcbutils.h"
+#include "window.h"
 #include "workspace.h"
 #include "x11_output.h"
 
@@ -40,6 +40,7 @@
 
 #include <KConfigGroup>
 #include <KCrash>
+#include <KGlobalAccel>
 #include <KLocalizedString>
 
 #include <QOpenGLContext>
@@ -350,7 +351,7 @@ void X11StandalonePlatform::updateCursor()
     }
 }
 
-void X11StandalonePlatform::startInteractiveWindowSelection(std::function<void(KWin::Toplevel *)> callback, const QByteArray &cursorName)
+void X11StandalonePlatform::startInteractiveWindowSelection(std::function<void(KWin::Window *)> callback, const QByteArray &cursorName)
 {
     if (m_windowSelector.isNull()) {
         m_windowSelector.reset(new WindowSelector);
@@ -368,7 +369,12 @@ void X11StandalonePlatform::startInteractivePositionSelection(std::function<void
 
 void X11StandalonePlatform::setupActionForGlobalAccel(QAction *action)
 {
-    connect(action, &QAction::triggered, kwinApp(), [action] {
+    connect(KGlobalAccel::self(), &KGlobalAccel::globalShortcutActiveChanged, kwinApp(), [action](QAction *triggeredAction, bool active) {
+        Q_UNUSED(active)
+
+        if (triggeredAction != action)
+            return;
+
         QVariant timestamp = action->property("org.kde.kglobalaccel.activationTimestamp");
         bool ok = false;
         const quint32 t = timestamp.toULongLong(&ok);
@@ -399,7 +405,7 @@ void X11StandalonePlatform::invertScreen()
     bool succeeded = false;
 
     if (Xcb::Extensions::self()->isRandrAvailable()) {
-        const auto active_client = workspace()->activeClient();
+        const auto active_client = workspace()->activeWindow();
         ScreenResources res((active_client && active_client->window() != XCB_WINDOW_NONE) ? active_client->window() : rootWindow());
 
         if (!res.isNull()) {
@@ -470,9 +476,9 @@ void X11StandalonePlatform::updateOutputs()
 template<typename T>
 void X11StandalonePlatform::doUpdateOutputs()
 {
-    QVector<AbstractOutput *> changed;
-    QVector<AbstractOutput *> added;
-    QVector<AbstractOutput *> removed = m_outputs;
+    QVector<Output *> changed;
+    QVector<Output *> added;
+    QVector<Output *> removed = m_outputs;
 
     if (Xcb::Extensions::self()->isRandrAvailable()) {
         T resources(rootWindow());
@@ -531,7 +537,7 @@ void X11StandalonePlatform::doUpdateOutputs()
                         changed.append(output);
                         removed.removeOne(output);
                     } else {
-                        output = new X11Output(outputInfo.name());
+                        output = new X11Output();
                         added.append(output);
                     }
 
@@ -543,8 +549,8 @@ void X11StandalonePlatform::doUpdateOutputs()
                     output->setRenderLoop(m_renderLoop);
                     output->setCrtc(crtcs[i]);
                     output->setGammaRampSize(gamma.isNull() ? 0 : gamma->size);
-                    output->setGeometry(geometry);
-                    output->setRefreshRate(refreshRate * 1000);
+                    output->setMode(geometry.size(), refreshRate * 1000);
+                    output->moveTo(geometry.topLeft());
                     output->setXineramaNumber(i);
 
                     QSize physicalSize(outputInfo->mm_width, outputInfo->mm_height);
@@ -560,7 +566,11 @@ void X11StandalonePlatform::doUpdateOutputs()
                     case XCB_RANDR_ROTATION_REFLECT_Y:
                         break;
                     }
-                    output->setPhysicalSize(physicalSize);
+
+                    output->setInformation(X11Output::Information{
+                        .name = outputInfo.name(),
+                        .physicalSize = physicalSize,
+                    });
                     break;
                 }
             }
@@ -577,14 +587,14 @@ void X11StandalonePlatform::doUpdateOutputs()
     }
 
     // Process new outputs. Note new outputs must be introduced before removing any other outputs.
-    for (AbstractOutput *output : qAsConst(added)) {
+    for (Output *output : qAsConst(added)) {
         m_outputs.append(output);
         Q_EMIT outputAdded(output);
         Q_EMIT outputEnabled(output);
     }
 
     // Outputs have to be removed last to avoid the case where there are no enabled outputs.
-    for (AbstractOutput *output : qAsConst(removed)) {
+    for (Output *output : qAsConst(removed)) {
         m_outputs.removeOne(output);
         Q_EMIT outputDisabled(output);
         Q_EMIT outputRemoved(output);
@@ -593,7 +603,7 @@ void X11StandalonePlatform::doUpdateOutputs()
 
     // Make sure that the position of an output in m_outputs matches its xinerama index, there
     // are X11 protocols that use xinerama indices to identify outputs.
-    std::sort(m_outputs.begin(), m_outputs.end(), [](const AbstractOutput *a, const AbstractOutput *b) {
+    std::sort(m_outputs.begin(), m_outputs.end(), [](const Output *a, const Output *b) {
         const auto xa = qobject_cast<const X11Output *>(a);
         if (!xa) {
             return false;
@@ -610,7 +620,7 @@ void X11StandalonePlatform::doUpdateOutputs()
 
 X11Output *X11StandalonePlatform::findX11Output(const QString &name) const
 {
-    for (AbstractOutput *output : m_outputs) {
+    for (Output *output : m_outputs) {
         if (output->name() == name) {
             return qobject_cast<X11Output *>(output);
         }
@@ -633,7 +643,7 @@ RenderLoop *X11StandalonePlatform::renderLoop() const
     return m_renderLoop;
 }
 
-static bool refreshRate_compare(const AbstractOutput *first, const AbstractOutput *smallest)
+static bool refreshRate_compare(const Output *first, const Output *smallest)
 {
     return first->refreshRate() < smallest->refreshRate();
 }
@@ -645,14 +655,14 @@ static int currentRefreshRate()
         return refreshRate;
     }
 
-    const QVector<AbstractOutput *> outputs = kwinApp()->platform()->enabledOutputs();
+    const QVector<Output *> outputs = kwinApp()->platform()->enabledOutputs();
     if (outputs.isEmpty()) {
         return 60000;
     }
 
     static const QString syncDisplayDevice = qEnvironmentVariable("__GL_SYNC_DISPLAY_DEVICE");
     if (!syncDisplayDevice.isEmpty()) {
-        for (const AbstractOutput *output : outputs) {
+        for (const Output *output : outputs) {
             if (output->name() == syncDisplayDevice) {
                 return output->refreshRate();
             }

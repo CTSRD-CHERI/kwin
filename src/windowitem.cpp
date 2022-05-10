@@ -5,31 +5,42 @@
 */
 
 #include "windowitem.h"
-#include "abstract_client.h"
 #include "decorationitem.h"
 #include "deleted.h"
-#include "internal_client.h"
+#include "internalwindow.h"
 #include "shadowitem.h"
 #include "surfaceitem_internal.h"
 #include "surfaceitem_wayland.h"
 #include "surfaceitem_x11.h"
+#include "wayland_server.h"
+#include "window.h"
+#include "workspace.h"
 
 namespace KWin
 {
 
-WindowItem::WindowItem(Toplevel *window, Item *parent)
+WindowItem::WindowItem(Window *window, Item *parent)
     : Item(parent)
     , m_window(window)
 {
-    AbstractClient *client = qobject_cast<AbstractClient *>(window);
-    if (client) {
-        connect(client, &AbstractClient::decorationChanged, this, &WindowItem::updateDecorationItem);
-        updateDecorationItem();
-    }
-    connect(window, &Toplevel::shadowChanged, this, &WindowItem::updateShadowItem);
+    connect(window, &Window::decorationChanged, this, &WindowItem::updateDecorationItem);
+    updateDecorationItem();
+
+    connect(window, &Window::shadowChanged, this, &WindowItem::updateShadowItem);
     updateShadowItem();
 
-    connect(window, &Toplevel::windowClosed, this, &WindowItem::handleWindowClosed);
+    if (waylandServer()) {
+        connect(waylandServer(), &WaylandServer::lockStateChanged, this, &WindowItem::updateVisibility);
+    }
+    connect(window, &Window::minimizedChanged, this, &WindowItem::updateVisibility);
+    connect(window, &Window::hiddenChanged, this, &WindowItem::updateVisibility);
+    connect(window, &Window::activitiesChanged, this, &WindowItem::updateVisibility);
+    connect(window, &Window::desktopChanged, this, &WindowItem::updateVisibility);
+    connect(workspace(), &Workspace::currentActivityChanged, this, &WindowItem::updateVisibility);
+    connect(workspace(), &Workspace::currentDesktopChanged, this, &WindowItem::updateVisibility);
+    updateVisibility();
+
+    connect(window, &Window::windowClosed, this, &WindowItem::handleWindowClosed);
 }
 
 SurfaceItem *WindowItem::surfaceItem() const
@@ -47,15 +58,98 @@ ShadowItem *WindowItem::shadowItem() const
     return m_shadowItem.data();
 }
 
-Toplevel *WindowItem::window() const
+Window *WindowItem::window() const
 {
     return m_window;
 }
 
-void WindowItem::handleWindowClosed(Toplevel *original, Deleted *deleted)
+void WindowItem::refVisible(int reason)
+{
+    if (reason & PAINT_DISABLED_BY_HIDDEN) {
+        m_forceVisibleByHiddenCount++;
+    }
+    if (reason & PAINT_DISABLED_BY_DELETE) {
+        m_forceVisibleByDeleteCount++;
+    }
+    if (reason & PAINT_DISABLED_BY_DESKTOP) {
+        m_forceVisibleByDesktopCount++;
+    }
+    if (reason & PAINT_DISABLED_BY_MINIMIZE) {
+        m_forceVisibleByMinimizeCount++;
+    }
+    if (reason & PAINT_DISABLED_BY_ACTIVITY) {
+        m_forceVisibleByActivityCount++;
+    }
+    updateVisibility();
+}
+
+void WindowItem::unrefVisible(int reason)
+{
+    if (reason & PAINT_DISABLED_BY_HIDDEN) {
+        Q_ASSERT(m_forceVisibleByHiddenCount > 0);
+        m_forceVisibleByHiddenCount--;
+    }
+    if (reason & PAINT_DISABLED_BY_DELETE) {
+        Q_ASSERT(m_forceVisibleByDeleteCount > 0);
+        m_forceVisibleByDeleteCount--;
+    }
+    if (reason & PAINT_DISABLED_BY_DESKTOP) {
+        Q_ASSERT(m_forceVisibleByDesktopCount > 0);
+        m_forceVisibleByDesktopCount--;
+    }
+    if (reason & PAINT_DISABLED_BY_MINIMIZE) {
+        Q_ASSERT(m_forceVisibleByMinimizeCount > 0);
+        m_forceVisibleByMinimizeCount--;
+    }
+    if (reason & PAINT_DISABLED_BY_ACTIVITY) {
+        Q_ASSERT(m_forceVisibleByActivityCount > 0);
+        m_forceVisibleByActivityCount--;
+    }
+    updateVisibility();
+}
+
+void WindowItem::handleWindowClosed(Window *original, Deleted *deleted)
 {
     Q_UNUSED(original)
     m_window = deleted;
+}
+
+bool WindowItem::computeVisibility() const
+{
+    if (waylandServer() && waylandServer()->isScreenLocked()) {
+        return m_window->isLockScreen() || m_window->isInputMethod();
+    }
+    if (m_window->isDeleted()) {
+        if (m_forceVisibleByDeleteCount == 0) {
+            return false;
+        }
+    }
+    if (!m_window->isOnCurrentDesktop()) {
+        if (m_forceVisibleByDesktopCount == 0) {
+            return false;
+        }
+    }
+    if (!m_window->isOnCurrentActivity()) {
+        if (m_forceVisibleByActivityCount == 0) {
+            return false;
+        }
+    }
+    if (m_window->isMinimized()) {
+        if (m_forceVisibleByMinimizeCount == 0) {
+            return false;
+        }
+    }
+    if (m_window->isHiddenInternal()) {
+        if (m_forceVisibleByHiddenCount == 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void WindowItem::updateVisibility()
+{
+    setVisible(computeVisibility());
 }
 
 void WindowItem::updateSurfaceItem(SurfaceItem *surfaceItem)
@@ -63,16 +157,16 @@ void WindowItem::updateSurfaceItem(SurfaceItem *surfaceItem)
     m_surfaceItem.reset(surfaceItem);
 
     if (m_surfaceItem) {
-        connect(m_window, &Toplevel::shadeChanged, this, &WindowItem::updateSurfaceVisibility);
-        connect(m_window, &Toplevel::bufferGeometryChanged, this, &WindowItem::updateSurfacePosition);
-        connect(m_window, &Toplevel::frameGeometryChanged, this, &WindowItem::updateSurfacePosition);
+        connect(m_window, &Window::shadeChanged, this, &WindowItem::updateSurfaceVisibility);
+        connect(m_window, &Window::bufferGeometryChanged, this, &WindowItem::updateSurfacePosition);
+        connect(m_window, &Window::frameGeometryChanged, this, &WindowItem::updateSurfacePosition);
 
         updateSurfacePosition();
         updateSurfaceVisibility();
     } else {
-        disconnect(m_window, &Toplevel::shadeChanged, this, &WindowItem::updateSurfaceVisibility);
-        disconnect(m_window, &Toplevel::bufferGeometryChanged, this, &WindowItem::updateSurfacePosition);
-        disconnect(m_window, &Toplevel::frameGeometryChanged, this, &WindowItem::updateSurfacePosition);
+        disconnect(m_window, &Window::shadeChanged, this, &WindowItem::updateSurfaceVisibility);
+        disconnect(m_window, &Window::bufferGeometryChanged, this, &WindowItem::updateSurfacePosition);
+        disconnect(m_window, &Window::frameGeometryChanged, this, &WindowItem::updateSurfacePosition);
     }
 }
 
@@ -108,12 +202,11 @@ void WindowItem::updateShadowItem()
 
 void WindowItem::updateDecorationItem()
 {
-    AbstractClient *client = qobject_cast<AbstractClient *>(m_window);
-    if (!client || client->isZombie()) {
+    if (m_window->isDeleted() || m_window->isZombie()) {
         return;
     }
-    if (client->decoration()) {
-        m_decorationItem.reset(new DecorationItem(client->decoration(), client, this));
+    if (m_window->decoration()) {
+        m_decorationItem.reset(new DecorationItem(m_window->decoration(), m_window, this));
         if (m_shadowItem) {
             m_decorationItem->stackAfter(m_shadowItem.data());
         } else if (m_surfaceItem) {
@@ -124,13 +217,13 @@ void WindowItem::updateDecorationItem()
     }
 }
 
-WindowItemX11::WindowItemX11(Toplevel *window, Item *parent)
+WindowItemX11::WindowItemX11(Window *window, Item *parent)
     : WindowItem(window, parent)
 {
     initialize();
 
     // Xwayland windows and Wayland surfaces are associated asynchronously.
-    connect(window, &Toplevel::surfaceChanged, this, &WindowItemX11::initialize);
+    connect(window, &Window::surfaceChanged, this, &WindowItemX11::initialize);
 }
 
 void WindowItemX11::initialize()
@@ -151,13 +244,13 @@ void WindowItemX11::initialize()
     }
 }
 
-WindowItemWayland::WindowItemWayland(Toplevel *window, Item *parent)
+WindowItemWayland::WindowItemWayland(Window *window, Item *parent)
     : WindowItem(window, parent)
 {
     updateSurfaceItem(new SurfaceItemWayland(window->surface(), window, this));
 }
 
-WindowItemInternal::WindowItemInternal(InternalClient *window, Item *parent)
+WindowItemInternal::WindowItemInternal(InternalWindow *window, Item *parent)
     : WindowItem(window, parent)
 {
     updateSurfaceItem(new SurfaceItemInternal(window, this));

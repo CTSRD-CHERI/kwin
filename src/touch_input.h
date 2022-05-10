@@ -21,14 +21,14 @@ namespace KWin
 
 class InputDevice;
 class InputRedirection;
-class Toplevel;
+class Window;
 
 namespace Decoration
 {
 class DecoratedClientImpl;
 }
 
-class TouchInputRedirection : public InputDeviceHandler
+class KWIN_EXPORT TouchInputRedirection : public InputDeviceHandler
 {
     Q_OBJECT
 public:
@@ -75,7 +75,7 @@ public:
 private:
     void cleanupDecoration(Decoration::DecoratedClientImpl *old, Decoration::DecoratedClientImpl *now) override;
 
-    void focusUpdate(Toplevel *focusOld, Toplevel *focusNow) override;
+    void focusUpdate(Window *focusOld, Window *focusNow) override;
 
     QSet<qint32> m_activeTouchPoints;
     bool m_inited = false;

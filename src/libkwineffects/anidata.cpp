@@ -31,17 +31,6 @@ FullScreenEffectLock::~FullScreenEffectLock()
     effects->setActiveFullScreenEffect(nullptr);
 }
 
-KeepAliveLock::KeepAliveLock(EffectWindow *w)
-    : m_window(w)
-{
-    m_window->refWindow();
-}
-
-KeepAliveLock::~KeepAliveLock()
-{
-    m_window->unrefWindow();
-}
-
 PreviousWindowPixmapLock::PreviousWindowPixmapLock(EffectWindow *w)
     : m_window(w)
 {
@@ -62,6 +51,7 @@ AniData::AniData()
     , customCurve(0) // Linear
     , meta(0)
     , startTime(0)
+    , frozenTime(-1)
     , waitAtSource(false)
     , keepAlive(true)
     , lastPresentTime(std::chrono::milliseconds::zero())
@@ -71,17 +61,19 @@ AniData::AniData()
 AniData::AniData(AnimationEffect::Attribute a, int meta_, const FPx2 &to_,
                  int delay, const FPx2 &from_, bool waitAtSource_,
                  FullScreenEffectLockPtr fullScreenEffectLock_, bool keepAlive,
-                 PreviousWindowPixmapLockPtr previousWindowPixmapLock_)
+                 PreviousWindowPixmapLockPtr previousWindowPixmapLock_, GLShader *shader)
     : attribute(a)
     , from(from_)
     , to(to_)
     , meta(meta_)
     , startTime(AnimationEffect::clock() + delay)
+    , frozenTime(-1)
     , fullScreenEffectLock(std::move(fullScreenEffectLock_))
     , waitAtSource(waitAtSource_)
     , keepAlive(keepAlive)
     , previousWindowPixmapLock(std::move(previousWindowPixmapLock_))
     , lastPresentTime(std::chrono::milliseconds::zero())
+    , shader(shader)
 {
 }
 

@@ -8,8 +8,6 @@
 
 #include <kwinquickeffect.h>
 
-#include "expolayout.h"
-
 namespace KWin
 {
 
@@ -17,7 +15,8 @@ class OverviewEffect : public QuickSceneEffect
 {
     Q_OBJECT
     Q_PROPERTY(int animationDuration READ animationDuration NOTIFY animationDurationChanged)
-    Q_PROPERTY(ExpoLayout::LayoutMode layout READ layout NOTIFY layoutChanged)
+    Q_PROPERTY(int layout READ layout NOTIFY layoutChanged)
+    Q_PROPERTY(bool ignoreMinimized READ ignoreMinimized NOTIFY ignoreMinimizedChanged)
     Q_PROPERTY(bool blurBackground READ blurBackground NOTIFY blurBackgroundChanged)
     Q_PROPERTY(qreal partialActivationFactor READ partialActivationFactor NOTIFY partialActivationFactorChanged)
     // More efficient from a property binding pov rather than binding to partialActivationFactor !== 0
@@ -32,8 +31,10 @@ public:
     OverviewEffect();
     ~OverviewEffect() override;
 
-    ExpoLayout::LayoutMode layout() const;
-    void setLayout(ExpoLayout::LayoutMode layout);
+    int layout() const;
+    void setLayout(int layout);
+
+    bool ignoreMinimized() const;
 
     int animationDuration() const;
     void setAnimationDuration(int duration);
@@ -55,6 +56,7 @@ Q_SIGNALS:
     void blurBackgroundChanged();
     void partialActivationFactorChanged();
     void gestureInProgressChanged();
+    void ignoreMinimizedChanged();
 
 public Q_SLOTS:
     void activate();
@@ -71,6 +73,7 @@ private:
 
     QTimer *m_shutdownTimer;
     QAction *m_toggleAction = nullptr;
+    QAction *m_realtimeToggleAction = nullptr;
     QList<QKeySequence> m_toggleShortcut;
     QList<ElectricBorder> m_borderActivate;
     QList<ElectricBorder> m_touchBorderActivate;
@@ -78,7 +81,7 @@ private:
     bool m_blurBackground = false;
     Status m_status = Status::Inactive;
     int m_animationDuration = 200;
-    ExpoLayout::LayoutMode m_layout = ExpoLayout::LayoutNatural;
+    int m_layout = 1;
 };
 
 } // namespace KWin

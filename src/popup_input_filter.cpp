@@ -5,13 +5,13 @@
 
 */
 #include "popup_input_filter.h"
-#include "abstract_client.h"
 #include "deleted.h"
-#include "internal_client.h"
+#include "internalwindow.h"
+#include "wayland/seat_interface.h"
 #include "wayland_server.h"
+#include "window.h"
 #include "workspace.h"
 
-#include <KWaylandServer/seat_interface.h>
 #include <QMouseEvent>
 
 namespace KWin
@@ -20,36 +20,36 @@ namespace KWin
 PopupInputFilter::PopupInputFilter()
     : QObject()
 {
-    connect(workspace(), &Workspace::clientAdded, this, &PopupInputFilter::handleClientAdded);
-    connect(workspace(), &Workspace::internalClientAdded, this, &PopupInputFilter::handleClientAdded);
+    connect(workspace(), &Workspace::windowAdded, this, &PopupInputFilter::handleWindowAdded);
+    connect(workspace(), &Workspace::internalWindowAdded, this, &PopupInputFilter::handleWindowAdded);
 }
 
-void PopupInputFilter::handleClientAdded(Toplevel *client)
+void PopupInputFilter::handleWindowAdded(Window *window)
 {
-    if (m_popupClients.contains(client)) {
+    if (m_popupWindows.contains(window)) {
         return;
     }
-    if (client->hasPopupGrab()) {
-        // TODO: verify that the Toplevel is allowed as a popup
-        connect(client, &Toplevel::windowShown, this, &PopupInputFilter::handleClientAdded, Qt::UniqueConnection);
-        connect(client, &Toplevel::windowClosed, this, &PopupInputFilter::handleClientRemoved, Qt::UniqueConnection);
-        m_popupClients << client;
+    if (window->hasPopupGrab()) {
+        // TODO: verify that the Window is allowed as a popup
+        connect(window, &Window::windowShown, this, &PopupInputFilter::handleWindowAdded, Qt::UniqueConnection);
+        connect(window, &Window::windowClosed, this, &PopupInputFilter::handleWindowRemoved, Qt::UniqueConnection);
+        m_popupWindows << window;
     }
 }
 
-void PopupInputFilter::handleClientRemoved(Toplevel *client)
+void PopupInputFilter::handleWindowRemoved(Window *window)
 {
-    m_popupClients.removeOne(client);
+    m_popupWindows.removeOne(window);
 }
 bool PopupInputFilter::pointerEvent(QMouseEvent *event, quint32 nativeButton)
 {
     Q_UNUSED(nativeButton)
-    if (m_popupClients.isEmpty()) {
+    if (m_popupWindows.isEmpty()) {
         return false;
     }
     if (event->type() == QMouseEvent::MouseButtonPress) {
-        auto pointerFocus = qobject_cast<AbstractClient *>(input()->findToplevel(event->globalPos()));
-        if (!pointerFocus || !AbstractClient::belongToSameApplication(pointerFocus, qobject_cast<AbstractClient *>(m_popupClients.constLast()))) {
+        auto pointerFocus = input()->findToplevel(event->globalPos());
+        if (!pointerFocus || !Window::belongToSameApplication(pointerFocus, m_popupWindows.constLast())) {
             // a press on a window (or no window) not belonging to the popup window
             cancelPopups();
             // filter out this press
@@ -69,13 +69,13 @@ bool PopupInputFilter::pointerEvent(QMouseEvent *event, quint32 nativeButton)
 
 bool PopupInputFilter::keyEvent(QKeyEvent *event)
 {
-    if (m_popupClients.isEmpty()) {
+    if (m_popupWindows.isEmpty()) {
         return false;
     }
 
     auto seat = waylandServer()->seat();
 
-    auto last = m_popupClients.last();
+    auto last = m_popupWindows.last();
     if (last->surface() == nullptr) {
         return false;
     }
@@ -93,11 +93,11 @@ bool PopupInputFilter::touchDown(qint32 id, const QPointF &pos, quint32 time)
 {
     Q_UNUSED(id)
     Q_UNUSED(time)
-    if (m_popupClients.isEmpty()) {
+    if (m_popupWindows.isEmpty()) {
         return false;
     }
-    auto pointerFocus = qobject_cast<AbstractClient *>(input()->findToplevel(pos.toPoint()));
-    if (!pointerFocus || !AbstractClient::belongToSameApplication(pointerFocus, qobject_cast<AbstractClient *>(m_popupClients.constLast()))) {
+    auto pointerFocus = input()->findToplevel(pos.toPoint());
+    if (!pointerFocus || !Window::belongToSameApplication(pointerFocus, m_popupWindows.constLast())) {
         // a touch on a window (or no window) not belonging to the popup window
         cancelPopups();
         // filter out this touch
@@ -116,8 +116,8 @@ bool PopupInputFilter::touchDown(qint32 id, const QPointF &pos, quint32 time)
 
 void PopupInputFilter::cancelPopups()
 {
-    while (!m_popupClients.isEmpty()) {
-        auto c = m_popupClients.takeLast();
+    while (!m_popupWindows.isEmpty()) {
+        auto c = m_popupWindows.takeLast();
         c->popupDone();
     }
 }

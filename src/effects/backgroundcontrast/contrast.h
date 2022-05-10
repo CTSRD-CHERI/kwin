@@ -15,7 +15,10 @@
 #include <QVector2D>
 #include <QVector>
 
-#include <KWaylandServer/contrast_interface.h>
+namespace KWaylandServer
+{
+class ContrastManagerInterface;
+}
 
 namespace KWin
 {
@@ -34,7 +37,6 @@ public:
 
     static QMatrix4x4 colorMatrix(qreal contrast, qreal intensity, qreal saturation);
     void drawWindow(EffectWindow *w, int mask, const QRegion &region, WindowPaintData &data) override;
-    void paintEffectFrame(EffectFrame *frame, const QRegion &region, double opacity, double frameOpacity) override;
 
     bool provides(Feature feature) override;
     bool isActive() const override;

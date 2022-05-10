@@ -14,18 +14,19 @@
 #include "virtualdesktopmanageradaptor.h"
 
 // kwin
-#include "abstract_client.h"
 #include "atoms.h"
 #include "composite.h"
 #include "debug_console.h"
 #include "kwinadaptor.h"
 #include "main.h"
+#include "output.h"
 #include "placement.h"
 #include "platform.h"
 #include "pluginmanager.h"
 #include "renderbackend.h"
 #include "unmanaged.h"
 #include "virtualdesktops.h"
+#include "window.h"
 #include "workspace.h"
 #if KWIN_BUILD_ACTIVITIES
 #include "activities.h"
@@ -129,6 +130,11 @@ WRAP(QString, supportInformation)
 
 #undef WRAP
 
+QString DBusInterface::activeOutputName()
+{
+    return Workspace::self()->activeOutput()->name();
+}
+
 bool DBusInterface::startActivity(const QString &in0)
 {
 #if KWIN_BUILD_ACTIVITIES
@@ -188,7 +194,7 @@ void DBusInterface::replace()
 
 namespace
 {
-QVariantMap clientToVariantMap(const AbstractClient *c)
+QVariantMap clientToVariantMap(const Window *c)
 {
     return
     {
@@ -228,17 +234,19 @@ QVariantMap DBusInterface::queryWindowInfo()
     m_replyQueryWindowInfo = message();
     setDelayedReply(true);
     kwinApp()->platform()->startInteractiveWindowSelection(
-        [this](Toplevel *t) {
-            if (auto c = qobject_cast<AbstractClient *>(t)) {
-                QDBusConnection::sessionBus().send(m_replyQueryWindowInfo.createReply(clientToVariantMap(c)));
-            } else if (qobject_cast<Unmanaged *>(t)) {
-                QDBusConnection::sessionBus().send(m_replyQueryWindowInfo.createErrorReply(
-                    QStringLiteral("org.kde.KWin.Error.InvalidWindow"),
-                    QStringLiteral("Tried to query information about an unmanaged window")));
-            } else {
+        [this](Window *t) {
+            if (!t) {
                 QDBusConnection::sessionBus().send(m_replyQueryWindowInfo.createErrorReply(
                     QStringLiteral("org.kde.KWin.Error.UserCancel"),
                     QStringLiteral("User cancelled the query")));
+                return;
+            }
+            if (t->isClient()) {
+                QDBusConnection::sessionBus().send(m_replyQueryWindowInfo.createReply(clientToVariantMap(t)));
+            } else {
+                QDBusConnection::sessionBus().send(m_replyQueryWindowInfo.createErrorReply(
+                    QStringLiteral("org.kde.KWin.Error.InvalidWindow"),
+                    QStringLiteral("Tried to query information about an unmanaged window")));
             }
         });
     return QVariantMap{};
@@ -247,7 +255,7 @@ QVariantMap DBusInterface::queryWindowInfo()
 QVariantMap DBusInterface::getWindowInfo(const QString &uuid)
 {
     const auto id = QUuid::fromString(uuid);
-    const auto client = workspace()->findAbstractClient([&id](const AbstractClient *c) {
+    const auto client = workspace()->findAbstractClient([&id](const Window *c) {
         return c->internalId() == id;
     });
     if (client) {

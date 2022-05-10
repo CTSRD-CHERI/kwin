@@ -13,9 +13,7 @@
 
 #include "atoms.h"
 #include "platform.h"
-#if KWIN_BUILD_CMS
 #include "colormanager.h"
-#endif
 #include "composite.h"
 #include "cursor.h"
 #include "input.h"
@@ -28,6 +26,7 @@
 #endif
 #include "sm.h"
 #include "utils/xcbutils.h"
+#include "wayland/surface_interface.h"
 #include "workspace.h"
 #include "x11eventfilter.h"
 
@@ -37,7 +36,6 @@
 #include <KAboutData>
 #include <KLocalizedString>
 #include <KPluginMetaData>
-#include <KWaylandServer/surface_interface.h>
 // Qt
 #include <QCommandLineParser>
 #include <QLibraryInfo>
@@ -311,9 +309,7 @@ void Application::createPlugins()
 
 void Application::createColorManager()
 {
-#if KWIN_BUILD_CMS
     ColorManager::create(this);
-#endif
 }
 
 void Application::createInputMethod()
@@ -353,9 +349,7 @@ void Application::destroyPlugins()
 
 void Application::destroyColorManager()
 {
-#if KWIN_BUILD_CMS
     delete ColorManager::self();
-#endif
 }
 
 void Application::destroyInputMethod()

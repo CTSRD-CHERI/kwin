@@ -28,11 +28,15 @@ set(DRM_SOURCES
     placeholderinputeventfilter.cpp
     virtual_egl_gbm_layer.cpp
     drm_lease_egl_gbm_layer.cpp
+    egl_gbm_layer_surface.cpp
+    dmabuf_feedback.cpp
+    drm_dumb_buffer.cpp
+    egl_gbm_cursor_layer.cpp
 )
 
 add_library(KWinWaylandDrmBackend MODULE ${DRM_SOURCES})
 set_target_properties(KWinWaylandDrmBackend PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/org.kde.kwin.waylandbackends/")
-target_link_libraries(KWinWaylandDrmBackend kwin Libdrm::Libdrm gbm::gbm)
+target_link_libraries(KWinWaylandDrmBackend kwin Libdrm::Libdrm gbm::gbm PkgConfig::Libxcvt)
 
 install(
     TARGETS

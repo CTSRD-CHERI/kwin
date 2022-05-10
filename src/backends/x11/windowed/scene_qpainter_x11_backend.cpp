@@ -15,6 +15,29 @@
 
 namespace KWin
 {
+
+X11WindowedQPainterOutput::X11WindowedQPainterOutput(Output *output, xcb_window_t window)
+    : window(window)
+    , buffer(output->pixelSize() * output->scale(), QImage::Format_RGB32)
+    , m_output(output)
+{
+    buffer.fill(Qt::black);
+}
+
+OutputLayerBeginFrameInfo X11WindowedQPainterOutput::beginFrame()
+{
+    return OutputLayerBeginFrameInfo{
+        .renderTarget = RenderTarget(&buffer),
+        .repaint = m_output->rect(),
+    };
+}
+
+void X11WindowedQPainterOutput::endFrame(const QRegion &renderedRegion, const QRegion &damagedRegion)
+{
+    Q_UNUSED(renderedRegion)
+    Q_UNUSED(damagedRegion)
+}
+
 X11WindowedQPainterBackend::X11WindowedQPainterBackend(X11WindowedBackend *backend)
     : QPainterBackend()
     , m_backend(backend)
@@ -25,7 +48,7 @@ X11WindowedQPainterBackend::X11WindowedQPainterBackend(X11WindowedBackend *backe
 
 X11WindowedQPainterBackend::~X11WindowedQPainterBackend()
 {
-    qDeleteAll(m_outputs);
+    m_outputs.clear();
     if (m_gc) {
         xcb_free_gc(m_backend->connection(), m_gc);
     }
@@ -33,33 +56,15 @@ X11WindowedQPainterBackend::~X11WindowedQPainterBackend()
 
 void X11WindowedQPainterBackend::createOutputs()
 {
-    qDeleteAll(m_outputs);
     m_outputs.clear();
     const auto &outputs = m_backend->outputs();
     for (const auto &x11Output : outputs) {
-        Output *output = new Output;
-        output->window = m_backend->windowForScreen(x11Output);
-        output->buffer = QImage(x11Output->pixelSize() * x11Output->scale(), QImage::Format_RGB32);
-        output->buffer.fill(Qt::black);
-        m_outputs.insert(x11Output, output);
+        m_outputs[x11Output] = QSharedPointer<X11WindowedQPainterOutput>::create(x11Output, m_backend->windowForScreen(x11Output));
     }
 }
 
-QImage *X11WindowedQPainterBackend::bufferForScreen(AbstractOutput *output)
+void X11WindowedQPainterBackend::present(Output *output)
 {
-    return &m_outputs[output]->buffer;
-}
-
-QRegion X11WindowedQPainterBackend::beginFrame(AbstractOutput *output)
-{
-    return output->geometry();
-}
-
-void X11WindowedQPainterBackend::endFrame(AbstractOutput *output, const QRegion &renderedRegion, const QRegion &damagedRegion)
-{
-    Q_UNUSED(renderedRegion)
-    Q_UNUSED(damagedRegion)
-
     static_cast<X11WindowedOutput *>(output)->vsyncMonitor()->arm();
 
     xcb_connection_t *c = m_backend->connection();
@@ -69,7 +74,7 @@ void X11WindowedQPainterBackend::endFrame(AbstractOutput *output, const QRegion 
         xcb_create_gc(c, m_gc, window, 0, nullptr);
     }
 
-    Output *rendererOutput = m_outputs[output];
+    const auto &rendererOutput = m_outputs[output];
     Q_ASSERT(rendererOutput);
 
     // TODO: only update changes?
@@ -79,4 +84,8 @@ void X11WindowedQPainterBackend::endFrame(AbstractOutput *output, const QRegion 
                   buffer.sizeInBytes(), buffer.constBits());
 }
 
+OutputLayer *X11WindowedQPainterBackend::primaryLayer(Output *output)
+{
+    return m_outputs[output].get();
+}
 }

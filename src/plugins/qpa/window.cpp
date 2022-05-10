@@ -12,7 +12,7 @@
 #include "platform.h"
 #include "screens.h"
 
-#include "internal_client.h"
+#include "internalwindow.h"
 
 #include <logging.h>
 
@@ -116,7 +116,7 @@ QSharedPointer<QOpenGLFramebufferObject> Window::swapFBO()
     return fbo;
 }
 
-InternalClient *Window::client() const
+InternalWindow *Window::internalWindow() const
 {
     return m_handle;
 }
@@ -141,7 +141,7 @@ void Window::map()
         return;
     }
 
-    m_handle = new InternalClient(window());
+    m_handle = new InternalWindow(window());
 }
 
 void Window::unmap()
@@ -150,7 +150,7 @@ void Window::unmap()
         return;
     }
 
-    m_handle->destroyClient();
+    m_handle->destroyWindow();
     m_handle = nullptr;
 
     m_contentFBO = nullptr;

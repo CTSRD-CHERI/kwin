@@ -16,8 +16,8 @@
 
 namespace KWin
 {
-class AbstractClient;
-class AbstractOutput;
+class Window;
+class Output;
 
 namespace ScriptingModels::V3
 {
@@ -41,13 +41,13 @@ public:
     int rowCount(const QModelIndex &parent = QModelIndex()) const override;
 
 private:
-    void markRoleChanged(AbstractClient *client, int role);
+    void markRoleChanged(Window *client, int role);
 
-    void handleClientAdded(AbstractClient *client);
-    void handleClientRemoved(AbstractClient *client);
-    void setupClientConnections(AbstractClient *client);
+    void handleClientAdded(Window *client);
+    void handleClientRemoved(Window *client);
+    void setupClientConnections(Window *client);
 
-    QList<AbstractClient *> m_clients;
+    QList<Window *> m_clients;
 };
 
 class ClientFilterModel : public QSortFilterProxyModel
@@ -59,6 +59,7 @@ class ClientFilterModel : public QSortFilterProxyModel
     Q_PROPERTY(QString filter READ filter WRITE setFilter NOTIFY filterChanged)
     Q_PROPERTY(QString screenName READ screenName WRITE setScreenName RESET resetScreenName NOTIFY screenNameChanged)
     Q_PROPERTY(WindowTypes windowType READ windowType WRITE setWindowType RESET resetWindowType NOTIFY windowTypeChanged)
+    Q_PROPERTY(bool minimizedWindows READ minimizedWindows WRITE setMinimizedWindows NOTIFY minimizedWindowsChanged)
 
 public:
     enum WindowType {
@@ -96,6 +97,9 @@ public:
     void setWindowType(WindowTypes windowType);
     void resetWindowType();
 
+    void setMinimizedWindows(bool show);
+    bool minimizedWindows() const;
+
 protected:
     bool filterAcceptsRow(int source_row, const QModelIndex &source_parent) const override;
 
@@ -106,16 +110,18 @@ Q_SIGNALS:
     void clientModelChanged();
     void filterChanged();
     void windowTypeChanged();
+    void minimizedWindowsChanged();
 
 private:
-    WindowTypes windowTypeMask(AbstractClient *client) const;
+    WindowTypes windowTypeMask(Window *client) const;
 
     ClientModel *m_clientModel = nullptr;
     std::optional<QString> m_activity;
-    QPointer<AbstractOutput> m_output;
+    QPointer<Output> m_output;
     QPointer<VirtualDesktop> m_desktop;
     QString m_filter;
     std::optional<WindowTypes> m_windowType;
+    bool m_showMinimizedWindows = true;
 };
 
 } // namespace ScriptingModels::V3

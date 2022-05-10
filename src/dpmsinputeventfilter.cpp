@@ -7,15 +7,14 @@
     SPDX-License-Identifier: GPL-2.0-or-later
 */
 #include "dpmsinputeventfilter.h"
-#include "abstract_wayland_output.h"
 #include "main.h"
+#include "output.h"
 #include "platform.h"
+#include "wayland/seat_interface.h"
 #include "wayland_server.h"
 
 #include <QGuiApplication>
 #include <QKeyEvent>
-
-#include <KWaylandServer/seat_interface.h>
 
 namespace KWin
 {
@@ -106,10 +105,9 @@ bool DpmsInputEventFilter::touchMotion(qint32 id, const QPointF &pos, quint32 ti
 
 void DpmsInputEventFilter::notify()
 {
-    const QVector<AbstractOutput *> enabledOutputs = kwinApp()->platform()->enabledOutputs();
-    for (auto it = enabledOutputs.constBegin(), end = enabledOutputs.constEnd(); it != end; it++) {
-        auto waylandOutput = static_cast<AbstractWaylandOutput *>(*it);
-        waylandOutput->setDpmsMode(AbstractWaylandOutput::DpmsMode::On);
+    const QVector<Output *> enabledOutputs = kwinApp()->platform()->enabledOutputs();
+    for (Output *output : enabledOutputs) {
+        output->setDpmsMode(Output::DpmsMode::On);
     }
 }
 

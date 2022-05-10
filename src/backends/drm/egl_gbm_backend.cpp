@@ -20,6 +20,7 @@
 #include "drm_pipeline.h"
 #include "dumb_swapchain.h"
 #include "egl_dmabuf.h"
+#include "egl_gbm_cursor_layer.h"
 #include "egl_gbm_layer.h"
 #include "gbm_surface.h"
 #include "kwineglutils_p.h"
@@ -31,6 +32,9 @@
 #include "shadowbuffer.h"
 #include "surfaceitem_wayland.h"
 #include "virtual_egl_gbm_layer.h"
+#include "wayland/clientconnection.h"
+#include "wayland/linuxdmabufv1clientbuffer.h"
+#include "wayland/surface_interface.h"
 // kwin libs
 #include <kwineglimagetexture.h>
 #include <kwinglplatform.h>
@@ -39,10 +43,6 @@
 #include <errno.h>
 #include <gbm.h>
 #include <unistd.h>
-// kwayland server
-#include "KWaylandServer/clientconnection.h"
-#include "KWaylandServer/linuxdmabufv1clientbuffer.h"
-#include "KWaylandServer/surface_interface.h"
 
 namespace KWin
 {
@@ -57,7 +57,7 @@ EglGbmBackend::EglGbmBackend(DrmBackend *drmBackend)
 
 EglGbmBackend::~EglGbmBackend()
 {
-    Q_EMIT aboutToBeDestroyed();
+    m_backend->releaseBuffers();
     cleanup();
     m_backend->setRenderBackend(nullptr);
 }
@@ -161,42 +161,19 @@ bool EglGbmBackend::initBufferConfigs()
 
         GbmFormat format;
         format.drmFormat = gbmFormat;
+        EGLint red, green, blue;
         // Query number of bits for color channel
-        eglGetConfigAttrib(eglDisplay(), configs[i], EGL_RED_SIZE, &format.redSize);
-        eglGetConfigAttrib(eglDisplay(), configs[i], EGL_GREEN_SIZE, &format.greenSize);
-        eglGetConfigAttrib(eglDisplay(), configs[i], EGL_BLUE_SIZE, &format.blueSize);
+        eglGetConfigAttrib(eglDisplay(), configs[i], EGL_RED_SIZE, &red);
+        eglGetConfigAttrib(eglDisplay(), configs[i], EGL_GREEN_SIZE, &green);
+        eglGetConfigAttrib(eglDisplay(), configs[i], EGL_BLUE_SIZE, &blue);
         eglGetConfigAttrib(eglDisplay(), configs[i], EGL_ALPHA_SIZE, &format.alphaSize);
-
-        if (m_formats.contains(format)) {
+        format.bpp = red + green + blue;
+        if (m_formats.contains(gbmFormat)) {
             continue;
         }
-        m_formats << format;
+        m_formats[gbmFormat] = format;
         m_configs[format.drmFormat] = configs[i];
     }
-
-    QVector<int> colorDepthOrder = {30, 24};
-    bool ok = false;
-    const int preferred = qEnvironmentVariableIntValue("KWIN_DRM_PREFER_COLOR_DEPTH", &ok);
-    if (ok) {
-        colorDepthOrder.prepend(preferred);
-    }
-
-    std::sort(m_formats.begin(), m_formats.end(), [&colorDepthOrder](const auto &lhs, const auto &rhs) {
-        const int ls = lhs.redSize + lhs.greenSize + lhs.blueSize;
-        const int rs = rhs.redSize + rhs.greenSize + rhs.blueSize;
-        if (ls == rs) {
-            return lhs.alphaSize < rhs.alphaSize;
-        } else {
-            for (const int &d : qAsConst(colorDepthOrder)) {
-                if (ls == d) {
-                    return true;
-                } else if (rs == d) {
-                    return false;
-                }
-            }
-            return ls > rs;
-        }
-    });
     if (!m_formats.isEmpty()) {
         return true;
     }
@@ -216,11 +193,6 @@ bool EglGbmBackend::initBufferConfigs()
     return false;
 }
 
-void EglGbmBackend::aboutToStartPainting(AbstractOutput *output, const QRegion &damagedRegion)
-{
-    static_cast<DrmAbstractOutput *>(output)->outputLayer()->aboutToStartPainting(damagedRegion);
-}
-
 SurfaceTexture *EglGbmBackend::createSurfaceTextureInternal(SurfacePixmapInternal *pixmap)
 {
     return new BasicEGLSurfaceTextureInternal(this, pixmap);
@@ -231,55 +203,27 @@ SurfaceTexture *EglGbmBackend::createSurfaceTextureWayland(SurfacePixmapWayland 
     return new BasicEGLSurfaceTextureWayland(this, pixmap);
 }
 
-QRegion EglGbmBackend::beginFrame(AbstractOutput *output)
+void EglGbmBackend::present(Output *output)
 {
-    return static_cast<DrmAbstractOutput *>(output)->outputLayer()->startRendering().value_or(QRegion());
+    static_cast<DrmAbstractOutput *>(output)->present();
 }
 
-void EglGbmBackend::endFrame(AbstractOutput *output, const QRegion &renderedRegion,
-                             const QRegion &damagedRegion)
+OutputLayer *EglGbmBackend::primaryLayer(Output *output)
 {
-    Q_UNUSED(renderedRegion)
-
-    const auto drmOutput = static_cast<DrmAbstractOutput *>(output);
-    drmOutput->outputLayer()->endRendering(damagedRegion);
-    drmOutput->present();
+    return static_cast<DrmAbstractOutput *>(output)->outputLayer();
 }
 
-bool EglGbmBackend::scanout(AbstractOutput *output, SurfaceItem *surfaceItem)
-{
-    const auto drmOutput = static_cast<DrmAbstractOutput *>(output);
-    if (drmOutput->outputLayer()->scanout(surfaceItem)) {
-        drmOutput->present();
-        return true;
-    } else {
-        return false;
-    }
-}
-
-QSharedPointer<GLTexture> EglGbmBackend::textureForOutput(AbstractOutput *output) const
+QSharedPointer<GLTexture> EglGbmBackend::textureForOutput(Output *output) const
 {
     const auto drmOutput = static_cast<DrmAbstractOutput *>(output);
     return static_cast<EglGbmLayer *>(drmOutput->outputLayer())->texture();
 }
 
-GbmFormat EglGbmBackend::gbmFormatForDrmFormat(uint32_t format) const
+std::optional<GbmFormat> EglGbmBackend::gbmFormatForDrmFormat(uint32_t format) const
 {
     // TODO use a hardcoded lookup table where needed instead?
-    const auto it = std::find_if(m_formats.begin(), m_formats.end(), [format](const auto &gbmFormat) {
-        return gbmFormat.drmFormat == format;
-    });
-    if (it == m_formats.end()) {
-        return GbmFormat{
-            .drmFormat = DRM_FORMAT_XRGB8888,
-            .redSize = 8,
-            .greenSize = 8,
-            .blueSize = 8,
-            .alphaSize = 0,
-        };
-    } else {
-        return *it;
-    }
+    const auto it = m_formats.constFind(format);
+    return it == m_formats.constEnd() ? std::optional<GbmFormat>() : *it;
 }
 
 bool EglGbmBackend::prefer10bpc() const
@@ -294,13 +238,18 @@ EGLConfig EglGbmBackend::config(uint32_t format) const
     return m_configs.value(format, EGL_NO_CONFIG_KHR);
 }
 
-QSharedPointer<DrmPipelineLayer> EglGbmBackend::createDrmPipelineLayer(DrmPipeline *pipeline)
+QSharedPointer<DrmPipelineLayer> EglGbmBackend::createPrimaryLayer(DrmPipeline *pipeline)
 {
     if (pipeline->output()) {
         return QSharedPointer<EglGbmLayer>::create(this, pipeline);
     } else {
-        return QSharedPointer<DrmLeaseEglGbmLayer>::create(this, pipeline);
+        return QSharedPointer<DrmLeaseEglGbmLayer>::create(pipeline);
     }
+}
+
+QSharedPointer<DrmOverlayLayer> EglGbmBackend::createCursorLayer(DrmPipeline *pipeline)
+{
+    return QSharedPointer<EglGbmCursorLayer>::create(this, pipeline);
 }
 
 QSharedPointer<DrmOutputLayer> EglGbmBackend::createLayer(DrmVirtualOutput *output)

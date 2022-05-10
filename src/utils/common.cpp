@@ -72,9 +72,6 @@ StrutRect &StrutRect::operator=(const StrutRect &other)
     return *this;
 }
 
-#endif
-
-#ifndef KCMRULES
 void updateXTime()
 {
     kwinApp()->platform()->updateXTime();
@@ -106,9 +103,11 @@ bool grabXKeyboard(xcb_window_t w)
         return false;
     }
     if (keyboard_grabbed) {
+        qCDebug(KWIN_CORE) << "Failed to grab X Keyboard: already grabbed by us";
         return false;
     }
     if (qApp->activePopupWidget() != nullptr) {
+        qCDebug(KWIN_CORE) << "Failed to grab X Keyboard: no popup widget";
         return false;
     }
     if (w == XCB_WINDOW_NONE) {
@@ -118,9 +117,11 @@ bool grabXKeyboard(xcb_window_t w)
                                                                      XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC);
     ScopedCPointer<xcb_grab_keyboard_reply_t> grab(xcb_grab_keyboard_reply(connection(), c, nullptr));
     if (grab.isNull()) {
+        qCDebug(KWIN_CORE) << "Failed to grab X Keyboard: grab null";
         return false;
     }
     if (grab->status != XCB_GRAB_STATUS_SUCCESS) {
+        qCDebug(KWIN_CORE) << "Failed to grab X Keyboard: grab failed with status" << grab->status;
         return false;
     }
     keyboard_grabbed = true;

@@ -12,6 +12,7 @@
 
 #include <kwinglutils.h>
 
+#include <QHash>
 #include <QPointer>
 #include <QSharedPointer>
 #include <optional>
@@ -26,7 +27,7 @@ class SurfaceInterface;
 
 namespace KWin
 {
-class AbstractOutput;
+class Output;
 class DrmAbstractOutput;
 class DrmBuffer;
 class DrmGbmBuffer;
@@ -44,9 +45,7 @@ class DrmPipeline;
 struct GbmFormat
 {
     uint32_t drmFormat = 0;
-    EGLint redSize = -1;
-    EGLint greenSize = -1;
-    EGLint blueSize = -1;
+    uint32_t bpp;
     EGLint alphaSize = -1;
 };
 bool operator==(const GbmFormat &lhs, const GbmFormat &rhs);
@@ -64,26 +63,21 @@ public:
     SurfaceTexture *createSurfaceTextureInternal(SurfacePixmapInternal *pixmap) override;
     SurfaceTexture *createSurfaceTextureWayland(SurfacePixmapWayland *pixmap) override;
 
-    QRegion beginFrame(AbstractOutput *output) override;
-    void endFrame(AbstractOutput *output, const QRegion &renderedRegion, const QRegion &damagedRegion) override;
+    void present(Output *output) override;
+    OutputLayer *primaryLayer(Output *output) override;
+
     void init() override;
-    bool scanout(AbstractOutput *output, SurfaceItem *surfaceItem) override;
     bool prefer10bpc() const override;
-    QSharedPointer<DrmPipelineLayer> createDrmPipelineLayer(DrmPipeline *pipeline) override;
+    QSharedPointer<DrmPipelineLayer> createPrimaryLayer(DrmPipeline *pipeline) override;
+    QSharedPointer<DrmOverlayLayer> createCursorLayer(DrmPipeline *pipeline) override;
     QSharedPointer<DrmOutputLayer> createLayer(DrmVirtualOutput *output) override;
 
-    QSharedPointer<GLTexture> textureForOutput(AbstractOutput *requestedOutput) const override;
+    QSharedPointer<GLTexture> textureForOutput(Output *requestedOutput) const override;
 
     QSharedPointer<DrmBuffer> testBuffer(DrmAbstractOutput *output);
     EGLConfig config(uint32_t format) const;
-    GbmFormat gbmFormatForDrmFormat(uint32_t format) const;
+    std::optional<GbmFormat> gbmFormatForDrmFormat(uint32_t format) const;
     DrmGpu *gpu() const;
-
-Q_SIGNALS:
-    void aboutToBeDestroyed();
-
-protected:
-    void aboutToStartPainting(AbstractOutput *output, const QRegion &damage) override;
 
 private:
     bool initializeEgl();
@@ -91,8 +85,8 @@ private:
     bool initRenderingContext();
 
     DrmBackend *m_backend;
-    QVector<GbmFormat> m_formats;
-    QMap<uint32_t, EGLConfig> m_configs;
+    QHash<uint32_t, GbmFormat> m_formats;
+    QHash<uint32_t, EGLConfig> m_configs;
 
     friend class EglGbmTexture;
 };

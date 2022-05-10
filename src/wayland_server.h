@@ -53,13 +53,11 @@ class XdgDecorationManagerV1Interface;
 namespace KWin
 {
 
-class AbstractClient;
-class AbstractOutput;
-class Toplevel;
-class XdgPopupClient;
-class XdgSurfaceClient;
-class XdgToplevelClient;
-class AbstractWaylandOutput;
+class Window;
+class Output;
+class XdgPopupWindow;
+class XdgSurfaceWindow;
+class XdgToplevelWindow;
 class WaylandOutput;
 class WaylandOutputDevice;
 
@@ -140,14 +138,14 @@ public:
     {
         return m_idle;
     }
-    QList<AbstractClient *> clients() const
+    QList<Window *> windows() const
     {
-        return m_clients;
+        return m_windows;
     }
-    void removeClient(AbstractClient *c);
-    AbstractClient *findClient(const KWaylandServer::SurfaceInterface *surface) const;
-    XdgToplevelClient *findXdgToplevelClient(KWaylandServer::SurfaceInterface *surface) const;
-    XdgSurfaceClient *findXdgSurfaceClient(KWaylandServer::SurfaceInterface *surface) const;
+    void removeWindow(Window *c);
+    Window *findWindow(const KWaylandServer::SurfaceInterface *surface) const;
+    XdgToplevelWindow *findXdgToplevelWindow(KWaylandServer::SurfaceInterface *surface) const;
+    XdgSurfaceWindow *findXdgSurfaceWindow(KWaylandServer::SurfaceInterface *surface) const;
 
     /**
      * @returns a transient parent of a surface imported with the foreign protocol, if any
@@ -226,7 +224,7 @@ public:
         m_linuxDmabufBuffers.remove(buffer);
     }
 
-    AbstractWaylandOutput *findOutput(KWaylandServer::OutputInterface *output) const;
+    Output *findOutput(KWaylandServer::OutputInterface *output) const;
 
     /**
      * Returns the first socket name that can be used to connect to this server.
@@ -235,23 +233,24 @@ public:
     QString socketName() const;
 
 Q_SIGNALS:
-    void shellClientAdded(KWin::AbstractClient *);
-    void shellClientRemoved(KWin::AbstractClient *);
+    void windowAdded(KWin::Window *);
+    void windowRemoved(KWin::Window *);
     void initialized();
     void foreignTransientChanged(KWaylandServer::SurfaceInterface *child);
+    void lockStateChanged();
 
 private:
     int createScreenLockerConnection();
-    void shellClientShown(Toplevel *t);
+    void windowShown(Window *t);
     void initScreenLocker();
-    void registerXdgGenericClient(AbstractClient *client);
-    void registerXdgToplevelClient(XdgToplevelClient *client);
-    void registerXdgPopupClient(XdgPopupClient *client);
-    void registerShellClient(AbstractClient *client);
-    void handleOutputAdded(AbstractOutput *output);
-    void handleOutputRemoved(AbstractOutput *output);
-    void handleOutputEnabled(AbstractOutput *output);
-    void handleOutputDisabled(AbstractOutput *output);
+    void registerXdgGenericWindow(Window *window);
+    void registerXdgToplevelWindow(XdgToplevelWindow *window);
+    void registerXdgPopupWindow(XdgPopupWindow *window);
+    void registerWindow(Window *window);
+    void handleOutputAdded(Output *output);
+    void handleOutputRemoved(Output *output);
+    void handleOutputEnabled(Output *output);
+    void handleOutputDisabled(Output *output);
 
     class LockScreenPresentationWatcher : public QObject
     {
@@ -259,7 +258,7 @@ private:
         LockScreenPresentationWatcher(WaylandServer *server);
 
     private:
-        QSet<AbstractOutput *> m_signaledOutputs;
+        QSet<Output *> m_signaledOutputs;
     };
 
     KWaylandServer::Display *m_display = nullptr;
@@ -288,10 +287,10 @@ private:
     KWaylandServer::XdgForeignV2Interface *m_XdgForeign = nullptr;
     KWaylandServer::KeyStateInterface *m_keyState = nullptr;
     KWaylandServer::PrimaryOutputV1Interface *m_primary = nullptr;
-    QList<AbstractClient *> m_clients;
+    QList<Window *> m_windows;
     InitializationFlags m_initFlags;
-    QHash<AbstractWaylandOutput *, WaylandOutput *> m_waylandOutputs;
-    QHash<AbstractWaylandOutput *, WaylandOutputDevice *> m_waylandOutputDevices;
+    QHash<Output *, WaylandOutput *> m_waylandOutputs;
+    QHash<Output *, WaylandOutputDevice *> m_waylandOutputDevices;
     KWIN_SINGLETON(WaylandServer)
 };
 

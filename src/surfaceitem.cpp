@@ -10,19 +10,19 @@
 namespace KWin
 {
 
-SurfaceItem::SurfaceItem(Toplevel *window, Item *parent)
+SurfaceItem::SurfaceItem(Window *window, Item *parent)
     : Item(parent)
     , m_window(window)
 {
-    connect(window, &Toplevel::windowClosed, this, &SurfaceItem::handleWindowClosed);
+    connect(window, &Window::windowClosed, this, &SurfaceItem::handleWindowClosed);
 }
 
-Toplevel *SurfaceItem::window() const
+Window *SurfaceItem::window() const
 {
     return m_window;
 }
 
-void SurfaceItem::handleWindowClosed(Toplevel *original, Deleted *deleted)
+void SurfaceItem::handleWindowClosed(Window *original, Deleted *deleted)
 {
     Q_UNUSED(original)
     m_window = deleted;
@@ -36,16 +36,6 @@ QMatrix4x4 SurfaceItem::surfaceToBufferMatrix() const
 void SurfaceItem::setSurfaceToBufferMatrix(const QMatrix4x4 &matrix)
 {
     m_surfaceToBufferMatrix = matrix;
-}
-
-QRegion SurfaceItem::shape() const
-{
-    return QRegion();
-}
-
-QRegion SurfaceItem::opaque() const
-{
-    return QRegion();
 }
 
 void SurfaceItem::addDamage(const QRegion &region)

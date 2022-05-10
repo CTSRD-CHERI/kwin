@@ -16,7 +16,10 @@
 #include <QVector2D>
 #include <QVector>
 
-#include <KWaylandServer/blur_interface.h>
+namespace KWaylandServer
+{
+class BlurManagerInterface;
+}
 
 namespace KWin
 {
@@ -40,7 +43,6 @@ public:
     void prePaintScreen(ScreenPrePaintData &data, std::chrono::milliseconds presentTime) override;
     void prePaintWindow(EffectWindow *w, WindowPrePaintData &data, std::chrono::milliseconds presentTime) override;
     void drawWindow(EffectWindow *w, int mask, const QRegion &region, WindowPaintData &data) override;
-    void paintEffectFrame(EffectFrame *frame, const QRegion &region, double opacity, double frameOpacity) override;
 
     bool provides(Feature feature) override;
     bool isActive() const override;
@@ -86,9 +88,9 @@ private:
 
 private:
     BlurShader *m_shader;
-    QVector<GLRenderTarget *> m_renderTargets;
+    QVector<GLFramebuffer *> m_renderTargets;
     QVector<GLTexture *> m_renderTextures;
-    QStack<GLRenderTarget *> m_renderTargetStack;
+    QStack<GLFramebuffer *> m_renderTargetStack;
 
     QScopedPointer<GLTexture> m_noiseTexture;
 

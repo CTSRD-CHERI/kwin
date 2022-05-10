@@ -16,7 +16,7 @@ namespace KWin
 {
 
 VirtualOutput::VirtualOutput(VirtualBackend *parent)
-    : AbstractWaylandOutput(parent)
+    : Output(parent)
     , m_backend(parent)
     , m_renderLoop(new RenderLoop(this))
     , m_vsyncMonitor(SoftwareVsyncMonitor::create(this))
@@ -25,7 +25,9 @@ VirtualOutput::VirtualOutput(VirtualBackend *parent)
 
     static int identifier = -1;
     m_identifier = ++identifier;
-    setName("Virtual-" + QString::number(identifier));
+    setInformation(Information{
+        .name = QStringLiteral("Virtual-%1").arg(identifier),
+    });
 }
 
 VirtualOutput::~VirtualOutput()
@@ -48,22 +50,13 @@ void VirtualOutput::init(const QPoint &logicalPosition, const QSize &pixelSize)
     m_renderLoop->setRefreshRate(refreshRate);
     m_vsyncMonitor->setRefreshRate(refreshRate);
 
-    Mode mode;
-    mode.id = 0;
-    mode.size = pixelSize;
-    mode.flags = ModeFlag::Current;
-    mode.refreshRate = refreshRate;
-    initialize(QByteArray("model_").append(QByteArray::number(m_identifier)),
-               QByteArray("manufacturer_").append(QByteArray::number(m_identifier)),
-               QByteArray("eisa_").append(QByteArray::number(m_identifier)),
-               QByteArray("serial_").append(QByteArray::number(m_identifier)),
-               pixelSize, {mode}, QByteArray("EDID_").append(QByteArray::number(m_identifier)));
     setGeometry(QRect(logicalPosition, pixelSize));
 }
 
 void VirtualOutput::setGeometry(const QRect &geo)
 {
-    // TODO: set mode to have updated pixelSize
+    auto mode = QSharedPointer<OutputMode>::create(geo.size(), m_vsyncMonitor->refreshRate());
+    setModesInternal({mode}, mode);
     moveTo(geo.topLeft());
 }
 

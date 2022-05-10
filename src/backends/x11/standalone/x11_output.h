@@ -9,7 +9,7 @@
 #ifndef KWIN_X11_OUTPUT_H
 #define KWIN_X11_OUTPUT_H
 
-#include "abstract_output.h"
+#include "output.h"
 #include <kwin_export.h>
 
 #include <QObject>
@@ -23,14 +23,14 @@ namespace KWin
 /**
  * X11 output representation
  */
-class KWIN_EXPORT X11Output : public AbstractOutput
+class KWIN_EXPORT X11Output : public Output
 {
     Q_OBJECT
 
 public:
-    explicit X11Output(const QString &name, QObject *parent = nullptr);
+    explicit X11Output(QObject *parent = nullptr);
 
-    QString name() const override;
+    bool usesSoftwareCursor() const override;
 
     RenderLoop *renderLoop() const override;
     void setRenderLoop(RenderLoop *loop);
@@ -38,20 +38,9 @@ public:
     int xineramaNumber() const;
     void setXineramaNumber(int number);
 
-    QRect geometry() const override;
-    void setGeometry(QRect set);
+    void setColorTransformation(const QSharedPointer<ColorTransformation> &transformation) override;
 
-    int refreshRate() const override;
-    void setRefreshRate(int set);
-
-    int gammaRampSize() const override;
-    bool setGammaRamp(const GammaRamp &gamma) override;
-
-    QSize physicalSize() const override;
-    void setPhysicalSize(const QSize &size);
-
-    QSize pixelSize() const override;
-    bool usesSoftwareCursor() const override;
+    void setMode(const QSize &size, int refreshRate);
 
 private:
     void setCrtc(xcb_randr_crtc_t crtc);
@@ -59,11 +48,7 @@ private:
 
     RenderLoop *m_loop = nullptr;
     xcb_randr_crtc_t m_crtc = XCB_NONE;
-    QString m_name;
-    QRect m_geometry;
-    QSize m_physicalSize;
     int m_gammaRampSize;
-    int m_refreshRate;
     int m_xineramaNumber = 0;
 
     friend class X11StandalonePlatform;

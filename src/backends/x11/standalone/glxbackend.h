@@ -10,6 +10,7 @@
 #define KWIN_GLX_BACKEND_H
 #include "openglbackend.h"
 #include "openglsurfacetexture_x11.h"
+#include "outputlayer.h"
 #include "utils/damagejournal.h"
 #include "x11eventfilter.h"
 
@@ -30,6 +31,7 @@ namespace KWin
 class GlxPixmapTexturePrivate;
 class VsyncMonitor;
 class X11StandalonePlatform;
+class GlxBackend;
 
 // GLX_MESA_swap_interval
 using glXSwapIntervalMESA_func = int (*)(unsigned int interval);
@@ -58,6 +60,18 @@ private:
     xcb_glx_drawable_t m_glxDrawable;
 };
 
+class GlxLayer : public OutputLayer
+{
+public:
+    GlxLayer(GlxBackend *backend);
+
+    OutputLayerBeginFrameInfo beginFrame() override;
+    void endFrame(const QRegion &renderedRegion, const QRegion &damagedRegion) override;
+
+private:
+    GlxBackend *const m_backend;
+};
+
 /**
  * @brief OpenGL Backend using GLX over an X overlay window.
  */
@@ -69,12 +83,14 @@ public:
     GlxBackend(Display *display, X11StandalonePlatform *backend);
     ~GlxBackend() override;
     SurfaceTexture *createSurfaceTextureX11(SurfacePixmapX11 *pixmap) override;
-    QRegion beginFrame(AbstractOutput *output) override;
-    void endFrame(AbstractOutput *output, const QRegion &renderedRegion, const QRegion &damagedRegion) override;
+    OutputLayerBeginFrameInfo beginFrame();
+    void endFrame(const QRegion &renderedRegion, const QRegion &damagedRegion);
+    void present(Output *output) override;
     bool makeCurrent() override;
     void doneCurrent() override;
     OverlayWindow *overlayWindow() const override;
     void init() override;
+    OutputLayer *primaryLayer(Output *output) override;
 
     Display *display() const
     {
@@ -100,15 +116,16 @@ private:
      * @brief The OverlayWindow used by this Backend.
      */
     OverlayWindow *m_overlayWindow;
-    Window window;
+    ::Window window;
     GLXFBConfig fbconfig;
     GLXWindow glxWindow;
     GLXContext ctx;
     QHash<xcb_visualid_t, FBConfigInfo *> m_fbconfigHash;
     QHash<xcb_visualid_t, int> m_visualDepthHash;
     std::unique_ptr<SwapEventFilter> m_swapEventFilter;
-    QScopedPointer<GLRenderTarget> m_renderTarget;
+    QScopedPointer<GLFramebuffer> m_fbo;
     DamageJournal m_damageJournal;
+    QRegion m_lastRenderedRegion;
     int m_bufferAge;
     bool m_haveMESACopySubBuffer = false;
     bool m_haveMESASwapControl = false;
@@ -117,6 +134,7 @@ private:
     Display *m_x11Display;
     X11StandalonePlatform *m_backend;
     VsyncMonitor *m_vsyncMonitor = nullptr;
+    QScopedPointer<GlxLayer> m_layer;
     friend class GlxPixmapTexturePrivate;
 };
 

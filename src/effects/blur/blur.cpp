@@ -11,6 +11,10 @@
 // KConfigSkeleton
 #include "blurconfig.h"
 
+#include "wayland/blur_interface.h"
+#include "wayland/display.h"
+#include "wayland/surface_interface.h"
+
 #include <QGuiApplication>
 #include <QMatrix4x4>
 #include <QScreen>
@@ -22,9 +26,6 @@
 
 #include <KConfigGroup>
 #include <KSharedConfig>
-#include <KWaylandServer/display.h>
-#include <KWaylandServer/shadow_interface.h>
-#include <KWaylandServer/surface_interface.h>
 
 #include <KDecoration2/Decoration>
 
@@ -108,7 +109,7 @@ void BlurEffect::slotScreenGeometryChanged()
 
 bool BlurEffect::renderTargetsValid() const
 {
-    return !m_renderTargets.isEmpty() && std::find_if(m_renderTargets.cbegin(), m_renderTargets.cend(), [](const GLRenderTarget *target) {
+    return !m_renderTargets.isEmpty() && std::find_if(m_renderTargets.cbegin(), m_renderTargets.cend(), [](const GLFramebuffer *target) {
                                              return !target->valid();
                                          })
         == m_renderTargets.cend();
@@ -165,7 +166,7 @@ void BlurEffect::updateTexture()
         m_renderTextures.constLast()->setFilter(GL_LINEAR);
         m_renderTextures.constLast()->setWrapMode(GL_CLAMP_TO_EDGE);
 
-        m_renderTargets.append(new GLRenderTarget(m_renderTextures.constLast()));
+        m_renderTargets.append(new GLFramebuffer(m_renderTextures.constLast()));
     }
 
     // This last set is used as a temporary helper texture
@@ -173,7 +174,7 @@ void BlurEffect::updateTexture()
     m_renderTextures.constLast()->setFilter(GL_LINEAR);
     m_renderTextures.constLast()->setWrapMode(GL_CLAMP_TO_EDGE);
 
-    m_renderTargets.append(new GLRenderTarget(m_renderTextures.constLast()));
+    m_renderTargets.append(new GLFramebuffer(m_renderTextures.constLast()));
 
     m_renderTargetsValid = renderTargetsValid();
 
@@ -402,7 +403,7 @@ bool BlurEffect::enabledByDefault()
 
 bool BlurEffect::supported()
 {
-    bool supported = effects->isOpenGLCompositing() && GLRenderTarget::supported() && GLRenderTarget::blitSupported();
+    bool supported = effects->isOpenGLCompositing() && GLFramebuffer::supported() && GLFramebuffer::blitSupported();
 
     if (supported) {
         int maxTexSize;
@@ -534,9 +535,6 @@ void BlurEffect::prePaintWindow(EffectWindow *w, WindowPrePaintData &data, std::
 
     effects->prePaintWindow(w, data, presentTime);
 
-    if (!w->isPaintingEnabled()) {
-        return;
-    }
     if (!m_shader || !m_shader->isValid()) {
         return;
     }
@@ -651,19 +649,6 @@ void BlurEffect::drawWindow(EffectWindow *w, int mask, const QRegion &region, Wi
     effects->drawWindow(w, mask, region, data);
 }
 
-void BlurEffect::paintEffectFrame(EffectFrame *frame, const QRegion &region, double opacity, double frameOpacity)
-{
-    const QRect screen = effects->virtualScreenGeometry();
-    bool valid = m_renderTargetsValid && m_shader && m_shader->isValid();
-
-    QRegion shape = frame->geometry().adjusted(-borderSize, -borderSize, borderSize, borderSize) & screen;
-
-    if (valid && !shape.isEmpty() && region.intersects(shape.boundingRect()) && frame->style() != EffectFrameNone) {
-        doBlur(shape, screen, opacity * frameOpacity, frame->screenProjectionMatrix(), false, frame->geometry());
-    }
-    effects->paintEffectFrame(frame, region, opacity, frameOpacity);
-}
-
 void BlurEffect::generateNoiseTexture()
 {
     if (m_noiseStrength == 0) {
@@ -722,7 +707,7 @@ void BlurEffect::doBlur(const QRegion &shape, const QRect &screen, const float o
      */
     if (isDock) {
         m_renderTargets.last()->blitFromFramebuffer(effects->mapToRenderTarget(sourceRect), destRect);
-        GLRenderTarget::pushRenderTargets(m_renderTargetStack);
+        GLFramebuffer::pushFramebuffers(m_renderTargetStack);
 
         if (useSRGB) {
             glEnable(GL_FRAMEBUFFER_SRGB);
@@ -734,14 +719,14 @@ void BlurEffect::doBlur(const QRegion &shape, const QRect &screen, const float o
         copyScreenSampleTexture(vbo, blurRectCount, shape.translated(xTranslate, yTranslate), mvp);
     } else {
         m_renderTargets.first()->blitFromFramebuffer(effects->mapToRenderTarget(sourceRect), destRect);
-        GLRenderTarget::pushRenderTargets(m_renderTargetStack);
+        GLFramebuffer::pushFramebuffers(m_renderTargetStack);
 
         if (useSRGB) {
             glEnable(GL_FRAMEBUFFER_SRGB);
         }
 
         // Remove the m_renderTargets[0] from the top of the stack that we will not use
-        GLRenderTarget::popRenderTarget();
+        GLFramebuffer::popFramebuffer();
     }
 
     downSampleTexture(vbo, blurRectCount);
@@ -797,6 +782,8 @@ void BlurEffect::doBlur(const QRegion &shape, const QRect &screen, const float o
 
 void BlurEffect::upscaleRenderToScreen(GLVertexBuffer *vbo, int vboStart, int blurRectCount, const QMatrix4x4 &screenProjection, QPoint windowPosition)
 {
+    Q_UNUSED(windowPosition)
+
     m_renderTextures[1]->bind();
 
     m_shader->bind(BlurShader::UpSampleType);
@@ -844,7 +831,7 @@ void BlurEffect::downSampleTexture(GLVertexBuffer *vbo, int blurRectCount)
         m_renderTextures[i - 1]->bind();
 
         vbo->draw(GL_TRIANGLES, blurRectCount * i, blurRectCount);
-        GLRenderTarget::popRenderTarget();
+        GLFramebuffer::popFramebuffer();
     }
 
     m_shader->unbind();
@@ -868,7 +855,7 @@ void BlurEffect::upSampleTexture(GLVertexBuffer *vbo, int blurRectCount)
         m_renderTextures[i + 1]->bind();
 
         vbo->draw(GL_TRIANGLES, blurRectCount * i, blurRectCount);
-        GLRenderTarget::popRenderTarget();
+        GLFramebuffer::popFramebuffer();
     }
 
     m_shader->unbind();
@@ -889,7 +876,7 @@ void BlurEffect::copyScreenSampleTexture(GLVertexBuffer *vbo, int blurRectCount,
     m_renderTextures.last()->bind();
 
     vbo->draw(GL_TRIANGLES, 0, blurRectCount);
-    GLRenderTarget::popRenderTarget();
+    GLFramebuffer::popFramebuffer();
 
     m_shader->unbind();
 }

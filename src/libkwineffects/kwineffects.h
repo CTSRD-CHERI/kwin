@@ -180,7 +180,7 @@ X-KDE-Library=kwin4_effect_cooleffect
 
 #define KWIN_EFFECT_API_MAKE_VERSION(major, minor) ((major) << 8 | (minor))
 #define KWIN_EFFECT_API_VERSION_MAJOR 0
-#define KWIN_EFFECT_API_VERSION_MINOR 233
+#define KWIN_EFFECT_API_VERSION_MINOR 234
 #define KWIN_EFFECT_API_VERSION KWIN_EFFECT_API_MAKE_VERSION( \
     KWIN_EFFECT_API_VERSION_MAJOR, KWIN_EFFECT_API_VERSION_MINOR)
 
@@ -199,7 +199,6 @@ enum DataRole {
     WindowBlurBehindRole, ///< For single windows to blur behind
     WindowForceBackgroundContrastRole, ///< For fullscreen effects to enforce the background contrast,
     WindowBackgroundContrastRole, ///< For single windows to enable Background contrast
-    LanczosCacheRole
 };
 
 /**
@@ -324,12 +323,6 @@ public:
          * Clear whole background as the very first step, without optimizing it
          */
         PAINT_SCREEN_BACKGROUND_FIRST = 1 << 6,
-        // PAINT_DECORATION_ONLY = 1 << 7 has been deprecated
-        /**
-         * Window will be painted with a lanczos filter.
-         */
-        PAINT_WINDOW_LANCZOS = 1 << 8
-        // PAINT_SCREEN_WITH_TRANSFORMED_WINDOWS_WITHOUT_FULL_REPAINTS = 1 << 9 has been removed
     };
 
     enum Feature {
@@ -455,21 +448,6 @@ public:
      * when this method is invoked.
      */
     virtual void postPaintWindow(EffectWindow *w);
-
-    /**
-     * This method is called directly before painting an @ref EffectFrame.
-     * You can implement this method if you need to bind a shader or perform
-     * other operations before the frame is rendered.
-     * @param frame The EffectFrame which will be rendered
-     * @param region Region to restrict painting to
-     * @param opacity Opacity of text/icon
-     * @param frameOpacity Opacity of background
-     * @since 4.6
-     *
-     * In OpenGL based compositing, the frameworks ensures that the context is current
-     * when this method is invoked.
-     */
-    virtual void paintEffectFrame(EffectFrame *frame, const QRegion &region, double opacity, double frameOpacity);
 
     /**
      * Called on Transparent resizes.
@@ -832,9 +810,9 @@ class KWINEFFECTS_EXPORT EffectsHandler : public QObject
     Q_PROPERTY(int currentDesktop READ currentDesktop WRITE setCurrentDesktop NOTIFY desktopChanged)
     Q_PROPERTY(QString currentActivity READ currentActivity NOTIFY currentActivityChanged)
     Q_PROPERTY(KWin::EffectWindow *activeWindow READ activeWindow WRITE activateWindow NOTIFY windowActivated)
-    Q_PROPERTY(QSize desktopGridSize READ desktopGridSize)
-    Q_PROPERTY(int desktopGridWidth READ desktopGridWidth)
-    Q_PROPERTY(int desktopGridHeight READ desktopGridHeight)
+    Q_PROPERTY(QSize desktopGridSize READ desktopGridSize NOTIFY desktopGridSizeChanged)
+    Q_PROPERTY(int desktopGridWidth READ desktopGridWidth NOTIFY desktopGridWidthChanged)
+    Q_PROPERTY(int desktopGridHeight READ desktopGridHeight NOTIFY desktopGridHeightChanged)
     Q_PROPERTY(int workspaceWidth READ workspaceWidth)
     Q_PROPERTY(int workspaceHeight READ workspaceHeight)
     /**
@@ -884,7 +862,6 @@ public:
     virtual void prePaintWindow(EffectWindow *w, WindowPrePaintData &data, std::chrono::milliseconds presentTime) = 0;
     virtual void paintWindow(EffectWindow *w, int mask, const QRegion &region, WindowPaintData &data) = 0;
     virtual void postPaintWindow(EffectWindow *w) = 0;
-    virtual void paintEffectFrame(EffectFrame *frame, const QRegion &region, double opacity, double frameOpacity) = 0;
     virtual void drawWindow(EffectWindow *w, int mask, const QRegion &region, WindowPaintData &data) = 0;
     virtual QVariant kwinOption(KWinOption kwopt) = 0;
     /**
@@ -1166,7 +1143,7 @@ public:
      */
     Q_SCRIPTABLE virtual KWin::EffectWindow *findWindow(QWindow *w) const = 0;
     /**
-     * Finds the EffectWindow for the Toplevel with KWin internal @p id.
+     * Finds the EffectWindow for the Window with KWin internal @p id.
      * If there is no such window @c null is returned.
      *
      * @since 5.16
@@ -1501,6 +1478,17 @@ Q_SIGNALS:
      * @since 4.9
      */
     void desktopChanged(int oldDesktop, int newDesktop, KWin::EffectWindow *with);
+
+    /**
+     * Signal emmitted while desktop is changing for animation.
+     * @param currentDesktop The current desktop untiotherwise.
+     * @param offset The current desktop offset.
+     * offset.x() = .6 means 60% of the way to the desktop to the right.
+     * Positive Values means Up and Right.
+     */
+    void desktopChanging(uint currentDesktop, QPointF offset, KWin::EffectWindow *with);
+    void desktopChangingCancelled();
+
     /**
      * @since 4.7
      * @deprecated
@@ -1519,6 +1507,24 @@ Q_SIGNALS:
      * @since 4.11.4
      */
     void desktopPresenceChanged(KWin::EffectWindow *window, int oldDesktop, int newDesktop);
+    /**
+     * Emitted when the virtual desktop grid layout changes
+     * @param size new size
+     * @since 5.25
+     */
+    void desktopGridSizeChanged(const QSize &size);
+    /**
+     * Emitted when the virtual desktop grid layout changes
+     * @param width new width
+     * @since 5.25
+     */
+    void desktopGridWidthChanged(int width);
+    /**
+     * Emitted when the virtual desktop grid layout changes
+     * @param height new height
+     * @since 5.25
+     */
+    void desktopGridHeightChanged(int height);
     /**
      * Signal emitted when the number of currently existing desktops is changed.
      * @param old The previous number of desktops in used.
@@ -2343,9 +2349,6 @@ public:
     explicit EffectWindow(QObject *parent = nullptr);
     ~EffectWindow() override;
 
-    virtual void enablePainting(int reason) = 0;
-    virtual void disablePainting(int reason) = 0;
-    virtual bool isPaintingEnabled() = 0;
     Q_SCRIPTABLE virtual void addRepaint(const QRect &r) = 0;
     Q_SCRIPTABLE virtual void addRepaint(int x, int y, int w, int h) = 0;
     Q_SCRIPTABLE virtual void addRepaintFull() = 0;
@@ -2354,6 +2357,9 @@ public:
 
     virtual void refWindow() = 0;
     virtual void unrefWindow() = 0;
+
+    virtual void refVisible(int reason) = 0;
+    virtual void unrefVisible(int reason) = 0;
 
     virtual bool isDeleted() const = 0;
 
@@ -2410,7 +2416,7 @@ public:
     /**
      * Returns the geometry of the pixmap or buffer attached to this window.
      *
-     * For X11 clients, this method returns server-side geometry of the Toplevel.
+     * For X11 clients, this method returns server-side geometry of the Window.
      *
      * For Wayland clients, this method returns rectangle that the main surface
      * occupies on the screen, in global screen coordinates.
@@ -2656,6 +2662,15 @@ public:
      * @since 5.21
      */
     virtual qlonglong windowId() const = 0;
+    /**
+     * Returns the internal id of the window that uniquely identifies it. The main difference
+     * between internalId() and windowId() is that the latter one works as expected only on X11,
+     * while the former is unique regardless of the window system.
+     *
+     * Note that the internaId() has special meaning only to kwin.
+     * @since 5.24
+     */
+    virtual QUuid internalId() const = 0;
 
     /**
      * Can be used to by effects to store arbitrary data in the EffectWindow.
@@ -2698,6 +2713,118 @@ public:
 private:
     class Private;
     QScopedPointer<Private> d;
+};
+
+/**
+ * The EffectWindowDeletedRef provides a convenient way to prevent deleting a closed
+ * window until an effect has finished animating it.
+ */
+class KWINEFFECTS_EXPORT EffectWindowDeletedRef
+{
+public:
+    EffectWindowDeletedRef()
+        : m_window(nullptr)
+    {
+    }
+
+    explicit EffectWindowDeletedRef(EffectWindow *window)
+        : m_window(window)
+    {
+        m_window->refWindow();
+    }
+
+    EffectWindowDeletedRef(const EffectWindowDeletedRef &other)
+        : m_window(other.m_window)
+    {
+        if (m_window) {
+            m_window->refWindow();
+        }
+    }
+
+    ~EffectWindowDeletedRef()
+    {
+        if (m_window) {
+            m_window->unrefWindow();
+        }
+    }
+
+    EffectWindowDeletedRef &operator=(const EffectWindowDeletedRef &other)
+    {
+        if (other.m_window) {
+            other.m_window->refWindow();
+        }
+        if (m_window) {
+            m_window->unrefWindow();
+        }
+        m_window = other.m_window;
+        return *this;
+    }
+
+    bool isNull() const
+    {
+        return m_window == nullptr;
+    }
+
+private:
+    EffectWindow *m_window;
+};
+
+/**
+ * The EffectWindowVisibleRef provides a convenient way to force the visible status of a
+ * window until an effect is finished animating it.
+ */
+class KWINEFFECTS_EXPORT EffectWindowVisibleRef
+{
+public:
+    EffectWindowVisibleRef()
+        : m_window(nullptr)
+    {
+    }
+
+    explicit EffectWindowVisibleRef(EffectWindow *window, int reason)
+        : m_window(window)
+        , m_reason(reason)
+    {
+        m_window->refVisible(reason);
+    }
+
+    EffectWindowVisibleRef(const EffectWindowVisibleRef &other)
+        : m_window(other.m_window)
+        , m_reason(other.m_reason)
+    {
+        if (m_window) {
+            m_window->refVisible(m_reason);
+        }
+    }
+
+    ~EffectWindowVisibleRef()
+    {
+        if (m_window) {
+            m_window->unrefVisible(m_reason);
+        }
+    }
+
+    EffectWindowVisibleRef &operator=(const EffectWindowVisibleRef &other)
+    {
+        if (other.m_window) {
+            other.m_window->refVisible(other.m_reason);
+        }
+        if (m_window) {
+            m_window->unrefVisible(m_reason);
+        }
+        m_window = other.m_window;
+        m_reason = other.m_reason;
+        return *this;
+    }
+
+    bool isNull() const
+    {
+        return m_window == nullptr;
+    }
+
+private:
+    EffectWindow *m_window;
+    int m_reason;
 };
 
 class KWINEFFECTS_EXPORT EffectWindowGroup
@@ -3594,22 +3721,6 @@ public:
     virtual const QSize &iconSize() const = 0;
 
     /**
-     * Sets the geometry of a selection.
-     * To remove the selection set a null rect.
-     * @param selection The geometry of the selection in screen coordinates.
-     */
-    virtual void setSelection(const QRect &selection) = 0;
-
-    /**
-     * @param shader The GLShader for rendering.
-     */
-    virtual void setShader(GLShader *shader) = 0;
-    /**
-     * @returns The GLShader used for rendering or null if none.
-     */
-    virtual GLShader *shader() const = 0;
-
-    /**
      * @returns The style of this EffectFrame.
      */
     virtual EffectFrameStyle style() const = 0;
@@ -3623,13 +3734,13 @@ public:
      * @see setCrossFadeProgress
      * @since 4.6
      */
-    void enableCrossFade(bool enable);
+    virtual void enableCrossFade(bool enable) = 0;
     /**
      * @returns @c true if cross fading is enabled, @c false otherwise
      * @see enableCrossFade
      * @since 4.6
      */
-    bool isCrossFade() const;
+    virtual bool isCrossFade() const = 0;
     /**
      * Sets the current progress for cross fading the last used icon/text
      * with current icon/text to @p progress.
@@ -3642,7 +3753,7 @@ public:
      * @see crossFadeProgress
      * @since 4.6
      */
-    void setCrossFadeProgress(qreal progress);
+    virtual void setCrossFadeProgress(qreal progress) = 0;
     /**
      * @returns The current progress for cross fading
      * @see setCrossFadeProgress
@@ -3650,23 +3761,7 @@ public:
      * @see isCrossFade
      * @since 4.6
      */
-    qreal crossFadeProgress() const;
-
-    /**
-     * Returns The projection matrix as used by the current screen painting pass
-     * including screen transformations.
-     *
-     * This matrix is only valid during a rendering pass started by render.
-     *
-     * @since 5.6
-     * @see render
-     * @see EffectsHandler::paintEffectFrame
-     * @see Effect::paintEffectFrame
-     */
-    QMatrix4x4 screenProjectionMatrix() const;
-
-protected:
-    void setScreenProjectionMatrix(const QMatrix4x4 &projection);
+    virtual qreal crossFadeProgress() const = 0;
 
 private:
     EffectFramePrivate *const d;

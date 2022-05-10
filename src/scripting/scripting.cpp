@@ -16,7 +16,7 @@
 #include "screenedgeitem.h"
 #include "scripting_logging.h"
 #include "scriptingutils.h"
-#include "thumbnailitem.h"
+#include "windowthumbnailitem.h"
 #include "workspace_wrapper.h"
 
 #include "v2/clientmodel.h"
@@ -28,7 +28,7 @@
 #include "screenedge.h"
 #include "virtualdesktops.h"
 #include "workspace.h"
-#include "x11client.h"
+#include "x11window.h"
 // KDE
 #include <KConfigGroup>
 #include <KGlobalAccel>
@@ -119,7 +119,7 @@ KWin::Script::Script(int id, QString scriptName, QString pluginName, QObject *pa
         QMetaType::registerConverter<QJSValue, QSize>(scriptValueToSize);
     }
 
-    qRegisterMetaType<QList<KWin::AbstractClient *>>();
+    qRegisterMetaType<QList<KWin::Window *>>();
 }
 
 KWin::Script::~Script()
@@ -435,7 +435,7 @@ void KWin::Script::registerUserActionsMenu(const QJSValue &callback)
     m_userActionsMenuCallbacks.append(callback);
 }
 
-QList<QAction *> KWin::Script::actionsForUserActionMenu(KWin::AbstractClient *client, QMenu *parent)
+QList<QAction *> KWin::Script::actionsForUserActionMenu(KWin::Window *client, QMenu *parent)
 {
     QList<QAction *> actions;
     actions.reserve(m_userActionsMenuCallbacks.count());
@@ -641,7 +641,6 @@ KWin::Scripting::Scripting(QObject *parent)
 
 void KWin::Scripting::init()
 {
-    qmlRegisterType<DesktopThumbnailItem>("org.kde.kwin", 2, 0, "DesktopThumbnailItem");
     qmlRegisterType<WindowThumbnailItem>("org.kde.kwin", 2, 0, "ThumbnailItem");
     qmlRegisterType<DBusCall>("org.kde.kwin", 2, 0, "DBusCall");
     qmlRegisterType<ScreenEdgeItem>("org.kde.kwin", 2, 0, "ScreenEdgeItem");
@@ -667,13 +666,13 @@ void KWin::Scripting::init()
     });
     qmlRegisterSingletonInstance("org.kde.kwin", 3, 0, "Options", options);
 
-    qmlRegisterAnonymousType<KWin::AbstractClient>("org.kde.kwin", 2);
+    qmlRegisterAnonymousType<KWin::Window>("org.kde.kwin", 2);
     qmlRegisterAnonymousType<KWin::VirtualDesktop>("org.kde.kwin", 2);
-    qmlRegisterAnonymousType<KWin::X11Client>("org.kde.kwin", 2);
+    qmlRegisterAnonymousType<KWin::X11Window>("org.kde.kwin", 2);
     qmlRegisterAnonymousType<QAbstractItemModel>("org.kde.kwin", 2);
-    qmlRegisterAnonymousType<KWin::AbstractClient>("org.kde.kwin", 3);
+    qmlRegisterAnonymousType<KWin::Window>("org.kde.kwin", 3);
     qmlRegisterAnonymousType<KWin::VirtualDesktop>("org.kde.kwin", 3);
-    qmlRegisterAnonymousType<KWin::X11Client>("org.kde.kwin", 3);
+    qmlRegisterAnonymousType<KWin::X11Window>("org.kde.kwin", 3);
     qmlRegisterAnonymousType<QAbstractItemModel>("org.kde.kwin", 3);
 
     // TODO Plasma 6: Drop context properties.
@@ -850,7 +849,7 @@ KWin::Scripting::~Scripting()
     s_self = nullptr;
 }
 
-QList<QAction *> KWin::Scripting::actionsForUserActionMenu(KWin::AbstractClient *c, QMenu *parent)
+QList<QAction *> KWin::Scripting::actionsForUserActionMenu(KWin::Window *c, QMenu *parent)
 {
     QList<QAction *> actions;
     for (AbstractScript *s : qAsConst(scripts)) {

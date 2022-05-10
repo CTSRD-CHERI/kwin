@@ -9,12 +9,12 @@
 
 #include "drm_lease_output.h"
 
-#include "KWaylandServer/drmleasedevice_v1_interface.h"
 #include "drm_layer.h"
 #include "drm_object_connector.h"
 #include "drm_object_crtc.h"
 #include "drm_object_plane.h"
 #include "drm_pipeline.h"
+#include "wayland/drmleasedevice_v1_interface.h"
 
 #include "logging.h"
 
@@ -41,15 +41,15 @@ DrmLeaseOutput::~DrmLeaseOutput()
 
 bool DrmLeaseOutput::addLeaseObjects(QVector<uint32_t> &objectList)
 {
-    if (!m_pipeline->pending.crtc) {
+    if (!m_pipeline->crtc()) {
         qCWarning(KWIN_DRM) << "Can't lease connector: No suitable crtc available";
         return false;
     }
     qCDebug(KWIN_DRM) << "adding connector" << m_pipeline->connector()->id() << "to lease";
     objectList << m_pipeline->connector()->id();
-    objectList << m_pipeline->pending.crtc->id();
-    if (m_pipeline->pending.crtc->primaryPlane()) {
-        objectList << m_pipeline->pending.crtc->primaryPlane()->id();
+    objectList << m_pipeline->crtc()->id();
+    if (m_pipeline->crtc()->primaryPlane()) {
+        objectList << m_pipeline->crtc()->primaryPlane()->id();
     }
     return true;
 }

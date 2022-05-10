@@ -18,7 +18,7 @@
 
 namespace KWin
 {
-class Toplevel;
+class Window;
 class TabletToolId;
 
 namespace Decoration
@@ -65,7 +65,7 @@ public:
 private:
     void cleanupDecoration(Decoration::DecoratedClientImpl *old,
                            Decoration::DecoratedClientImpl *now) override;
-    void focusUpdate(Toplevel *focusOld, Toplevel *focusNow) override;
+    void focusUpdate(Window *focusOld, Window *focusNow) override;
 
     bool m_tipDown = false;
     bool m_tipNear = false;

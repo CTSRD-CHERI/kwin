@@ -5,15 +5,14 @@
 */
 
 #include "layershellv1integration.h"
-#include "abstract_wayland_output.h"
-#include "layershellv1client.h"
+#include "layershellv1window.h"
+#include "output.h"
 #include "platform.h"
 #include "screens.h"
+#include "wayland/display.h"
+#include "wayland/layershell_v1_interface.h"
 #include "wayland_server.h"
 #include "workspace.h"
-
-#include <KWaylandServer/display.h>
-#include <KWaylandServer/layershell_v1_interface.h>
 
 #include <QTimer>
 
@@ -30,16 +29,16 @@ LayerShellV1Integration::LayerShellV1Integration(QObject *parent)
 {
     LayerShellV1Interface *shell = new LayerShellV1Interface(waylandServer()->display(), this);
     connect(shell, &KWaylandServer::LayerShellV1Interface::surfaceCreated,
-            this, &LayerShellV1Integration::createClient);
+            this, &LayerShellV1Integration::createWindow);
 
     m_rearrangeTimer = new QTimer(this);
     m_rearrangeTimer->setSingleShot(true);
     connect(m_rearrangeTimer, &QTimer::timeout, this, &LayerShellV1Integration::rearrange);
 }
 
-void LayerShellV1Integration::createClient(LayerSurfaceV1Interface *shellSurface)
+void LayerShellV1Integration::createWindow(LayerSurfaceV1Interface *shellSurface)
 {
-    AbstractOutput *output = waylandServer()->findOutput(shellSurface->output());
+    Output *output = waylandServer()->findOutput(shellSurface->output());
     if (!output) {
         output = workspace()->activeOutput();
     }
@@ -49,22 +48,22 @@ void LayerShellV1Integration::createClient(LayerSurfaceV1Interface *shellSurface
         return;
     }
 
-    Q_EMIT clientCreated(new LayerShellV1Client(shellSurface, output, this));
+    Q_EMIT windowCreated(new LayerShellV1Window(shellSurface, output, this));
 }
 
-void LayerShellV1Integration::recreateClient(LayerSurfaceV1Interface *shellSurface)
+void LayerShellV1Integration::recreateWindow(LayerSurfaceV1Interface *shellSurface)
 {
-    destroyClient(shellSurface);
-    createClient(shellSurface);
+    destroyWindow(shellSurface);
+    createWindow(shellSurface);
 }
 
-void LayerShellV1Integration::destroyClient(LayerSurfaceV1Interface *shellSurface)
+void LayerShellV1Integration::destroyWindow(LayerSurfaceV1Interface *shellSurface)
 {
-    const QList<AbstractClient *> clients = waylandServer()->clients();
-    for (AbstractClient *client : clients) {
-        LayerShellV1Client *layerShellClient = qobject_cast<LayerShellV1Client *>(client);
-        if (layerShellClient && layerShellClient->shellSurface() == shellSurface) {
-            layerShellClient->destroyClient();
+    const QList<Window *> windows = waylandServer()->windows();
+    for (Window *window : windows) {
+        LayerShellV1Window *layerShellWindow = qobject_cast<LayerShellV1Window *>(window);
+        if (layerShellWindow && layerShellWindow->shellSurface() == shellSurface) {
+            layerShellWindow->destroyWindow();
             break;
         }
     }
@@ -88,11 +87,11 @@ static void adjustWorkArea(const LayerSurfaceV1Interface *shellSurface, QRect *w
     }
 }
 
-static void rearrangeLayer(const QList<LayerShellV1Client *> &clients, QRect *workArea,
+static void rearrangeLayer(const QList<LayerShellV1Window *> &windows, QRect *workArea,
                            LayerSurfaceV1Interface::Layer layer, bool exclusive)
 {
-    for (LayerShellV1Client *client : clients) {
-        LayerSurfaceV1Interface *shellSurface = client->shellSurface();
+    for (LayerShellV1Window *window : windows) {
+        LayerSurfaceV1Interface *shellSurface = window->shellSurface();
 
         if (shellSurface->layer() != layer) {
             continue;
@@ -103,7 +102,7 @@ static void rearrangeLayer(const QList<LayerShellV1Client *> &clients, QRect *wo
 
         QRect bounds;
         if (shellSurface->exclusiveZone() == -1) {
-            bounds = client->desiredOutput()->geometry();
+            bounds = window->desiredOutput()->geometry();
         } else {
             bounds = *workArea;
         }
@@ -149,15 +148,15 @@ static void rearrangeLayer(const QList<LayerShellV1Client *> &clients, QRect *wo
         }
 
         // Move the window's bottom if its virtual keyboard is overlapping it
-        if (shellSurface->exclusiveZone() >= 0 && !client->virtualKeyboardGeometry().isEmpty() && geometry.bottom() > client->virtualKeyboardGeometry().top()) {
-            geometry.setBottom(client->virtualKeyboardGeometry().top());
+        if (shellSurface->exclusiveZone() >= 0 && !window->virtualKeyboardGeometry().isEmpty() && geometry.bottom() > window->virtualKeyboardGeometry().top()) {
+            geometry.setBottom(window->virtualKeyboardGeometry().top());
         }
 
         if (geometry.isValid()) {
-            client->moveResize(geometry);
+            window->moveResize(geometry);
         } else {
-            qCWarning(KWIN_CORE) << "Closing a layer shell client due to invalid geometry";
-            client->closeWindow();
+            qCWarning(KWIN_CORE) << "Closing a layer shell window due to invalid geometry";
+            window->closeWindow();
             continue;
         }
 
@@ -167,37 +166,37 @@ static void rearrangeLayer(const QList<LayerShellV1Client *> &clients, QRect *wo
     }
 }
 
-static QList<LayerShellV1Client *> clientsForOutput(AbstractOutput *output)
+static QList<LayerShellV1Window *> windowsForOutput(Output *output)
 {
-    QList<LayerShellV1Client *> result;
-    const QList<AbstractClient *> clients = waylandServer()->clients();
-    for (AbstractClient *client : clients) {
-        LayerShellV1Client *layerShellClient = qobject_cast<LayerShellV1Client *>(client);
-        if (!layerShellClient || layerShellClient->desiredOutput() != output) {
+    QList<LayerShellV1Window *> result;
+    const QList<Window *> windows = waylandServer()->windows();
+    for (Window *window : windows) {
+        LayerShellV1Window *layerShellWindow = qobject_cast<LayerShellV1Window *>(window);
+        if (!layerShellWindow || layerShellWindow->desiredOutput() != output) {
             continue;
         }
-        if (layerShellClient->shellSurface()->isCommitted()) {
-            result.append(layerShellClient);
+        if (layerShellWindow->shellSurface()->isCommitted()) {
+            result.append(layerShellWindow);
         }
     }
     return result;
 }
 
-static void rearrangeOutput(AbstractOutput *output)
+static void rearrangeOutput(Output *output)
 {
-    const QList<LayerShellV1Client *> clients = clientsForOutput(output);
-    if (!clients.isEmpty()) {
+    const QList<LayerShellV1Window *> windows = windowsForOutput(output);
+    if (!windows.isEmpty()) {
         QRect workArea = output->geometry();
 
-        rearrangeLayer(clients, &workArea, LayerSurfaceV1Interface::OverlayLayer, true);
-        rearrangeLayer(clients, &workArea, LayerSurfaceV1Interface::TopLayer, true);
-        rearrangeLayer(clients, &workArea, LayerSurfaceV1Interface::BottomLayer, true);
-        rearrangeLayer(clients, &workArea, LayerSurfaceV1Interface::BackgroundLayer, true);
+        rearrangeLayer(windows, &workArea, LayerSurfaceV1Interface::OverlayLayer, true);
+        rearrangeLayer(windows, &workArea, LayerSurfaceV1Interface::TopLayer, true);
+        rearrangeLayer(windows, &workArea, LayerSurfaceV1Interface::BottomLayer, true);
+        rearrangeLayer(windows, &workArea, LayerSurfaceV1Interface::BackgroundLayer, true);
 
-        rearrangeLayer(clients, &workArea, LayerSurfaceV1Interface::OverlayLayer, false);
-        rearrangeLayer(clients, &workArea, LayerSurfaceV1Interface::TopLayer, false);
-        rearrangeLayer(clients, &workArea, LayerSurfaceV1Interface::BottomLayer, false);
-        rearrangeLayer(clients, &workArea, LayerSurfaceV1Interface::BackgroundLayer, false);
+        rearrangeLayer(windows, &workArea, LayerSurfaceV1Interface::OverlayLayer, false);
+        rearrangeLayer(windows, &workArea, LayerSurfaceV1Interface::TopLayer, false);
+        rearrangeLayer(windows, &workArea, LayerSurfaceV1Interface::BottomLayer, false);
+        rearrangeLayer(windows, &workArea, LayerSurfaceV1Interface::BackgroundLayer, false);
     }
 }
 
@@ -205,8 +204,8 @@ void LayerShellV1Integration::rearrange()
 {
     m_rearrangeTimer->stop();
 
-    const QVector<AbstractOutput *> outputs = kwinApp()->platform()->enabledOutputs();
-    for (AbstractOutput *output : outputs) {
+    const QVector<Output *> outputs = kwinApp()->platform()->enabledOutputs();
+    for (Output *output : outputs) {
         rearrangeOutput(output);
     }
 

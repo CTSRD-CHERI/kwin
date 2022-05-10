@@ -9,23 +9,25 @@
 */
 #include "virtualdesktops.h"
 #include "input.h"
+#include "wayland/plasmavirtualdesktop_interface.h"
 // KDE
 #include <KConfigGroup>
 #include <KGlobalAccel>
 #include <KLocalizedString>
 #include <NETWM>
 
-#include <KWaylandServer/plasmavirtualdesktop_interface.h>
 // Qt
 #include <QAction>
+#include <QDebug>
 #include <QUuid>
 
-#include <QDebug>
 #include <algorithm>
+
 namespace KWin
 {
 
 static bool s_loadingDesktopSettings = false;
+static const double GESTURE_SWITCH_THRESHOLD = .25;
 
 static QString generateDesktopId()
 {
@@ -209,6 +211,8 @@ VirtualDesktopManager::VirtualDesktopManager(QObject *parent)
     : QObject(parent)
     , m_navigationWrapsAround(false)
     , m_rootInfo(nullptr)
+    , m_swipeGestureReleasedY(new QAction(this))
+    , m_swipeGestureReleasedX(new QAction(this))
 {
 }
 
@@ -498,9 +502,9 @@ void VirtualDesktopManager::removeVirtualDesktop(VirtualDesktop *desktop)
         Q_EMIT currentChanged(oldCurrent, newCurrent);
     }
 
+    updateRootInfo();
     save();
 
-    updateRootInfo();
     Q_EMIT desktopRemoved(desktop);
     Q_EMIT countChanged(m_desktops.count() + 1, m_desktops.count());
 
@@ -519,7 +523,7 @@ VirtualDesktop *VirtualDesktopManager::currentDesktop() const
 
 bool VirtualDesktopManager::setCurrent(uint newDesktop)
 {
-    if (newDesktop < 1 || newDesktop > count() || newDesktop == current()) {
+    if (newDesktop < 1 || newDesktop > count()) {
         return false;
     }
     auto d = desktopForX11Id(newDesktop);
@@ -657,6 +661,13 @@ void VirtualDesktopManager::updateLayout()
         m_rows = count() == 1u ? 1 : 2;
         columns = count() / m_rows;
     }
+
+    // Patch to make desktop grid size equal 1 when 1 desktop for desktop switching animations
+    if (m_desktops.size() == 1) {
+        m_rows = 1;
+        columns = 1;
+    }
+
     setNETDesktopLayout(orientation,
                         columns, m_rows, 0 // rootInfo->desktopLayoutCorner() // Not really worth implementing right now.
     );
@@ -780,10 +791,10 @@ void VirtualDesktopManager::initShortcuts()
 {
     initSwitchToShortcuts();
 
-    QAction *nextAction = addAction(QStringLiteral("Switch to Next Desktop"), i18n("Switch to Next Desktop"), &VirtualDesktopManager::slotNext);
-    input()->registerTouchpadSwipeShortcut(SwipeDirection::Right, 4, nextAction);
-    QAction *previousAction = addAction(QStringLiteral("Switch to Previous Desktop"), i18n("Switch to Previous Desktop"), &VirtualDesktopManager::slotPrevious);
-    input()->registerTouchpadSwipeShortcut(SwipeDirection::Left, 4, previousAction);
+    Q_UNUSED(addAction(QStringLiteral("Switch to Next Desktop"), i18n("Switch to Next Desktop"), &VirtualDesktopManager::slotNext))
+    Q_UNUSED(addAction(QStringLiteral("Switch to Previous Desktop"), i18n("Switch to Previous Desktop"), &VirtualDesktopManager::slotPrevious))
+
+    // shortcuts
     QAction *slotRightAction = addAction(QStringLiteral("Switch One Desktop to the Right"), i18n("Switch One Desktop to the Right"), &VirtualDesktopManager::slotRight);
     KGlobalAccel::setGlobalShortcut(slotRightAction, QKeySequence(Qt::CTRL | Qt::META | Qt::Key_Right));
     QAction *slotLeftAction = addAction(QStringLiteral("Switch One Desktop to the Left"), i18n("Switch One Desktop to the Left"), &VirtualDesktopManager::slotLeft);
@@ -793,14 +804,97 @@ void VirtualDesktopManager::initShortcuts()
     QAction *slotDownAction = addAction(QStringLiteral("Switch One Desktop Down"), i18n("Switch One Desktop Down"), &VirtualDesktopManager::slotDown);
     KGlobalAccel::setGlobalShortcut(slotDownAction, QKeySequence(Qt::CTRL | Qt::META | Qt::Key_Down));
 
+    // Gestures
+    // These connections decide which desktop to end on after gesture ends
+    connect(m_swipeGestureReleasedX.get(), &QAction::triggered, this, &VirtualDesktopManager::gestureReleasedX);
+    connect(m_swipeGestureReleasedY.get(), &QAction::triggered, this, &VirtualDesktopManager::gestureReleasedY);
+
+    // These take the live feedback from a gesture
+    input()->registerRealtimeTouchpadSwipeShortcut(SwipeDirection::Left, 3, m_swipeGestureReleasedX.get(), [this](qreal cb) {
+        if (grid().width() > 1) {
+            m_currentDesktopOffset.setX(cb);
+            Q_EMIT currentChanging(current(), m_currentDesktopOffset);
+        }
+    });
+    input()->registerRealtimeTouchpadSwipeShortcut(SwipeDirection::Right, 3, m_swipeGestureReleasedX.get(), [this](qreal cb) {
+        if (grid().width() > 1) {
+            m_currentDesktopOffset.setX(-cb);
+            Q_EMIT currentChanging(current(), m_currentDesktopOffset);
+        }
+    });
+    input()->registerRealtimeTouchpadSwipeShortcut(SwipeDirection::Left, 4, m_swipeGestureReleasedX.get(), [this](qreal cb) {
+        if (grid().width() > 1) {
+            m_currentDesktopOffset.setX(cb);
+            Q_EMIT currentChanging(current(), m_currentDesktopOffset);
+        }
+    });
+    input()->registerRealtimeTouchpadSwipeShortcut(SwipeDirection::Right, 4, m_swipeGestureReleasedX.get(), [this](qreal cb) {
+        if (grid().width() > 1) {
+            m_currentDesktopOffset.setX(-cb);
+            Q_EMIT currentChanging(current(), m_currentDesktopOffset);
+        }
+    });
+    input()->registerRealtimeTouchpadSwipeShortcut(SwipeDirection::Down, 3, m_swipeGestureReleasedY.get(), [this](qreal cb) {
+        if (grid().height() > 1) {
+            m_currentDesktopOffset.setY(-cb);
+            Q_EMIT currentChanging(current(), m_currentDesktopOffset);
+        }
+    });
+    input()->registerRealtimeTouchpadSwipeShortcut(SwipeDirection::Up, 3, m_swipeGestureReleasedY.get(), [this](qreal cb) {
+        if (grid().height() > 1) {
+            m_currentDesktopOffset.setY(cb);
+            Q_EMIT currentChanging(current(), m_currentDesktopOffset);
+        }
+    });
+
+    input()->registerTouchscreenSwipeShortcut(SwipeDirection::Left, 3, slotRightAction);
+    input()->registerTouchscreenSwipeShortcut(SwipeDirection::Right, 3, slotLeftAction);
+
     // axis events
     input()->registerAxisShortcut(Qt::ControlModifier | Qt::AltModifier, PointerAxisDown,
                                   findChild<QAction *>(QStringLiteral("Switch to Next Desktop")));
     input()->registerAxisShortcut(Qt::ControlModifier | Qt::AltModifier, PointerAxisUp,
                                   findChild<QAction *>(QStringLiteral("Switch to Previous Desktop")));
+}
 
-    input()->registerTouchscreenSwipeShortcut(SwipeDirection::Left, 3, nextAction);
-    input()->registerTouchscreenSwipeShortcut(SwipeDirection::Right, 3, previousAction);
+void VirtualDesktopManager::gestureReleasedY()
+{
+    // Note that if desktop wrapping is disabled and there's no desktop above or below,
+    // above() and below() will return the current desktop.
+    VirtualDesktop *target = m_current;
+    if (m_currentDesktopOffset.y() <= -GESTURE_SWITCH_THRESHOLD) {
+        target = above(m_current, isNavigationWrappingAround());
+    } else if (m_currentDesktopOffset.y() >= GESTURE_SWITCH_THRESHOLD) {
+        target = below(m_current, isNavigationWrappingAround());
+    }
+
+    // If the current desktop has not changed, consider that the gesture has been canceled.
+    if (m_current != target) {
+        setCurrent(target);
+    } else {
+        Q_EMIT currentChangingCancelled();
+    }
+    m_currentDesktopOffset = QPointF(0, 0);
+}
+
+void VirtualDesktopManager::gestureReleasedX()
+{
+    // Note that if desktop wrapping is disabled and there's no desktop to left or right,
+    // toLeft() and toRight() will return the current desktop.
+    VirtualDesktop *target = m_current;
+    if (m_currentDesktopOffset.x() <= -GESTURE_SWITCH_THRESHOLD) {
+        target = toLeft(m_current, isNavigationWrappingAround());
+    } else if (m_currentDesktopOffset.x() >= GESTURE_SWITCH_THRESHOLD) {
+        target = toRight(m_current, isNavigationWrappingAround());
+    }
+
+    // If the current desktop has not changed, consider that the gesture has been canceled.
+    if (m_current != target) {
+        setCurrent(target);
+    } else {
+        Q_EMIT currentChangingCancelled();
+    }
+    m_currentDesktopOffset = QPointF(0, 0);
 }
 
 void VirtualDesktopManager::initSwitchToShortcuts()

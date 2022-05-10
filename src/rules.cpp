@@ -22,10 +22,9 @@
 #include "client_machine.h"
 #include "main.h"
 #include "platform.h"
-#include "screens.h"
 #include "virtualdesktops.h"
+#include "window.h"
 #include "workspace.h"
-#include "x11client.h"
 #endif
 
 #include "rulebooksettings.h"
@@ -414,7 +413,7 @@ bool Rules::matchClientMachine(const QByteArray &match_machine, bool local) cons
 }
 
 #ifndef KCMRULES
-bool Rules::match(const AbstractClient *c) const
+bool Rules::match(const Window *c) const
 {
     if (!matchType(c->windowType(true))) {
         return false;
@@ -429,7 +428,7 @@ bool Rules::match(const AbstractClient *c) const
         return false;
     }
     if (titlematch != UnimportantMatch) { // track title changes to rematch rules
-        QObject::connect(c, &AbstractClient::captionChanged, c, &AbstractClient::evaluateWindowRules,
+        QObject::connect(c, &Window::captionChanged, c, &Window::evaluateWindowRules,
                          // QueuedConnection, because title may change before
                          // the client is ready (could segfault!)
                          static_cast<Qt::ConnectionType>(Qt::QueuedConnection | Qt::UniqueConnection));
@@ -442,7 +441,7 @@ bool Rules::match(const AbstractClient *c) const
 
 #define NOW_REMEMBER(_T_, _V_) ((selection & _T_) && (_V_##rule == (SetRule)Remember))
 
-bool Rules::update(AbstractClient *c, int selection)
+bool Rules::update(Window *c, int selection)
 {
     // TODO check this setting is for this client ?
     bool updated = false;
@@ -766,7 +765,7 @@ void WindowRules::discardTemporary()
     rules.erase(it2, rules.end());
 }
 
-void WindowRules::update(AbstractClient *c, int selection)
+void WindowRules::update(Window *c, int selection)
 {
     bool updated = false;
     for (QVector<Rules *>::ConstIterator it = rules.constBegin();
@@ -839,7 +838,7 @@ MaximizeMode WindowRules::checkMaximize(MaximizeMode mode, bool init) const
     return static_cast<MaximizeMode>((vert ? MaximizeVertical : 0) | (horiz ? MaximizeHorizontal : 0));
 }
 
-AbstractOutput *WindowRules::checkOutput(AbstractOutput *output, bool init) const
+Output *WindowRules::checkOutput(Output *output, bool init) const
 {
     if (rules.isEmpty()) {
         return output;
@@ -850,7 +849,7 @@ AbstractOutput *WindowRules::checkOutput(AbstractOutput *output, bool init) cons
             break;
         }
     }
-    AbstractOutput *ruleOutput = kwinApp()->platform()->findOutput(ret);
+    Output *ruleOutput = kwinApp()->platform()->findOutput(ret);
     return ruleOutput ? ruleOutput : output;
 }
 
@@ -880,94 +879,6 @@ CHECK_RULE(DesktopFile, QString)
 #undef CHECK_RULE
 #undef CHECK_FORCE_RULE
 
-// Client
-
-void AbstractClient::setupWindowRules(bool ignore_temporary)
-{
-    disconnect(this, &AbstractClient::captionChanged, this, &AbstractClient::evaluateWindowRules);
-    m_rules = RuleBook::self()->find(this, ignore_temporary);
-    // check only after getting the rules, because there may be a rule forcing window type
-}
-
-// Applies Force, ForceTemporarily and ApplyNow rules
-// Used e.g. after the rules have been modified using the kcm.
-void AbstractClient::applyWindowRules()
-{
-    // apply force rules
-    // Placement - does need explicit update, just like some others below
-    // Geometry : setGeometry() doesn't check rules
-    auto client_rules = rules();
-    const QRect oldGeometry = moveResizeGeometry();
-    const QRect geometry = client_rules->checkGeometry(oldGeometry);
-    if (geometry != oldGeometry) {
-        moveResize(geometry);
-    }
-    // MinSize, MaxSize handled by Geometry
-    // IgnoreGeometry
-    setDesktops(desktops());
-    workspace()->sendClientToOutput(this, output());
-    setOnActivities(activities());
-    // Type
-    maximize(maximizeMode());
-    // Minimize : functions don't check, and there are two functions
-    if (client_rules->checkMinimize(isMinimized())) {
-        minimize();
-    } else {
-        unminimize();
-    }
-    setShade(shadeMode());
-    setOriginalSkipTaskbar(skipTaskbar());
-    setSkipPager(skipPager());
-    setSkipSwitcher(skipSwitcher());
-    setKeepAbove(keepAbove());
-    setKeepBelow(keepBelow());
-    setFullScreen(isFullScreen(), true);
-    setNoBorder(noBorder());
-    updateColorScheme();
-    // FSP
-    // AcceptFocus :
-    if (workspace()->mostRecentlyActivatedClient() == this
-        && !client_rules->checkAcceptFocus(true)) {
-        workspace()->activateNextClient(this);
-    }
-    // Autogrouping : Only checked on window manage
-    // AutogroupInForeground : Only checked on window manage
-    // AutogroupById : Only checked on window manage
-    // StrictGeometry
-    setShortcut(rules()->checkShortcut(shortcut().toString()));
-    // see also X11Client::setActive()
-    if (isActive()) {
-        setOpacity(rules()->checkOpacityActive(qRound(opacity() * 100.0)) / 100.0);
-        workspace()->disableGlobalShortcutsForClient(rules()->checkDisableGlobalShortcuts(false));
-    } else {
-        setOpacity(rules()->checkOpacityInactive(qRound(opacity() * 100.0)) / 100.0);
-    }
-    setDesktopFileName(rules()->checkDesktopFile(desktopFileName()).toUtf8());
-}
-
-void X11Client::updateWindowRules(Rules::Types selection)
-{
-    if (!isManaged()) { // not fully setup yet
-        return;
-    }
-    AbstractClient::updateWindowRules(selection);
-}
-
-void AbstractClient::updateWindowRules(Rules::Types selection)
-{
-    if (RuleBook::self()->areUpdatesDisabled()) {
-        return;
-    }
-    m_rules.update(this, selection);
-}
-
-void AbstractClient::finishWindowRules()
-{
-    updateWindowRules(Rules::All);
-    m_rules = WindowRules();
-}
-
-// Workspace
 KWIN_SINGLETON_FACTORY(RuleBook)
 
 RuleBook::RuleBook(QObject *parent)
@@ -1011,7 +922,7 @@ void RuleBook::deleteAll()
     m_rules.clear();
 }
 
-WindowRules RuleBook::find(const AbstractClient *c, bool ignore_temporary)
+WindowRules RuleBook::find(const Window *c, bool ignore_temporary)
 {
     QVector<Rules *> ret;
     for (QList<Rules *>::Iterator it = m_rules.begin();
@@ -1036,7 +947,7 @@ WindowRules RuleBook::find(const AbstractClient *c, bool ignore_temporary)
     return WindowRules(ret);
 }
 
-void RuleBook::edit(AbstractClient *c, bool whole_app)
+void RuleBook::edit(Window *c, bool whole_app)
 {
     save();
     QStringList args;
@@ -1126,7 +1037,7 @@ void RuleBook::cleanupTemporaryRules()
     }
 }
 
-void RuleBook::discardUsed(AbstractClient *c, bool withdrawn)
+void RuleBook::discardUsed(Window *c, bool withdrawn)
 {
     bool updated = false;
     for (QList<Rules *>::Iterator it = m_rules.begin();
@@ -1159,8 +1070,8 @@ void RuleBook::setUpdatesDisabled(bool disable)
 {
     m_updatesDisabled = disable;
     if (!disable) {
-        const auto clients = Workspace::self()->clientList();
-        for (X11Client *c : clients) {
+        const auto clients = Workspace::self()->allClientList();
+        for (Window *c : clients) {
             c->updateWindowRules(Rules::All);
         }
     }

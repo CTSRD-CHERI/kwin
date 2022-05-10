@@ -8,7 +8,6 @@
 */
 #include "kwin_wayland_test.h"
 
-#include "abstract_client.h"
 #include "cursor.h"
 #include "input.h"
 #include "platform.h"
@@ -16,6 +15,7 @@
 #include "useractions.h"
 #include "virtualdesktops.h"
 #include "wayland_server.h"
+#include "window.h"
 #include "workspace.h"
 
 #include <KWayland/Client/surface.h>
@@ -45,7 +45,7 @@ private Q_SLOTS:
 
 void KWinBindingsTest::initTestCase()
 {
-    qRegisterMetaType<KWin::AbstractClient *>();
+    qRegisterMetaType<KWin::Window *>();
     QSignalSpy applicationStartedSpy(kwinApp(), &Application::started);
     QVERIFY(applicationStartedSpy.isValid());
     kwinApp()->platform()->setInitialWindowSize(QSize(1280, 1024));
@@ -110,22 +110,22 @@ void KWinBindingsTest::testSwitchWindow()
         QDBusConnection::sessionBus().asyncCall(msg);
     };
     invokeShortcut(QStringLiteral("Switch Window Up"));
-    QTRY_COMPARE(workspace()->activeClient(), c1);
+    QTRY_COMPARE(workspace()->activeWindow(), c1);
     invokeShortcut(QStringLiteral("Switch Window Right"));
-    QTRY_COMPARE(workspace()->activeClient(), c2);
+    QTRY_COMPARE(workspace()->activeWindow(), c2);
     invokeShortcut(QStringLiteral("Switch Window Down"));
-    QTRY_COMPARE(workspace()->activeClient(), c3);
+    QTRY_COMPARE(workspace()->activeWindow(), c3);
     invokeShortcut(QStringLiteral("Switch Window Left"));
-    QTRY_COMPARE(workspace()->activeClient(), c4);
+    QTRY_COMPARE(workspace()->activeWindow(), c4);
     // test opposite direction
     invokeShortcut(QStringLiteral("Switch Window Left"));
-    QTRY_COMPARE(workspace()->activeClient(), c3);
+    QTRY_COMPARE(workspace()->activeWindow(), c3);
     invokeShortcut(QStringLiteral("Switch Window Down"));
-    QTRY_COMPARE(workspace()->activeClient(), c2);
+    QTRY_COMPARE(workspace()->activeWindow(), c2);
     invokeShortcut(QStringLiteral("Switch Window Right"));
-    QTRY_COMPARE(workspace()->activeClient(), c1);
+    QTRY_COMPARE(workspace()->activeWindow(), c1);
     invokeShortcut(QStringLiteral("Switch Window Up"));
-    QTRY_COMPARE(workspace()->activeClient(), c4);
+    QTRY_COMPARE(workspace()->activeWindow(), c4);
 }
 
 void KWinBindingsTest::testSwitchWindowScript()
@@ -176,13 +176,13 @@ void KWinBindingsTest::testSwitchWindowScript()
     };
 
     runScript(QStringLiteral("slotSwitchWindowUp"));
-    QTRY_COMPARE(workspace()->activeClient(), c1);
+    QTRY_COMPARE(workspace()->activeWindow(), c1);
     runScript(QStringLiteral("slotSwitchWindowRight"));
-    QTRY_COMPARE(workspace()->activeClient(), c2);
+    QTRY_COMPARE(workspace()->activeWindow(), c2);
     runScript(QStringLiteral("slotSwitchWindowDown"));
-    QTRY_COMPARE(workspace()->activeClient(), c3);
+    QTRY_COMPARE(workspace()->activeWindow(), c3);
     runScript(QStringLiteral("slotSwitchWindowLeft"));
-    QTRY_COMPARE(workspace()->activeClient(), c4);
+    QTRY_COMPARE(workspace()->activeWindow(), c4);
 }
 
 void KWinBindingsTest::testWindowToDesktop_data()
@@ -218,10 +218,10 @@ void KWinBindingsTest::testWindowToDesktop()
     // now create a window
     QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
-    auto c = Test::renderAndWaitForShown(surface.data(), QSize(100, 50), Qt::blue);
-    QSignalSpy desktopChangedSpy(c, &AbstractClient::desktopChanged);
+    auto window = Test::renderAndWaitForShown(surface.data(), QSize(100, 50), Qt::blue);
+    QSignalSpy desktopChangedSpy(window, &Window::desktopChanged);
     QVERIFY(desktopChangedSpy.isValid());
-    QCOMPARE(workspace()->activeClient(), c);
+    QCOMPARE(workspace()->activeWindow(), window);
 
     QFETCH(int, desktop);
     VirtualDesktopManager::self()->setCount(desktop);
@@ -238,11 +238,11 @@ void KWinBindingsTest::testWindowToDesktop()
     };
     invokeShortcut(desktop);
     QVERIFY(desktopChangedSpy.wait());
-    QCOMPARE(c->desktop(), desktop);
+    QCOMPARE(window->desktop(), desktop);
     // back to desktop 1
     invokeShortcut(1);
     QVERIFY(desktopChangedSpy.wait());
-    QCOMPARE(c->desktop(), 1);
+    QCOMPARE(window->desktop(), 1);
     // invoke with one desktop too many
     invokeShortcut(desktop + 1);
     // that should fail

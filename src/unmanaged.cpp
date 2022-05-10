@@ -11,8 +11,10 @@
 
 #include "deleted.h"
 #include "effects.h"
+#include "platform.h"
 #include "surfaceitem_x11.h"
 #include "utils/common.h"
+#include "wayland/surface_interface.h"
 #include "workspace.h"
 
 #include <QDebug>
@@ -21,8 +23,6 @@
 #include <QWindow>
 
 #include <xcb/shape.h>
-
-#include <KWaylandServer/surface_interface.h>
 
 using namespace KWaylandServer;
 
@@ -50,12 +50,12 @@ const NET::WindowTypes SUPPORTED_UNMANAGED_WINDOW_TYPES_MASK = NET::NormalMask
     | NET::CriticalNotificationMask;
 
 Unmanaged::Unmanaged()
-    : Toplevel()
+    : Window()
 {
     switch (kwinApp()->operationMode()) {
     case Application::OperationModeXwayland:
         // The wayland surface is associated with the override-redirect window asynchronously.
-        connect(this, &Toplevel::surfaceChanged, this, &Unmanaged::associate);
+        connect(this, &Window::surfaceChanged, this, &Unmanaged::associate);
         break;
     case Application::OperationModeX11:
         // We have no way knowing whether the override-redirect window can be painted. Mark it
@@ -217,6 +217,11 @@ QWindow *Unmanaged::findInternalWindow() const
         }
     }
     return nullptr;
+}
+
+void Unmanaged::checkOutput()
+{
+    setOutput(kwinApp()->platform()->outputAt(frameGeometry().center()));
 }
 
 void Unmanaged::damageNotifyEvent()

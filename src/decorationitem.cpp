@@ -6,13 +6,13 @@
 */
 
 #include "decorationitem.h"
-#include "abstract_client.h"
-#include "abstract_output.h"
 #include "composite.h"
 #include "decorations/decoratedclient.h"
 #include "deleted.h"
+#include "output.h"
 #include "scene.h"
 #include "utils/common.h"
+#include "window.h"
 
 #include <cmath>
 
@@ -47,7 +47,7 @@ Decoration::DecoratedClientImpl *DecorationRenderer::client() const
 void DecorationRenderer::invalidate()
 {
     if (m_client) {
-        addDamage(m_client->client()->rect());
+        addDamage(m_client->window()->rect());
     }
     m_imageSizesDirty = true;
 }
@@ -93,7 +93,7 @@ QImage DecorationRenderer::renderToImage(const QRect &geo)
 
     // Guess the pixel format of the X pixmap into which the QImage will be copied.
     QImage::Format format;
-    const int depth = client()->client()->depth();
+    const int depth = client()->window()->depth();
     switch (depth) {
     case 30:
         format = QImage::Format_A2RGB30_Premultiplied;
@@ -124,17 +124,17 @@ void DecorationRenderer::renderToPainter(QPainter *painter, const QRect &rect)
     client()->decoration()->paint(painter, rect);
 }
 
-DecorationItem::DecorationItem(KDecoration2::Decoration *decoration, AbstractClient *window, Item *parent)
+DecorationItem::DecorationItem(KDecoration2::Decoration *decoration, Window *window, Item *parent)
     : Item(parent)
     , m_window(window)
 {
     m_renderer.reset(Compositor::self()->scene()->createDecorationRenderer(window->decoratedClient()));
 
-    connect(window, &Toplevel::frameGeometryChanged,
+    connect(window, &Window::frameGeometryChanged,
             this, &DecorationItem::handleFrameGeometryChanged);
-    connect(window, &Toplevel::windowClosed,
+    connect(window, &Window::windowClosed,
             this, &DecorationItem::handleWindowClosed);
-    connect(window, &Toplevel::screenChanged,
+    connect(window, &Window::screenChanged,
             this, &DecorationItem::handleOutputChanged);
 
     connect(decoration, &KDecoration2::Decoration::bordersChanged,
@@ -145,6 +145,18 @@ DecorationItem::DecorationItem(KDecoration2::Decoration *decoration, AbstractCli
 
     setSize(window->size());
     handleOutputChanged();
+}
+
+QRegion DecorationItem::shape() const
+{
+    QRect left, top, right, bottom;
+    m_window->layoutDecorationRects(left, top, right, bottom);
+    return QRegion(left).united(top).united(right).united(bottom);
+}
+
+QRegion DecorationItem::opaque() const
+{
+    return m_window->decorationHasAlpha() ? QRegion() : shape();
 }
 
 void DecorationItem::preprocess()
@@ -159,14 +171,14 @@ void DecorationItem::preprocess()
 void DecorationItem::handleOutputChanged()
 {
     if (m_output) {
-        disconnect(m_output, &AbstractOutput::scaleChanged, this, &DecorationItem::handleOutputScaleChanged);
+        disconnect(m_output, &Output::scaleChanged, this, &DecorationItem::handleOutputScaleChanged);
     }
 
     m_output = m_window->output();
 
     if (m_output) {
         handleOutputScaleChanged();
-        connect(m_output, &AbstractOutput::scaleChanged, this, &DecorationItem::handleOutputScaleChanged);
+        connect(m_output, &Output::scaleChanged, this, &DecorationItem::handleOutputScaleChanged);
     }
 }
 
@@ -184,7 +196,7 @@ void DecorationItem::handleFrameGeometryChanged()
     setSize(m_window->size());
 }
 
-void DecorationItem::handleWindowClosed(Toplevel *original, Deleted *deleted)
+void DecorationItem::handleWindowClosed(Window *original, Deleted *deleted)
 {
     Q_UNUSED(original)
     m_window = deleted;
@@ -196,6 +208,11 @@ void DecorationItem::handleWindowClosed(Toplevel *original, Deleted *deleted)
 DecorationRenderer *DecorationItem::renderer() const
 {
     return m_renderer.data();
+}
+
+Window *DecorationItem::window() const
+{
+    return m_window;
 }
 
 WindowQuad buildQuad(const QRect &partRect, const QPoint &textureOffset,
@@ -244,11 +261,7 @@ WindowQuadList DecorationItem::buildQuads() const
     const qreal devicePixelRatio = m_renderer->effectiveDevicePixelRatio();
     const int texturePad = DecorationRenderer::TexturePad;
 
-    if (const AbstractClient *client = qobject_cast<const AbstractClient *>(m_window)) {
-        client->layoutDecorationRects(left, top, right, bottom);
-    } else if (const Deleted *deleted = qobject_cast<const Deleted *>(m_window)) {
-        deleted->layoutDecorationRects(left, top, right, bottom);
-    }
+    m_window->layoutDecorationRects(left, top, right, bottom);
 
     const int topHeight = std::ceil(top.height() * devicePixelRatio);
     const int bottomHeight = std::ceil(bottom.height() * devicePixelRatio);

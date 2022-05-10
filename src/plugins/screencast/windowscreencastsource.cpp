@@ -7,24 +7,26 @@
 #include "windowscreencastsource.h"
 #include "screencastutils.h"
 
-#include "abstract_output.h"
+#include "composite.h"
 #include "deleted.h"
 #include "effects.h"
 #include "kwineffects.h"
 #include "kwingltexture.h"
 #include "kwinglutils.h"
+#include "output.h"
 #include "renderloop.h"
 #include "scene.h"
-#include "toplevel.h"
+#include "window.h"
+#include "windowitem.h"
 
 namespace KWin
 {
 
-WindowScreenCastSource::WindowScreenCastSource(Toplevel *window, QObject *parent)
+WindowScreenCastSource::WindowScreenCastSource(Window *window, QObject *parent)
     : ScreenCastSource(parent)
     , m_window(window)
 {
-    connect(m_window, &Toplevel::windowClosed, this, &ScreenCastSource::closed);
+    connect(m_window, &Window::windowClosed, this, &ScreenCastSource::closed);
 }
 
 bool WindowScreenCastSource::hasAlphaChannel() const
@@ -40,28 +42,27 @@ QSize WindowScreenCastSource::textureSize() const
 void WindowScreenCastSource::render(QImage *image)
 {
     GLTexture offscreenTexture(hasAlphaChannel() ? GL_RGBA8 : GL_RGB8, textureSize());
-    GLRenderTarget offscreenTarget(&offscreenTexture);
+    GLFramebuffer offscreenTarget(&offscreenTexture);
 
     render(&offscreenTarget);
     grabTexture(&offscreenTexture, image);
 }
 
-void WindowScreenCastSource::render(GLRenderTarget *target)
+void WindowScreenCastSource::render(GLFramebuffer *target)
 {
     const QRect geometry = m_window->clientGeometry();
     QMatrix4x4 projectionMatrix;
     projectionMatrix.ortho(geometry.x(), geometry.x() + geometry.width(),
                            geometry.y(), geometry.y() + geometry.height(), -1, 1);
 
-    EffectWindowImpl *effectWindow = m_window->effectWindow();
-    WindowPaintData data(effectWindow);
+    WindowPaintData data(m_window->effectWindow());
     data.setProjectionMatrix(projectionMatrix);
 
-    GLRenderTarget::pushRenderTarget(target);
+    GLFramebuffer::pushFramebuffer(target);
     glClearColor(0.0, 0.0, 0.0, 0.0);
     glClear(GL_COLOR_BUFFER_BIT);
-    effectWindow->sceneWindow()->performPaint(Scene::PAINT_WINDOW_TRANSFORMED, infiniteRegion(), data);
-    GLRenderTarget::popRenderTarget();
+    Compositor::self()->scene()->render(m_window->windowItem(), Scene::PAINT_WINDOW_TRANSFORMED, infiniteRegion(), data);
+    GLFramebuffer::popFramebuffer();
 }
 
 std::chrono::nanoseconds WindowScreenCastSource::clock() const

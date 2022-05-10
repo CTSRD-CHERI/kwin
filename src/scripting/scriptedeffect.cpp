@@ -21,11 +21,14 @@
 #include <KGlobalAccel>
 #include <KPluginMetaData>
 #include <kconfigloader.h>
+#include <kwinglutils.h>
 // Qt
 #include <QAction>
 #include <QFile>
 #include <QQmlEngine>
 #include <QStandardPaths>
+
+#include <optional>
 
 Q_DECLARE_METATYPE(KSharedConfigPtr)
 
@@ -40,18 +43,21 @@ struct AnimationSettings
         Delay = 1 << 2,
         Duration = 1 << 3,
         FullScreen = 1 << 4,
-        KeepAlive = 1 << 5
+        KeepAlive = 1 << 5,
+        FrozenTime = 1 << 6
     };
     AnimationEffect::Attribute type;
     QEasingCurve::Type curve;
     QJSValue from;
     QJSValue to;
     int delay;
+    qint64 frozenTime;
     uint duration;
     uint set;
     uint metaData;
     bool fullScreenEffect;
     bool keepAlive;
+    std::optional<uint> shader;
 };
 
 AnimationSettings animationSettingsFromObject(const QJSValue &object)
@@ -111,6 +117,18 @@ AnimationSettings animationSettingsFromObject(const QJSValue &object)
         settings.keepAlive = true;
     }
 
+    const QJSValue frozenTime = object.property(QStringLiteral("frozenTime"));
+    if (frozenTime.isNumber()) {
+        settings.frozenTime = frozenTime.toInt();
+        settings.set |= AnimationSettings::FrozenTime;
+    } else {
+        settings.frozenTime = -1;
+    }
+
+    if (const auto shader = object.property(QStringLiteral("fragmentShader")); shader.isNumber()) {
+        settings.shader = shader.toUInt();
+    }
+
     return settings;
 }
 
@@ -148,17 +166,20 @@ ScriptedEffect *ScriptedEffect::create(const KPluginMetaData &effect)
         qCDebug(KWIN_SCRIPTING) << "Could not locate the effect script";
         return nullptr;
     }
-    return ScriptedEffect::create(name, scriptFile, effect.value(QStringLiteral("X-KDE-Ordering")).toInt());
+
+    return ScriptedEffect::create(name, scriptFile, effect.value(QStringLiteral("X-KDE-Ordering")).toInt(), effect.value(QStringLiteral("X-KWin-Exclusive-Category")));
 }
 
-ScriptedEffect *ScriptedEffect::create(const QString &effectName, const QString &pathToScript, int chainPosition)
+ScriptedEffect *ScriptedEffect::create(const QString &effectName, const QString &pathToScript, int chainPosition, const QString &exclusiveCategory)
 {
     ScriptedEffect *effect = new ScriptedEffect();
+    effect->m_exclusiveCategory = exclusiveCategory;
     if (!effect->init(effectName, pathToScript)) {
         delete effect;
         return nullptr;
     }
     effect->m_chainPosition = chainPosition;
+
     return effect;
 }
 
@@ -189,6 +210,7 @@ ScriptedEffect::ScriptedEffect()
 
 ScriptedEffect::~ScriptedEffect()
 {
+    qDeleteAll(m_shaders);
 }
 
 bool ScriptedEffect::init(const QString &effectName, const QString &pathToScript)
@@ -248,6 +270,7 @@ bool ScriptedEffect::init(const QString &effectName, const QString &pathToScript
 
         QStringLiteral("registerShortcut"),
         QStringLiteral("registerScreenEdge"),
+        QStringLiteral("registerRealtimeScreenEdge"),
         QStringLiteral("registerTouchScreenEdge"),
         QStringLiteral("unregisterScreenEdge"),
         QStringLiteral("unregisterTouchScreenEdge"),
@@ -255,9 +278,12 @@ bool ScriptedEffect::init(const QString &effectName, const QString &pathToScript
         QStringLiteral("animate"),
         QStringLiteral("set"),
         QStringLiteral("retarget"),
+        QStringLiteral("freezeInTime"),
         QStringLiteral("redirect"),
         QStringLiteral("complete"),
         QStringLiteral("cancel"),
+        QStringLiteral("addShader"),
+        QStringLiteral("setUniform"),
     };
 
     for (const QString &propertyName : globalProperties) {
@@ -290,6 +316,26 @@ QString ScriptedEffect::pluginId() const
 bool ScriptedEffect::isActiveFullScreenEffect() const
 {
     return effects->activeFullScreenEffect() == this;
+}
+
+QList<int> ScriptedEffect::touchEdgesForAction(const QString &action) const
+{
+    QList<int> ret;
+    if (m_exclusiveCategory == QStringLiteral("show-desktop") && action == QStringLiteral("show-desktop")) {
+        const QVector borders({ElectricTop, ElectricRight, ElectricBottom, ElectricLeft});
+
+        for (const auto b : borders) {
+            if (ScreenEdges::self()->actionForTouchBorder(b) == ElectricActionShowDesktop) {
+                ret.append(b);
+            }
+        }
+        return ret;
+    } else {
+        if (!m_config) {
+            return ret;
+        }
+        return m_config->property(QStringLiteral("TouchBorderActivate") + action).value<QList<int>>();
+    }
 }
 
 QJSValue ScriptedEffect::animate_helper(const QJSValue &object, AnimationType animationType)
@@ -346,6 +392,9 @@ QJSValue ScriptedEffect::animate_helper(const QJSValue &object, AnimationType an
                 if (!(s.set & AnimationSettings::KeepAlive)) {
                     s.keepAlive = settings.at(0).keepAlive;
                 }
+                if (!s.shader.has_value()) {
+                    s.shader = settings.at(0).shader;
+                }
 
                 s.metaData = 0;
                 typedef QMap<AnimationEffect::MetaType, QString> MetaTypeMap;
@@ -364,6 +413,20 @@ QJSValue ScriptedEffect::animate_helper(const QJSValue &object, AnimationType an
                     if (metaVal.isNumber()) {
                         AnimationEffect::setMetaData(it.key(), metaVal.toInt(), s.metaData);
                     }
+                }
+                if (s.type == ShaderUniform && s.shader) {
+                    auto uniformProperty = value.property(QStringLiteral("uniform")).toString();
+                    auto shader = findShader(s.shader.value());
+                    if (!shader) {
+                        m_engine->throwError(QStringLiteral("Shader for given shaderId not found"));
+                        return {};
+                    }
+                    if (!effects->makeOpenGLContextCurrent()) {
+                        m_engine->throwError(QStringLiteral("Failed to make OpenGL context current"));
+                        return {};
+                    }
+                    ShaderBinder binder{shader};
+                    s.metaData = shader->uniformLocation(uniformProperty.toUtf8().constData());
                 }
 
                 settings << s;
@@ -404,7 +467,11 @@ QJSValue ScriptedEffect::animate_helper(const QJSValue &object, AnimationType an
                               setting.curve,
                               setting.delay,
                               setting.fullScreenEffect,
-                              setting.keepAlive);
+                              setting.keepAlive,
+                              setting.shader ? setting.shader.value() : 0u);
+            if (setting.frozenTime >= 0) {
+                freezeInTime(animationId, setting.frozenTime);
+            }
         } else {
             animationId = animate(window,
                                   setting.type,
@@ -415,7 +482,11 @@ QJSValue ScriptedEffect::animate_helper(const QJSValue &object, AnimationType an
                                   setting.curve,
                                   setting.delay,
                                   setting.fullScreenEffect,
-                                  setting.keepAlive);
+                                  setting.keepAlive,
+                                  setting.shader ? setting.shader.value() : 0u);
+            if (setting.frozenTime >= 0) {
+                freezeInTime(animationId, setting.frozenTime);
+            }
         }
         array.setProperty(i, animationId);
     }
@@ -425,7 +496,7 @@ QJSValue ScriptedEffect::animate_helper(const QJSValue &object, AnimationType an
 
 quint64 ScriptedEffect::animate(KWin::EffectWindow *window, KWin::AnimationEffect::Attribute attribute,
                                 int ms, const QJSValue &to, const QJSValue &from, uint metaData, int curve,
-                                int delay, bool fullScreen, bool keepAlive)
+                                int delay, bool fullScreen, bool keepAlive, uint shaderId)
 {
     QEasingCurve qec;
     if (curve < QEasingCurve::Custom) {
@@ -434,7 +505,7 @@ quint64 ScriptedEffect::animate(KWin::EffectWindow *window, KWin::AnimationEffec
         qec.setCustomType(qecGaussian);
     }
     return AnimationEffect::animate(window, attribute, metaData, ms, fpx2FromScriptValue(to), qec,
-                                    delay, fpx2FromScriptValue(from), fullScreen, keepAlive);
+                                    delay, fpx2FromScriptValue(from), fullScreen, keepAlive, findShader(shaderId));
 }
 
 QJSValue ScriptedEffect::animate(const QJSValue &object)
@@ -444,7 +515,7 @@ QJSValue ScriptedEffect::animate(const QJSValue &object)
 
 quint64 ScriptedEffect::set(KWin::EffectWindow *window, KWin::AnimationEffect::Attribute attribute,
                             int ms, const QJSValue &to, const QJSValue &from, uint metaData, int curve,
-                            int delay, bool fullScreen, bool keepAlive)
+                            int delay, bool fullScreen, bool keepAlive, uint shaderId)
 {
     QEasingCurve qec;
     if (curve < QEasingCurve::Custom) {
@@ -453,7 +524,7 @@ quint64 ScriptedEffect::set(KWin::EffectWindow *window, KWin::AnimationEffect::A
         qec.setCustomType(qecGaussian);
     }
     return AnimationEffect::set(window, attribute, metaData, ms, fpx2FromScriptValue(to), qec,
-                                delay, fpx2FromScriptValue(from), fullScreen, keepAlive);
+                                delay, fpx2FromScriptValue(from), fullScreen, keepAlive, findShader(shaderId));
 }
 
 QJSValue ScriptedEffect::set(const QJSValue &object)
@@ -470,6 +541,18 @@ bool ScriptedEffect::retarget(const QList<quint64> &animationIds, const QJSValue
 {
     return std::all_of(animationIds.begin(), animationIds.end(), [&](quint64 animationId) {
         return retarget(animationId, newTarget, newRemainingTime);
+    });
+}
+
+bool ScriptedEffect::freezeInTime(quint64 animationId, qint64 frozenTime)
+{
+    return AnimationEffect::freezeInTime(animationId, frozenTime);
+}
+
+bool ScriptedEffect::freezeInTime(const QList<quint64> &animationIds, qint64 frozenTime)
+{
+    return std::all_of(animationIds.begin(), animationIds.end(), [&](quint64 animationId) {
+        return AnimationEffect::freezeInTime(animationId, frozenTime);
     });
 }
 
@@ -635,6 +718,43 @@ bool ScriptedEffect::registerScreenEdge(int edge, const QJSValue &callback)
     return true;
 }
 
+bool ScriptedEffect::registerRealtimeScreenEdge(int edge, const QJSValue &callback)
+{
+    if (!callback.isCallable()) {
+        m_engine->throwError(QStringLiteral("Screen edge handler must be callable"));
+        return false;
+    }
+    auto it = realtimeScreenEdgeCallbacks().find(edge);
+    if (it == realtimeScreenEdgeCallbacks().end()) {
+        // not yet registered
+        realtimeScreenEdgeCallbacks().insert(edge, QJSValueList{callback});
+        auto *triggerAction = new QAction(this);
+        connect(triggerAction, &QAction::triggered, this, [this, edge]() {
+            auto it = realtimeScreenEdgeCallbacks().constFind(edge);
+            if (it != realtimeScreenEdgeCallbacks().constEnd()) {
+                for (const QJSValue &callback : it.value()) {
+                    QJSValue(callback).call({edge});
+                }
+            }
+        });
+        effects->registerRealtimeTouchBorder(static_cast<KWin::ElectricBorder>(edge), triggerAction, [this](ElectricBorder border, const QSizeF &deltaProgress, EffectScreen *screen) {
+            auto it = realtimeScreenEdgeCallbacks().constFind(border);
+            if (it != realtimeScreenEdgeCallbacks().constEnd()) {
+                for (const QJSValue &callback : it.value()) {
+                    QJSValue delta = m_engine->newObject();
+                    delta.setProperty("width", deltaProgress.width());
+                    delta.setProperty("height", deltaProgress.height());
+
+                    QJSValue(callback).call({border, QJSValue(delta), m_engine->newQObject(screen)});
+                }
+            }
+        });
+    } else {
+        it->append(callback);
+    }
+    return true;
+}
+
 bool ScriptedEffect::unregisterScreenEdge(int edge)
 {
     auto it = screenEdgeCallbacks().find(edge);
@@ -679,6 +799,89 @@ bool ScriptedEffect::unregisterTouchScreenEdge(int edge)
 QJSEngine *ScriptedEffect::engine() const
 {
     return m_engine;
+}
+
+uint ScriptedEffect::addFragmentShader(ShaderTrait traits, const QString &fragmentShaderFile)
+{
+    if (!effects->makeOpenGLContextCurrent()) {
+        m_engine->throwError(QStringLiteral("Failed to make OpenGL context current"));
+        return 0;
+    }
+    const QString shaderDir{QLatin1String(KWIN_NAME "/effects/") + m_effectName + QLatin1String("/contents/shaders/")};
+    const QString fragment = fragmentShaderFile.isEmpty() ? QString{} : QStandardPaths::locate(QStandardPaths::GenericDataLocation, shaderDir + fragmentShaderFile);
+
+    auto shader = ShaderManager::instance()->generateShaderFromFile(static_cast<KWin::ShaderTraits>(int(traits)), {}, fragment);
+    if (!shader->isValid()) {
+        m_engine->throwError(QStringLiteral("Shader failed to load"));
+        delete shader;
+        // 0 is never a valid shader identifier, it's ensured the first shader gets id 1
+        return 0;
+    }
+
+    const uint shaderId{m_nextShaderId};
+    m_nextShaderId++;
+    m_shaders.insert(shaderId, shader);
+    return shaderId;
+}
+
+GLShader *ScriptedEffect::findShader(uint shaderId) const
+{
+    if (auto it = m_shaders.find(shaderId); it != m_shaders.end()) {
+        return it.value();
+    }
+    return nullptr;
+}
+
+void ScriptedEffect::setUniform(uint shaderId, const QString &name, const QJSValue &value)
+{
+    auto shader = findShader(shaderId);
+    if (!shader) {
+        m_engine->throwError(QStringLiteral("Shader for given shaderId not found"));
+        return;
+    }
+    if (!effects->makeOpenGLContextCurrent()) {
+        m_engine->throwError(QStringLiteral("Failed to make OpenGL context current"));
+        return;
+    }
+    auto setColorUniform = [this, shader, name] (const QColor &color)
+    {
+        if (!color.isValid()) {
+            return;
+        }
+        if (!shader->setUniform(name.toUtf8().constData(), color)) {
+            m_engine->throwError(QStringLiteral("Failed to set uniform ") + name);
+        }
+    };
+    ShaderBinder binder{shader};
+    if (value.isString()) {
+        setColorUniform(value.toString());
+    } else if (value.isNumber()) {
+        if (!shader->setUniform(name.toUtf8().constData(), float(value.toNumber()))) {
+            m_engine->throwError(QStringLiteral("Failed to set uniform ") + name);
+        }
+    } else if (value.isArray()) {
+        const auto length = value.property(QStringLiteral("length")).toInt();
+        if (length == 2) {
+            if (!shader->setUniform(name.toUtf8().constData(), QVector2D{float(value.property(0).toNumber()), float(value.property(1).toNumber())})) {
+                m_engine->throwError(QStringLiteral("Failed to set uniform ") + name);
+            }
+        } else if (length == 3) {
+            if (!shader->setUniform(name.toUtf8().constData(), QVector3D{float(value.property(0).toNumber()), float(value.property(1).toNumber()), float(value.property(2).toNumber())})) {
+                m_engine->throwError(QStringLiteral("Failed to set uniform ") + name);
+            }
+        } else if (length == 4) {
+            if (!shader->setUniform(name.toUtf8().constData(), QVector4D{float(value.property(0).toNumber()), float(value.property(1).toNumber()), float(value.property(2).toNumber()), float(value.property(3).toNumber())})) {
+                m_engine->throwError(QStringLiteral("Failed to set uniform ") + name);
+            }
+        } else {
+            m_engine->throwError(QStringLiteral("Invalid number of elements in array"));
+        }
+    } else if (value.isVariant()) {
+        const auto variant = value.toVariant();
+        setColorUniform(variant.value<QColor>());
+    } else {
+        m_engine->throwError(QStringLiteral("Invalid value provided for uniform"));
+    }
 }
 
 } // namespace

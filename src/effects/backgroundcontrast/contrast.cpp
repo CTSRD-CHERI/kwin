@@ -10,13 +10,14 @@
 #include "contrastshader.h"
 // KConfigSkeleton
 
+#include "wayland/contrast_interface.h"
+#include "wayland/display.h"
+#include "wayland/surface_interface.h"
+
 #include <QCoreApplication>
 #include <QMatrix4x4>
 #include <QTimer>
 #include <QWindow>
-
-#include <KWaylandServer/display.h>
-#include <KWaylandServer/surface_interface.h>
 
 namespace KWin
 {
@@ -273,7 +274,7 @@ bool ContrastEffect::enabledByDefault()
 
 bool ContrastEffect::supported()
 {
-    bool supported = effects->isOpenGLCompositing() && GLRenderTarget::supported();
+    bool supported = effects->isOpenGLCompositing() && GLFramebuffer::supported();
 
     if (supported) {
         int maxTexSize;
@@ -406,12 +407,6 @@ void ContrastEffect::drawWindow(EffectWindow *w, int mask, const QRegion &region
 
     // Draw the window over the contrast area
     effects->drawWindow(w, mask, region, data);
-}
-
-void ContrastEffect::paintEffectFrame(EffectFrame *frame, const QRegion &region, double opacity, double frameOpacity)
-{
-    // FIXME: this is a no-op for now, it should figure out the right contrast, intensity, saturation
-    effects->paintEffectFrame(frame, region, opacity, frameOpacity);
 }
 
 void ContrastEffect::doContrast(EffectWindow *w, const QRegion &shape, const QRect &screen, const float opacity, const QMatrix4x4 &screenProjection)

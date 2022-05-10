@@ -59,8 +59,8 @@ public:
     QVector<CompositingType> supportedCompositors() const override;
 
     QString supportInformation() const override;
-    AbstractOutput *createVirtualOutput(const QString &name, const QSize &size, double scale) override;
-    void removeVirtualOutput(AbstractOutput *output) override;
+    Output *createVirtualOutput(const QString &name, const QSize &size, double scale) override;
+    void removeVirtualOutput(Output *output) override;
 
     DrmGpu *primaryGpu() const;
     DrmGpu *findGpu(dev_t deviceId) const;
@@ -70,6 +70,8 @@ public:
 
     void setRenderBackend(DrmRenderBackend *backend);
     DrmRenderBackend *renderBackend() const;
+
+    void releaseBuffers();
 
 public Q_SLOTS:
     void turnOutputsOn();
@@ -81,7 +83,7 @@ Q_SIGNALS:
     void gpuAdded(DrmGpu *gpu);
 
 protected:
-    bool applyOutputChanges(const WaylandOutputConfig &config) override;
+    bool applyOutputChanges(const OutputConfiguration &config) override;
 
 private:
     friend class DrmGpu;

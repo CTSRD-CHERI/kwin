@@ -9,20 +9,18 @@
 */
 #include "shadow.h"
 // kwin
-#include "abstract_client.h"
 #include "atoms.h"
 #include "composite.h"
-#include "internal_client.h"
+#include "internalwindow.h"
 #include "scene.h"
-#include "toplevel.h"
+#include "wayland/shadow_interface.h"
+#include "wayland/shmclientbuffer.h"
+#include "wayland/surface_interface.h"
 #include "wayland_server.h"
+#include "window.h"
 
 #include <KDecoration2/Decoration>
 #include <KDecoration2/DecorationShadow>
-
-#include <KWaylandServer/shadow_interface.h>
-#include <KWaylandServer/shmclientbuffer.h>
-#include <KWaylandServer/surface_interface.h>
 
 #include <QWindow>
 
@@ -31,38 +29,38 @@ Q_DECLARE_METATYPE(QMargins)
 namespace KWin
 {
 
-Shadow::Shadow(Toplevel *toplevel)
-    : m_topLevel(toplevel)
-    , m_cachedSize(toplevel->size())
+Shadow::Shadow(Window *window)
+    : m_window(window)
+    , m_cachedSize(window->size())
     , m_decorationShadow(nullptr)
 {
-    connect(m_topLevel, &Toplevel::frameGeometryChanged, this, &Shadow::geometryChanged);
+    connect(m_window, &Window::frameGeometryChanged, this, &Shadow::geometryChanged);
 }
 
 Shadow::~Shadow()
 {
 }
 
-Shadow *Shadow::createShadow(Toplevel *toplevel)
+Shadow *Shadow::createShadow(Window *window)
 {
-    Shadow *shadow = createShadowFromDecoration(toplevel);
+    Shadow *shadow = createShadowFromDecoration(window);
     if (!shadow && waylandServer()) {
-        shadow = createShadowFromWayland(toplevel);
+        shadow = createShadowFromWayland(window);
     }
     if (!shadow && kwinApp()->x11Connection()) {
-        shadow = createShadowFromX11(toplevel);
+        shadow = createShadowFromX11(window);
     }
     if (!shadow) {
-        shadow = createShadowFromInternalWindow(toplevel);
+        shadow = createShadowFromInternalWindow(window);
     }
     return shadow;
 }
 
-Shadow *Shadow::createShadowFromX11(Toplevel *toplevel)
+Shadow *Shadow::createShadowFromX11(Window *window)
 {
-    auto data = Shadow::readX11ShadowProperty(toplevel->window());
+    auto data = Shadow::readX11ShadowProperty(window->window());
     if (!data.isEmpty()) {
-        Shadow *shadow = Compositor::self()->scene()->createShadow(toplevel);
+        Shadow *shadow = Compositor::self()->scene()->createShadow(window);
 
         if (!shadow->init(data)) {
             delete shadow;
@@ -74,26 +72,22 @@ Shadow *Shadow::createShadowFromX11(Toplevel *toplevel)
     }
 }
 
-Shadow *Shadow::createShadowFromDecoration(Toplevel *toplevel)
+Shadow *Shadow::createShadowFromDecoration(Window *window)
 {
-    AbstractClient *c = qobject_cast<AbstractClient *>(toplevel);
-    if (!c) {
+    if (!window->decoration()) {
         return nullptr;
     }
-    if (!c->decoration()) {
-        return nullptr;
-    }
-    Shadow *shadow = Compositor::self()->scene()->createShadow(toplevel);
-    if (!shadow->init(c->decoration())) {
+    Shadow *shadow = Compositor::self()->scene()->createShadow(window);
+    if (!shadow->init(window->decoration())) {
         delete shadow;
         return nullptr;
     }
     return shadow;
 }
 
-Shadow *Shadow::createShadowFromWayland(Toplevel *toplevel)
+Shadow *Shadow::createShadowFromWayland(Window *window)
 {
-    auto surface = toplevel->surface();
+    auto surface = window->surface();
     if (!surface) {
         return nullptr;
     }
@@ -101,7 +95,7 @@ Shadow *Shadow::createShadowFromWayland(Toplevel *toplevel)
     if (!s) {
         return nullptr;
     }
-    Shadow *shadow = Compositor::self()->scene()->createShadow(toplevel);
+    Shadow *shadow = Compositor::self()->scene()->createShadow(window);
     if (!shadow->init(s)) {
         delete shadow;
         return nullptr;
@@ -109,18 +103,18 @@ Shadow *Shadow::createShadowFromWayland(Toplevel *toplevel)
     return shadow;
 }
 
-Shadow *Shadow::createShadowFromInternalWindow(Toplevel *toplevel)
+Shadow *Shadow::createShadowFromInternalWindow(Window *window)
 {
-    const InternalClient *client = qobject_cast<InternalClient *>(toplevel);
-    if (!client) {
+    const InternalWindow *internalWindow = qobject_cast<InternalWindow *>(window);
+    if (!internalWindow) {
         return nullptr;
     }
-    const QWindow *window = client->internalWindow();
-    if (!window) {
+    const QWindow *handle = internalWindow->handle();
+    if (!handle) {
         return nullptr;
     }
-    Shadow *shadow = Compositor::self()->scene()->createShadow(toplevel);
-    if (!shadow->init(window)) {
+    Shadow *shadow = Compositor::self()->scene()->createShadow(window);
+    if (!shadow->init(handle)) {
         delete shadow;
         return nullptr;
     }
@@ -192,18 +186,18 @@ bool Shadow::init(KDecoration2::Decoration *decoration)
 {
     if (m_decorationShadow) {
         // disconnect previous connections
-        disconnect(m_decorationShadow.data(), &KDecoration2::DecorationShadow::innerShadowRectChanged, m_topLevel, &Toplevel::updateShadow);
-        disconnect(m_decorationShadow.data(), &KDecoration2::DecorationShadow::shadowChanged, m_topLevel, &Toplevel::updateShadow);
-        disconnect(m_decorationShadow.data(), &KDecoration2::DecorationShadow::paddingChanged, m_topLevel, &Toplevel::updateShadow);
+        disconnect(m_decorationShadow.data(), &KDecoration2::DecorationShadow::innerShadowRectChanged, m_window, &Window::updateShadow);
+        disconnect(m_decorationShadow.data(), &KDecoration2::DecorationShadow::shadowChanged, m_window, &Window::updateShadow);
+        disconnect(m_decorationShadow.data(), &KDecoration2::DecorationShadow::paddingChanged, m_window, &Window::updateShadow);
     }
     m_decorationShadow = decoration->shadow();
     if (!m_decorationShadow) {
         return false;
     }
     // setup connections - all just mapped to recreate
-    connect(m_decorationShadow.data(), &KDecoration2::DecorationShadow::innerShadowRectChanged, m_topLevel, &Toplevel::updateShadow);
-    connect(m_decorationShadow.data(), &KDecoration2::DecorationShadow::shadowChanged, m_topLevel, &Toplevel::updateShadow);
-    connect(m_decorationShadow.data(), &KDecoration2::DecorationShadow::paddingChanged, m_topLevel, &Toplevel::updateShadow);
+    connect(m_decorationShadow.data(), &KDecoration2::DecorationShadow::innerShadowRectChanged, m_window, &Window::updateShadow);
+    connect(m_decorationShadow.data(), &KDecoration2::DecorationShadow::shadowChanged, m_window, &Window::updateShadow);
+    connect(m_decorationShadow.data(), &KDecoration2::DecorationShadow::paddingChanged, m_window, &Window::updateShadow);
 
     m_offset = m_decorationShadow->padding();
     Q_EMIT offsetChanged();
@@ -284,14 +278,14 @@ bool Shadow::init(const QWindow *window)
 
 bool Shadow::updateShadow()
 {
-    if (!m_topLevel) {
+    if (!m_window) {
         return false;
     }
 
     if (m_decorationShadow) {
-        if (AbstractClient *c = qobject_cast<AbstractClient *>(m_topLevel)) {
-            if (c->decoration()) {
-                if (init(c->decoration())) {
+        if (m_window) {
+            if (m_window->decoration()) {
+                if (init(m_window->decoration())) {
                     return true;
                 }
             }
@@ -300,8 +294,8 @@ bool Shadow::updateShadow()
     }
 
     if (waylandServer()) {
-        if (m_topLevel && m_topLevel->surface()) {
-            if (const auto &s = m_topLevel->surface()->shadow()) {
+        if (m_window && m_window->surface()) {
+            if (const auto &s = m_window->surface()->shadow()) {
                 if (init(s)) {
                     return true;
                 }
@@ -309,13 +303,13 @@ bool Shadow::updateShadow()
         }
     }
 
-    if (InternalClient *client = qobject_cast<InternalClient *>(m_topLevel)) {
-        if (init(client->internalWindow())) {
+    if (InternalWindow *window = qobject_cast<InternalWindow *>(m_window)) {
+        if (init(window->handle())) {
             return true;
         }
     }
 
-    auto data = Shadow::readX11ShadowProperty(m_topLevel->window());
+    auto data = Shadow::readX11ShadowProperty(m_window->window());
     if (data.isEmpty()) {
         return false;
     }
@@ -325,22 +319,22 @@ bool Shadow::updateShadow()
     return true;
 }
 
-Toplevel *Shadow::toplevel() const
+Window *Shadow::window() const
 {
-    return m_topLevel;
+    return m_window;
 }
 
-void Shadow::setToplevel(Toplevel *topLevel)
+void Shadow::setWindow(Window *window)
 {
-    m_topLevel = topLevel;
-    connect(m_topLevel, &Toplevel::frameGeometryChanged, this, &Shadow::geometryChanged);
+    m_window = window;
+    connect(m_window, &Window::frameGeometryChanged, this, &Shadow::geometryChanged);
 }
 void Shadow::geometryChanged()
 {
-    if (m_cachedSize == m_topLevel->size()) {
+    if (m_cachedSize == m_window->size()) {
         return;
     }
-    m_cachedSize = m_topLevel->size();
+    m_cachedSize = m_window->size();
     Q_EMIT rectChanged();
 }
 

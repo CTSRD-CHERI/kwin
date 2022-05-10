@@ -27,18 +27,19 @@ set_target_properties(kwin PROPERTIES
 
 target_sources(kwin PRIVATE
     3rdparty/xcursor.c
-    abstract_client.cpp
-    abstract_output.cpp
-    abstract_wayland_output.cpp
     activation.cpp
     appmenu.cpp
     atoms.cpp
     client_machine.cpp
+    colors/colordevice.cpp
+    colors/colorlut.cpp
+    colors/colormanager.cpp
+    colors/colorpipelinestage.cpp
+    colors/colortransformation.cpp
     composite.cpp
     cursor.cpp
-    cursorview.cpp
-    cursorview_opengl.cpp
-    cursorview_qpainter.cpp
+    cursordelegate_opengl.cpp
+    cursordelegate_qpainter.cpp
     dbusinterface.cpp
     debug_console.cpp
     decorationitem.cpp
@@ -65,9 +66,9 @@ target_sources(kwin PRIVATE
     inputbackend.cpp
     inputdevice.cpp
     inputmethod.cpp
-    inputpanelv1client.cpp
     inputpanelv1integration.cpp
-    internal_client.cpp
+    inputpanelv1window.cpp
+    internalwindow.cpp
     item.cpp
     keyboard_input.cpp
     keyboard_layout.cpp
@@ -75,8 +76,8 @@ target_sources(kwin PRIVATE
     keyboard_repeat.cpp
     killwindow.cpp
     layers.cpp
-    layershellv1client.cpp
     layershellv1integration.cpp
+    layershellv1window.cpp
     linux_dmabuf.cpp
     main.cpp
     modifier_only_shortcuts.cpp
@@ -86,6 +87,8 @@ target_sources(kwin PRIVATE
     options.cpp
     osd.cpp
     outline.cpp
+    output.cpp
+    outputconfiguration.cpp
     outputlayer.cpp
     overlaywindow.cpp
     placement.cpp
@@ -99,6 +102,7 @@ target_sources(kwin PRIVATE
     renderlayer.cpp
     renderlayerdelegate.cpp
     renderloop.cpp
+    rendertarget.cpp
     rootinfo_filter.cpp
     rulebooksettings.cpp
     rules.cpp
@@ -115,7 +119,7 @@ target_sources(kwin PRIVATE
     scripting/scripting.cpp
     scripting/scripting_logging.cpp
     scripting/scriptingutils.cpp
-    scripting/thumbnailitem.cpp
+    scripting/windowthumbnailitem.cpp
     scripting/workspace_wrapper.cpp
     session.cpp
     session_consolekit.cpp
@@ -130,7 +134,6 @@ target_sources(kwin PRIVATE
     surfaceitem_x11.cpp
     syncalarmx11filter.cpp
     tablet_input.cpp
-    toplevel.cpp
     hide_cursor_spy.cpp
     touch_input.cpp
     udev.cpp
@@ -141,24 +144,24 @@ target_sources(kwin PRIVATE
     virtualkeyboard_dbus.cpp
     was_user_interaction_x11_filter.cpp
     wayland_server.cpp
-    waylandclient.cpp
     waylandoutput.cpp
-    waylandoutputconfig.cpp
     waylandoutputdevicev2.cpp
     waylandshellintegration.cpp
+    waylandwindow.cpp
+    window.cpp
     window_property_notify_x11_filter.cpp
     windowitem.cpp
     workspace.cpp
-    x11client.cpp
     x11eventfilter.cpp
     x11syncmanager.cpp
+    x11window.cpp
     xcursortheme.cpp
     xdgactivationv1.cpp
-    xdgshellclient.cpp
     xdgshellintegration.cpp
+    xdgshellwindow.cpp
     xkb.cpp
-    xwaylandclient.cpp
-    xwl/xwayland_interface.cpp
+    xwaylandwindow.cpp
+    xwayland/xwayland_interface.cpp
 )
 
 target_link_libraries(kwin
@@ -176,13 +179,11 @@ target_link_libraries(kwin
     KF5::GlobalAccelPrivate
     KF5::I18n
     KF5::Package
-    KF5::Plasma
+    KF5::Service
     KF5::WindowSystem
 
     KDecoration2::KDecoration
     KDecoration2::KDecoration2Private
-
-    Plasma::KWaylandServer
 
     XCB::COMPOSITE
     XCB::CURSOR
@@ -200,9 +201,12 @@ target_link_libraries(kwin
 
     UDev::UDev
     XKB::XKB
+    EGL::EGL
     epoxy::epoxy
 
     Threads::Threads
+    Wayland::Server
+    lcms2::lcms2
 )
 if (QT_MAJOR_VERSION EQUAL "5")
     target_link_libraries(kwin Qt5::XkbCommonSupportPrivate)
@@ -246,14 +250,8 @@ target_sources(kwin PRIVATE
 add_subdirectory(backends)
 add_subdirectory(scenes)
 add_subdirectory(utils)
-
-if (KWIN_BUILD_CMS)
-    target_sources(kwin PRIVATE
-        colordevice.cpp
-        colormanager.cpp
-    )
-    target_link_libraries(kwin lcms2::lcms2)
-endif()
+add_subdirectory(wayland)
+add_subdirectory(xwayland)
 
 if (KWIN_BUILD_ACTIVITIES)
     target_sources(kwin PRIVATE activities.cpp)
@@ -297,8 +295,6 @@ kcoreaddons_target_static_plugins(kwin_x11 "kwin/effects/plugins")
 
 install(TARGETS kwin ${KDE_INSTALL_TARGETS_DEFAULT_ARGS} LIBRARY NAMELINK_SKIP)
 install(TARGETS kwin_x11 ${KDE_INSTALL_TARGETS_DEFAULT_ARGS})
-
-add_subdirectory(xwl)
 
 add_executable(kwin_wayland
     main_wayland.cpp

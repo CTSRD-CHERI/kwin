@@ -32,8 +32,8 @@ class QWheelEvent;
 
 namespace KWin
 {
+class Window;
 class GlobalShortcutsManager;
-class Toplevel;
 class InputEventFilter;
 class InputEventSpy;
 class KeyboardInputRedirection;
@@ -165,8 +165,8 @@ public:
      */
     void uninstallInputEventSpy(InputEventSpy *spy);
 
-    Toplevel *findToplevel(const QPoint &pos);
-    Toplevel *findManagedToplevel(const QPoint &pos);
+    Window *findToplevel(const QPoint &pos);
+    Window *findManagedToplevel(const QPoint &pos);
     GlobalShortcutsManager *shortcuts() const
     {
         return m_shortcuts;
@@ -241,7 +241,7 @@ public:
     bool hasTouch() const;
     bool hasTabletModeSwitch();
 
-    void startInteractiveWindowSelection(std::function<void(KWin::Toplevel *)> callback, const QByteArray &cursorName);
+    void startInteractiveWindowSelection(std::function<void(KWin::Window *)> callback, const QByteArray &cursorName);
     void startInteractivePositionSelection(std::function<void(const QPoint &)> callback);
     bool isSelectingWindow() const;
 
@@ -439,21 +439,21 @@ public:
     void update();
 
     /**
-     * @brief First Toplevel currently at the position of the input device
+     * @brief First Window currently at the position of the input device
      * according to the stacking order.
-     * @return Toplevel* at device position.
+     * @return Window* at device position.
      *
-     * This will be null if no toplevel is at the position
+     * This will be null if no window is at the position
      */
-    Toplevel *hover() const;
+    Window *hover() const;
     /**
-     * @brief Toplevel currently having pointer input focus (this might
-     * be different from the Toplevel at the position of the pointer).
-     * @return Toplevel* with pointer focus.
+     * @brief Window currently having pointer input focus (this might
+     * be different from the Window at the position of the pointer).
+     * @return Window* with pointer focus.
      *
-     * This will be null if no toplevel has focus
+     * This will be null if no window has focus
      */
-    Toplevel *focus() const;
+    Window *focus() const;
 
     /**
      * @brief The Decoration currently receiving events.
@@ -463,7 +463,7 @@ public:
 
     virtual QPointF position() const = 0;
 
-    void setFocus(Toplevel *toplevel);
+    void setFocus(Window *window);
     void setDecoration(Decoration::DecoratedClientImpl *decoration);
 
 Q_SIGNALS:
@@ -474,7 +474,7 @@ protected:
 
     virtual void cleanupDecoration(Decoration::DecoratedClientImpl *old, Decoration::DecoratedClientImpl *now) = 0;
 
-    virtual void focusUpdate(Toplevel *old, Toplevel *now) = 0;
+    virtual void focusUpdate(Window *old, Window *now) = 0;
 
     /**
      * Certain input devices can be in a state of having no valid
@@ -500,19 +500,19 @@ protected:
     }
 
 private:
-    bool setHover(Toplevel *toplevel);
+    bool setHover(Window *window);
     void updateFocus();
     void updateDecoration();
 
     struct
     {
-        QPointer<Toplevel> window;
+        QPointer<Window> window;
         QMetaObject::Connection surfaceCreatedConnection;
     } m_hover;
 
     struct
     {
-        QPointer<Toplevel> window;
+        QPointer<Window> window;
         QPointer<Decoration::DecoratedClientImpl> decoration;
     } m_focus;
 

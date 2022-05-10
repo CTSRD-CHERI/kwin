@@ -10,19 +10,17 @@
 #ifndef KWIN_DELETED_H
 #define KWIN_DELETED_H
 
-#include "toplevel.h"
+#include "window.h"
 
 namespace KWin
 {
 
-class AbstractClient;
-
-class KWIN_EXPORT Deleted : public Toplevel
+class KWIN_EXPORT Deleted : public Window
 {
     Q_OBJECT
 
 public:
-    static Deleted *create(Toplevel *c);
+    static Deleted *create(Window *c);
     // used by effects to keep the window around for e.g. fadeout effects when it's destroyed
     void refWindow();
     void unrefWindow();
@@ -34,7 +32,7 @@ public:
     QPoint clientPos() const override;
     bool isDeleted() const override;
     xcb_window_t frameId() const override;
-    void layoutDecorationRects(QRect &left, QRect &top, QRect &right, QRect &bottom) const;
+    void layoutDecorationRects(QRect &left, QRect &top, QRect &right, QRect &bottom) const override;
     Layer layer() const override
     {
         return m_layer;
@@ -51,9 +49,9 @@ public:
     {
         return m_modal;
     }
-    QList<AbstractClient *> mainClients() const
+    QList<Window *> mainWindows() const override
     {
-        return m_mainClients;
+        return m_mainWindows;
     }
     NET::WindowType windowType(bool direct = false, int supported_types = 0) const override;
     bool wasClient() const
@@ -62,7 +60,7 @@ public:
     }
     QByteArray windowRole() const override;
 
-    bool isFullScreen() const
+    bool isFullScreen() const override
     {
         return m_fullscreen;
     }
@@ -75,10 +73,33 @@ public:
     {
         return m_keepBelow;
     }
+
     QString caption() const
     {
         return m_caption;
     }
+
+    QString captionNormal() const override { return m_caption; }
+    QString captionSuffix() const override { return {}; }
+    bool isCloseable() const override { return false; }
+    bool isShown() const override { return false; }
+    bool isHiddenInternal() const override { return false; }
+    void hideClient() override { /* nothing to do */ }
+    void showClient() override { /* nothing to do */ }
+    Window *findModal(bool /*allow_itself*/) override { return nullptr; }
+    bool isResizable() const override { return false; }
+    bool isMovable() const override { return false; }
+    bool isMovableAcrossScreens() const override { return false; }
+    bool takeFocus() override { return false; }
+    bool wantsInput() const override { return false; }
+    void killWindow() override { /* nothing to do */ }
+    void destroyWindow() override { /* nothing to do */ }
+    void closeWindow() override { /* nothing to do */ }
+    bool acceptsFocus() const override { return false; }
+    bool belongsToSameApplication(const Window *other, SameApplicationChecks /*checks*/) const override { return other == this; }
+    void moveResizeInternal(const QRect & /*rect*/, KWin::Window::MoveResizeMode /*mode*/) override { /* nothing to do */ }
+    void updateCaption() override { /* nothing to do */ }
+    void resizeWithChecks(const QSize&) override { /* nothing to do */ }
 
     /**
      * Returns whether the client was a popup.
@@ -105,11 +126,11 @@ public:
     }
 
 private Q_SLOTS:
-    void mainClientClosed(KWin::Toplevel *client);
+    void mainWindowClosed(KWin::Window *window);
 
 private:
     Deleted(); // use create()
-    void copyToDeleted(Toplevel *c);
+    void copyToDeleted(Window *c);
     ~Deleted() override; // deleted only using unrefWindow()
 
     QMargins m_frameMargins;
@@ -129,7 +150,7 @@ private:
     bool m_shade;
     bool m_minimized;
     bool m_modal;
-    QList<AbstractClient *> m_mainClients;
+    QList<Window *> m_mainWindows;
     bool m_wasClient;
     NET::WindowType m_type = NET::Unknown;
     QByteArray m_windowRole;

@@ -9,14 +9,14 @@
 */
 #include "kwin_wayland_test.h"
 
-#include "abstract_output.h"
 #include "composite.h"
 #include "cursor.h"
+#include "output.h"
 #include "platform.h"
 #include "renderbackend.h"
 #include "wayland_server.h"
 #include "workspace.h"
-#include "x11client.h"
+#include "x11window.h"
 #include <kwineffects.h>
 
 #include <KWayland/Client/surface.h>
@@ -42,7 +42,7 @@ private Q_SLOTS:
 
 void DontCrashNoBorder::initTestCase()
 {
-    qRegisterMetaType<KWin::AbstractClient *>();
+    qRegisterMetaType<KWin::Window *>();
     QSignalSpy applicationStartedSpy(kwinApp(), &Application::started);
     QVERIFY(applicationStartedSpy.isValid());
     kwinApp()->platform()->setInitialWindowSize(QSize(1280, 1024));
@@ -98,10 +98,10 @@ void DontCrashNoBorder::testCreateWindow()
 
     // let's render
     shellSurface->xdgSurface()->ack_configure(surfaceConfigureRequestedSpy.last().at(0).value<quint32>());
-    auto c = Test::renderAndWaitForShown(surface.data(), QSize(500, 50), Qt::blue);
-    QVERIFY(c);
-    QCOMPARE(workspace()->activeClient(), c);
-    QVERIFY(!c->isDecorated());
+    auto window = Test::renderAndWaitForShown(surface.data(), QSize(500, 50), Qt::blue);
+    QVERIFY(window);
+    QCOMPARE(workspace()->activeWindow(), window);
+    QVERIFY(!window->isDecorated());
 }
 
 }

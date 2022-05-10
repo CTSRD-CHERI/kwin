@@ -5,8 +5,8 @@
 */
 
 #include "desktopbackgrounditem.h"
-#include "abstract_client.h"
-#include "abstract_output.h"
+#include "output.h"
+#include "window.h"
 #if KWIN_BUILD_ACTIVITIES
 #include "activities.h"
 #endif
@@ -40,12 +40,12 @@ void DesktopBackgroundItem::setOutputName(const QString &name)
     setOutput(kwinApp()->platform()->findOutput(name));
 }
 
-AbstractOutput *DesktopBackgroundItem::output() const
+Output *DesktopBackgroundItem::output() const
 {
     return m_output;
 }
 
-void DesktopBackgroundItem::setOutput(AbstractOutput *output)
+void DesktopBackgroundItem::setOutput(Output *output)
 {
     if (m_output != output) {
         m_output = output;
@@ -106,7 +106,7 @@ void DesktopBackgroundItem::updateWindow()
     }
 
     const auto clients = workspace()->allClientList();
-    for (AbstractClient *client : clients) {
+    for (Window *client : clients) {
         if (client->isDesktop() && client->isOnOutput(m_output) && client->isOnDesktop(desktop) && client->isOnActivity(activity)) {
             setClient(client);
             break;

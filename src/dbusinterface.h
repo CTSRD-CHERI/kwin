@@ -56,6 +56,7 @@ public Q_SLOTS: // METHODS
     bool startActivity(const QString &in0);
     bool stopActivity(const QString &in0);
     QString supportInformation();
+    QString activeOutputName();
     Q_NOREPLY void unclutterDesktop();
     Q_NOREPLY void showDebugConsole();
 
@@ -81,7 +82,7 @@ public Q_SLOTS: // METHODS
      *
      * The map includes entries such as position, size, status, and more.
      *
-     * @param uuid is a QUuid from Toplevel::internalId().
+     * @param uuid is a QUuid from Window::internalId().
      */
     QVariantMap getWindowInfo(const QString &uuid);
 

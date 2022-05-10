@@ -11,13 +11,14 @@
 #include "slidingpopups.h"
 #include "slidingpopupsconfig.h"
 
+#include "wayland/display.h"
+#include "wayland/slide_interface.h"
+#include "wayland/surface_interface.h"
+
 #include <QFontMetrics>
 #include <QGuiApplication>
 #include <QTimer>
 #include <QWindow>
-
-#include <KWaylandServer/display.h>
-#include <KWaylandServer/surface_interface.h>
 
 #include <KWindowEffects>
 
@@ -130,7 +131,6 @@ void SlidingPopupsEffect::prePaintWindow(EffectWindow *w, WindowPrePaintData &da
 
     (*animationIt).timeLine.update(delta);
     data.setTransformed();
-    w->enablePainting(EffectWindow::PAINT_DISABLED | EffectWindow::PAINT_DISABLED_BY_DELETE);
 
     effects->prePaintWindow(w, data, presentTime);
 }
@@ -194,9 +194,7 @@ void SlidingPopupsEffect::postPaintWindow(EffectWindow *w)
     auto animationIt = m_animations.find(w);
     if (animationIt != m_animations.end()) {
         if ((*animationIt).timeLine.done()) {
-            if (w->isDeleted()) {
-                w->unrefWindow();
-            } else {
+            if (!w->isDeleted()) {
                 w->setData(WindowForceBackgroundContrastRole, QVariant());
                 w->setData(WindowForceBlurRole, QVariant());
             }
@@ -544,11 +542,11 @@ void SlidingPopupsEffect::slideOut(EffectWindow *w)
         return;
     }
 
-    if (w->isDeleted()) {
-        w->refWindow();
-    }
-
     Animation &animation = m_animations[w];
+    if (w->isDeleted()) {
+        animation.deletedRef = EffectWindowDeletedRef(w);
+    }
+    animation.visibleRef = EffectWindowVisibleRef(w, EffectWindow::PAINT_DISABLED | EffectWindow::PAINT_DISABLED_BY_DELETE);
     animation.kind = AnimationKind::Out;
     animation.timeLine.setDirection(TimeLine::Backward);
     animation.timeLine.setDuration((*dataIt).slideOutDuration);
@@ -574,9 +572,7 @@ void SlidingPopupsEffect::stopAnimations()
     for (auto it = m_animations.constBegin(); it != m_animations.constEnd(); ++it) {
         EffectWindow *w = it.key();
 
-        if (w->isDeleted()) {
-            w->unrefWindow();
-        } else {
+        if (!w->isDeleted()) {
             w->setData(WindowForceBackgroundContrastRole, QVariant());
             w->setData(WindowForceBlurRole, QVariant());
         }

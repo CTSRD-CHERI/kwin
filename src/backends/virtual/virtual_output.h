@@ -9,7 +9,7 @@
 #ifndef KWIN_VIRTUAL_OUTPUT_H
 #define KWIN_VIRTUAL_OUTPUT_H
 
-#include "abstract_wayland_output.h"
+#include "output.h"
 
 #include <QObject>
 #include <QRect>
@@ -20,7 +20,7 @@ namespace KWin
 class SoftwareVsyncMonitor;
 class VirtualBackend;
 
-class VirtualOutput : public AbstractWaylandOutput
+class VirtualOutput : public Output
 {
     Q_OBJECT
 
@@ -32,19 +32,7 @@ public:
     SoftwareVsyncMonitor *vsyncMonitor() const;
 
     void init(const QPoint &logicalPosition, const QSize &pixelSize);
-
     void setGeometry(const QRect &geo);
-
-    int gammaRampSize() const override
-    {
-        return m_gammaSize;
-    }
-    bool setGammaRamp(const GammaRamp &gamma) override
-    {
-        Q_UNUSED(gamma);
-        return m_gammaResult;
-    }
-
     void updateEnablement(bool enable) override;
 
 private:

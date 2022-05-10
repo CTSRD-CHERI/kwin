@@ -9,6 +9,8 @@
 #ifndef KWIN_VIRTUAL_KEYBOARD_H
 #define KWIN_VIRTUAL_KEYBOARD_H
 
+#include "wayland/textinput_v2_interface.h"
+
 #include <utility>
 #include <vector>
 
@@ -17,7 +19,6 @@
 #include <kwin_export.h>
 #include <kwinglobals.h>
 
-#include <KWaylandServer/textinput_v2_interface.h>
 #include <QPointer>
 #include <QTimer>
 
@@ -31,8 +32,8 @@ class InputMethodGrabV1;
 namespace KWin
 {
 
-class AbstractClient;
-class InputPanelV1Client;
+class Window;
+class InputPanelV1Window;
 
 /**
  * This class implements the zwp_input_method_unstable_v1, which is currently used to provide
@@ -62,8 +63,8 @@ public:
     bool isVisible() const;
     bool isAvailable() const;
 
-    InputPanelV1Client *panel() const;
-    void setPanel(InputPanelV1Client *client);
+    InputPanelV1Window *panel() const;
+    void setPanel(InputPanelV1Window *panel);
     void setInputMethodCommand(const QString &path);
 
     KWaylandServer::InputMethodGrabV1 *keyboardGrab();
@@ -106,7 +107,7 @@ private:
     void setTextDirection(uint32_t serial, Qt::LayoutDirection direction);
     void startInputMethod();
     void stopInputMethod();
-    void setTrackedClient(AbstractClient *trackedClient);
+    void setTrackedWindow(Window *trackedWindow);
     void installKeyboardGrab(KWaylandServer::InputMethodGrabV1 *keyboardGrab);
     void updateModifiersMap(const QByteArray &modifiers);
 
@@ -122,8 +123,8 @@ private:
 
     bool m_enabled = true;
     quint32 m_serial = 0;
-    QPointer<InputPanelV1Client> m_inputClient;
-    QPointer<AbstractClient> m_trackedClient;
+    QPointer<InputPanelV1Window> m_panel;
+    QPointer<Window> m_trackedWindow;
     QPointer<KWaylandServer::InputMethodGrabV1> m_keyboardGrab;
 
     QProcess *m_inputMethodProcess = nullptr;

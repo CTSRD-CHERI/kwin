@@ -10,7 +10,7 @@
 #include "backingstore.h"
 #include "window.h"
 
-#include "internal_client.h"
+#include "internalwindow.h"
 
 #include <QPainter>
 
@@ -67,14 +67,14 @@ void BackingStore::flush(QWindow *window, const QRegion &region, const QPoint &o
     Q_UNUSED(offset)
 
     Window *platformWindow = static_cast<Window *>(window->handle());
-    InternalClient *client = platformWindow->client();
-    if (!client) {
+    InternalWindow *internalWindow = platformWindow->internalWindow();
+    if (!internalWindow) {
         return;
     }
 
     blitImage(m_backBuffer, m_frontBuffer, region);
 
-    client->present(m_frontBuffer, region);
+    internalWindow->present(m_frontBuffer, region);
 }
 
 }

@@ -24,14 +24,14 @@ class KWIN_EXPORT SceneQPainter : public Scene
 
 public:
     ~SceneQPainter() override;
-    void paint(const QRegion &region) override;
+    void paint(RenderTarget *renderTarget, const QRegion &region) override;
     void paintGenericScreen(int mask, const ScreenPaintData &data) override;
     bool initFailed() const override;
-    EffectFrame *createEffectFrame(EffectFrameImpl *frame) override;
-    Shadow *createShadow(Toplevel *toplevel) override;
+    Shadow *createShadow(Window *window) override;
     DecorationRenderer *createDecorationRenderer(Decoration::DecoratedClientImpl *impl) override;
     SurfaceTexture *createSurfaceTextureInternal(SurfacePixmapInternal *pixmap) override;
     SurfaceTexture *createSurfaceTextureWayland(SurfacePixmapWayland *pixmap) override;
+    void render(Item *item, int mask, const QRegion &region, const WindowPaintData &data) override;
 
     bool animationsSupported() const override
     {
@@ -39,7 +39,6 @@ public:
     }
 
     QPainter *scenePainter() const override;
-    QImage *qpainterRenderBuffer(AbstractOutput *output) const override;
 
     QPainterBackend *backend() const
     {
@@ -50,65 +49,23 @@ public:
 
 protected:
     void paintBackground(const QRegion &region) override;
-    Scene::Window *createWindow(Toplevel *toplevel) override;
     void paintOffscreenQuickView(OffscreenQuickView *w) override;
 
 private:
     explicit SceneQPainter(QPainterBackend *backend, QObject *parent = nullptr);
-    QPainterBackend *m_backend;
-    QScopedPointer<QPainter> m_painter;
-    class Window;
-};
 
-class SceneQPainter::Window : public Scene::Window
-{
-    Q_OBJECT
-
-public:
-    Window(SceneQPainter *scene, Toplevel *c);
-    ~Window() override;
-    void performPaint(int mask, const QRegion &region, const WindowPaintData &data) override;
-
-private:
     void renderSurfaceItem(QPainter *painter, SurfaceItem *surfaceItem) const;
     void renderDecorationItem(QPainter *painter, DecorationItem *decorationItem) const;
     void renderItem(QPainter *painter, Item *item) const;
-    SceneQPainter *m_scene;
-};
 
-class QPainterEffectFrame : public Scene::EffectFrame
-{
-public:
-    QPainterEffectFrame(EffectFrameImpl *frame, SceneQPainter *scene);
-    ~QPainterEffectFrame() override;
-    void crossFadeIcon() override
-    {
-    }
-    void crossFadeText() override
-    {
-    }
-    void free() override
-    {
-    }
-    void freeIconFrame() override
-    {
-    }
-    void freeTextFrame() override
-    {
-    }
-    void freeSelection() override
-    {
-    }
-    void render(const QRegion &region, double opacity, double frameOpacity) override;
-
-private:
-    SceneQPainter *m_scene;
+    QPainterBackend *m_backend;
+    QScopedPointer<QPainter> m_painter;
 };
 
 class SceneQPainterShadow : public Shadow
 {
 public:
-    SceneQPainterShadow(Toplevel *toplevel);
+    SceneQPainterShadow(Window *window);
     ~SceneQPainterShadow() override;
 
 protected:

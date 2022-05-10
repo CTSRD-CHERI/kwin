@@ -10,9 +10,9 @@
 
 #include <config-kwin.h>
 
-#include "abstract_output.h"
 #include "libinput_logging.h"
 #include "main.h"
+#include "output.h"
 #include "platform.h"
 
 #include <QDBusArgument>
@@ -75,20 +75,6 @@ static bool checkAlphaNumericKeyboard(libinput_device *device)
         }
     }
     return true;
-}
-
-QVector<Device *> Device::s_devices;
-
-Device *Device::getDevice(libinput_device *native)
-{
-    auto it = std::find_if(s_devices.constBegin(), s_devices.constEnd(),
-                           [native](const Device *d) {
-                               return d->device() == native;
-                           });
-    if (it != s_devices.constEnd()) {
-        return *it;
-    }
-    return nullptr;
 }
 
 enum class ConfigKey {
@@ -336,6 +322,7 @@ Device::Device(libinput_device *device, QObject *parent)
     , m_clickMethod(libinput_device_config_click_get_method(m_device))
 {
     libinput_device_ref(m_device);
+    libinput_device_set_user_data(m_device, this);
 
     qreal width = 0;
     qreal height = 0;
@@ -385,7 +372,6 @@ Device::Device(libinput_device *device, QObject *parent)
 
     qDBusRegisterMetaType<QMatrix4x4>();
 
-    s_devices << this;
     QDBusConnection::sessionBus().registerObject(QStringLiteral("/org/kde/KWin/InputDevice/") + m_sysName,
                                                  QStringLiteral("org.kde.KWin.InputDevice"),
                                                  this,
@@ -394,9 +380,14 @@ Device::Device(libinput_device *device, QObject *parent)
 
 Device::~Device()
 {
-    s_devices.removeOne(this);
     QDBusConnection::sessionBus().unregisterObject(QStringLiteral("/org/kde/KWin/InputDevice/") + m_sysName);
+    libinput_device_set_user_data(m_device, nullptr);
     libinput_device_unref(m_device);
+}
+
+Device *Device::get(libinput_device *native)
+{
+    return static_cast<Device *>(libinput_device_get_user_data(native));
 }
 
 template<typename T>
@@ -665,13 +656,14 @@ void Device::setOutputName(const QString &name)
 #endif
 }
 
-AbstractOutput *Device::output() const
+Output *Device::output() const
 {
     return m_output;
 }
 
-void Device::setOutput(AbstractOutput *output)
+void Device::setOutput(Output *output)
 {
+#ifndef KWIN_BUILD_TESTING
     m_output = output;
     if (m_output) {
         writeEntry(ConfigKey::OutputName, output->name());
@@ -679,6 +671,9 @@ void Device::setOutput(AbstractOutput *output)
         writeEntry(ConfigKey::OutputName, QString());
     }
     Q_EMIT outputNameChanged();
+#else
+    Q_UNUSED(output)
+#endif
 }
 
 static libinput_led toLibinputLEDS(LEDs leds)

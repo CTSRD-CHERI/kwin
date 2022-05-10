@@ -18,15 +18,16 @@
 namespace KWin
 {
 
-class AbstractOutput;
+class Output;
 class CompositorSelectionOwner;
 class CursorView;
 class RenderBackend;
 class RenderLayer;
 class RenderLoop;
+class RenderTarget;
 class Scene;
-class Toplevel;
-class X11Client;
+class Window;
+class X11Window;
 class X11SyncManager;
 
 class KWIN_EXPORT Compositor : public QObject
@@ -134,9 +135,9 @@ private:
     bool attemptOpenGLCompositing();
     bool attemptQPainterCompositing();
 
-    AbstractOutput *findOutput(RenderLoop *loop) const;
-    void addOutput(AbstractOutput *output);
-    void removeOutput(AbstractOutput *output);
+    Output *findOutput(RenderLoop *loop) const;
+    void addOutput(Output *output);
+    void removeOutput(Output *output);
 
     void addSuperLayer(RenderLayer *layer);
     void removeSuperLayer(RenderLayer *layer);
@@ -144,7 +145,7 @@ private:
     void prePaintPass(RenderLayer *layer);
     void postPaintPass(RenderLayer *layer);
     void preparePaintPass(RenderLayer *layer, QRegion *repaint);
-    void paintPass(RenderLayer *layer, const QRegion &region);
+    void paintPass(RenderLayer *layer, RenderTarget *target, const QRegion &region);
 
     State m_state = State::Off;
     CompositorSelectionOwner *m_selectionOwner = nullptr;
@@ -152,7 +153,6 @@ private:
     QList<xcb_atom_t> m_unusedSupportProperties;
     QTimer m_unusedSupportPropertyTimer;
     Scene *m_scene = nullptr;
-    CursorView *m_cursorView = nullptr;
     RenderBackend *m_backend = nullptr;
     QHash<RenderLoop *, RenderLayer *> m_superlayers;
 };
@@ -239,7 +239,7 @@ public:
      */
     bool isOverlayWindowVisible() const;
 
-    void updateClientCompositeBlocking(X11Client *client = nullptr);
+    void updateClientCompositeBlocking(X11Window *client = nullptr);
 
     static X11Compositor *self();
 

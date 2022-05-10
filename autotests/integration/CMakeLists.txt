@@ -1,43 +1,36 @@
 add_subdirectory(helper)
 
-set(KWinIntegrationTestFramework_SOURCES
-    ../../src/cursor.cpp
-
-    generic_scene_opengl_test.cpp
-    kwin_wayland_test.cpp
-    test_helpers.cpp
-)
 add_library(KWinIntegrationTestFramework SHARED)
 if (QT_MAJOR_VERSION EQUAL "5")
-    ecm_add_qtwayland_client_protocol(KWinIntegrationTestFramework_SOURCES
+    ecm_add_qtwayland_client_protocol(KWinIntegrationTestFramework
         PROTOCOL ${WaylandProtocols_DATADIR}/unstable/input-method/input-method-unstable-v1.xml
         BASENAME input-method-unstable-v1
     )
-    ecm_add_qtwayland_client_protocol(KWinIntegrationTestFramework_SOURCES
+    ecm_add_qtwayland_client_protocol(KWinIntegrationTestFramework
         PROTOCOL ${WaylandProtocols_DATADIR}/unstable/text-input/text-input-unstable-v3.xml
         BASENAME text-input-unstable-v3
     )
-    ecm_add_qtwayland_client_protocol(KWinIntegrationTestFramework_SOURCES
+    ecm_add_qtwayland_client_protocol(KWinIntegrationTestFramework
         PROTOCOL protocols/wlr-layer-shell-unstable-v1.xml
         BASENAME wlr-layer-shell-unstable-v1
     )
-    ecm_add_qtwayland_client_protocol(KWinIntegrationTestFramework_SOURCES
+    ecm_add_qtwayland_client_protocol(KWinIntegrationTestFramework
         PROTOCOL ${WaylandProtocols_DATADIR}/stable/xdg-shell/xdg-shell.xml
         BASENAME xdg-shell
     )
-    ecm_add_qtwayland_client_protocol(KWinIntegrationTestFramework_SOURCES
+    ecm_add_qtwayland_client_protocol(KWinIntegrationTestFramework
         PROTOCOL ${WaylandProtocols_DATADIR}/unstable/xdg-decoration/xdg-decoration-unstable-v1.xml
         BASENAME xdg-decoration-unstable-v1
     )
-    ecm_add_qtwayland_client_protocol(KWinIntegrationTestFramework_SOURCES
+    ecm_add_qtwayland_client_protocol(KWinIntegrationTestFramework
         PROTOCOL ${WaylandProtocols_DATADIR}/unstable/idle-inhibit/idle-inhibit-unstable-v1.xml
         BASENAME idle-inhibit-unstable-v1
     )
-    ecm_add_qtwayland_client_protocol(KWinIntegrationTestFramework_SOURCES
+    ecm_add_qtwayland_client_protocol(KWinIntegrationTestFramework
         PROTOCOL ${PLASMA_WAYLAND_PROTOCOLS_DIR}/kde-output-device-v2.xml
         BASENAME kde-output-device-v2
     )
-    ecm_add_qtwayland_client_protocol(KWinIntegrationTestFramework_SOURCES
+    ecm_add_qtwayland_client_protocol(KWinIntegrationTestFramework
         PROTOCOL ${PLASMA_WAYLAND_PROTOCOLS_DIR}/kde-output-management-v2.xml
         BASENAME kde-output-management-v2
     )
@@ -54,7 +47,13 @@ else()
     )
 endif()
 
-target_sources(KWinIntegrationTestFramework PRIVATE ${KWinIntegrationTestFramework_SOURCES})
+target_sources(KWinIntegrationTestFramework PRIVATE
+    ../../src/cursor.cpp
+
+    generic_scene_opengl_test.cpp
+    kwin_wayland_test.cpp
+    test_helpers.cpp
+)
 target_link_libraries(KWinIntegrationTestFramework
     PUBLIC
         Qt::Test
@@ -107,7 +106,7 @@ integrationTest(NAME testDebugConsole SRCS debug_console_test.cpp)
 integrationTest(NAME testDontCrashEmptyDeco SRCS dont_crash_empty_deco.cpp)
 integrationTest(WAYLAND_ONLY NAME testPlasmaSurface SRCS plasma_surface_test.cpp)
 integrationTest(WAYLAND_ONLY NAME testMaximized SRCS maximize_test.cpp)
-integrationTest(WAYLAND_ONLY NAME testXdgShellClient SRCS xdgshellclient_test.cpp)
+integrationTest(WAYLAND_ONLY NAME testXdgShellWindow SRCS xdgshellwindow_test.cpp)
 integrationTest(WAYLAND_ONLY NAME testDontCrashNoBorder SRCS dont_crash_no_border.cpp)
 integrationTest(NAME testXwaylandSelections SRCS xwayland_selections_test.cpp)
 integrationTest(WAYLAND_ONLY NAME testSceneOpenGL SRCS scene_opengl_test.cpp )
@@ -124,9 +123,9 @@ integrationTest(WAYLAND_ONLY NAME testKeymapCreationFailure SRCS keymap_creation
 integrationTest(WAYLAND_ONLY NAME testShowingDesktop SRCS showing_desktop_test.cpp)
 integrationTest(WAYLAND_ONLY NAME testDontCrashUseractionsMenu SRCS dont_crash_useractions_menu.cpp)
 integrationTest(WAYLAND_ONLY NAME testKWinBindings SRCS kwinbindings_test.cpp)
-integrationTest(WAYLAND_ONLY NAME testLayerShellV1Client SRCS layershellv1client_test.cpp)
+integrationTest(WAYLAND_ONLY NAME testLayerShellV1Window SRCS layershellv1window_test.cpp)
 integrationTest(WAYLAND_ONLY NAME testVirtualDesktop SRCS virtual_desktop_test.cpp)
-integrationTest(WAYLAND_ONLY NAME testXdgShellClientRules SRCS xdgshellclient_rules_test.cpp)
+integrationTest(WAYLAND_ONLY NAME testXdgShellWindowRules SRCS xdgshellwindow_rules_test.cpp)
 integrationTest(WAYLAND_ONLY NAME testIdleInhibition SRCS idle_inhibition_test.cpp)
 integrationTest(WAYLAND_ONLY NAME testDontCrashCursorPhysicalSizeEmpty SRCS dont_crash_cursor_physical_size_empty.cpp)
 integrationTest(WAYLAND_ONLY NAME testDontCrashReinitializeCompositor SRCS dont_crash_reinitialize_compositor.cpp)
@@ -141,10 +140,7 @@ integrationTest(WAYLAND_ONLY NAME testOutputChanges SRCS outputchanges_test.cpp)
 
 qt_add_dbus_interfaces(DBUS_SRCS ${CMAKE_BINARY_DIR}/src/org.kde.kwin.VirtualKeyboard.xml)
 integrationTest(WAYLAND_ONLY NAME testVirtualKeyboardDBus SRCS test_virtualkeyboard_dbus.cpp ${DBUS_SRCS})
-
-if (KWIN_BUILD_CMS)
-    integrationTest(WAYLAND_ONLY NAME testNightColor SRCS nightcolor_test.cpp LIBS KWinNightColorPlugin)
-endif()
+integrationTest(WAYLAND_ONLY NAME testNightColor SRCS nightcolor_test.cpp LIBS KWinNightColorPlugin)
 
 if (XCB_ICCCM_FOUND)
     integrationTest(NAME testMoveResize SRCS move_resize_window_test.cpp LIBS XCB::ICCCM)
@@ -156,7 +152,7 @@ if (XCB_ICCCM_FOUND)
     integrationTest(NAME testX11DesktopWindow SRCS desktop_window_x11_test.cpp LIBS XCB::ICCCM)
     integrationTest(NAME testXwaylandInput SRCS xwayland_input_test.cpp LIBS XCB::ICCCM)
     integrationTest(NAME testWindowRules SRCS window_rules_test.cpp LIBS XCB::ICCCM)
-    integrationTest(NAME testX11Client SRCS x11_client_test.cpp LIBS XCB::ICCCM)
+    integrationTest(NAME testX11Window SRCS x11_window_test.cpp LIBS XCB::ICCCM)
     integrationTest(NAME testQuickTiling SRCS quick_tiling_test.cpp LIBS XCB::ICCCM)
     integrationTest(NAME testGlobalShortcuts SRCS globalshortcuts_test.cpp LIBS XCB::ICCCM)
     integrationTest(NAME testSceneQPainter SRCS scene_qpainter_test.cpp LIBS XCB::ICCCM)

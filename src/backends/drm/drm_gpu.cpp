@@ -12,6 +12,7 @@
 
 #include "abstract_egl_backend.h"
 #include "drm_backend.h"
+#include "drm_layer.h"
 #include "drm_lease_output.h"
 #include "drm_object_connector.h"
 #include "drm_object_crtc.h"
@@ -25,6 +26,7 @@
 #include "main.h"
 #include "renderloop_p.h"
 #include "session.h"
+#include "wayland/drmleasedevice_v1_interface.h"
 #include "wayland_server.h"
 // system
 #include <algorithm>
@@ -38,8 +40,6 @@
 #include <libdrm/drm_mode.h>
 #include <xf86drm.h>
 #include <xf86drmMode.h>
-// KWaylandServer
-#include "KWaylandServer/drmleasedevice_v1_interface.h"
 
 namespace KWin
 {
@@ -250,6 +250,7 @@ bool DrmGpu::updateOutputs()
     }
 
     // check for added and removed connectors
+    QVector<DrmOutput *> addedOutputs;
     QVector<DrmConnector *> removedConnectors = m_connectors;
     for (int i = 0; i < resources->count_connectors; ++i) {
         const uint32_t currentConnector = resources->connectors[i];
@@ -274,18 +275,21 @@ bool DrmGpu::updateOutputs()
         if (conn->isConnected() && updateSuccess) {
             if (conn->isNonDesktop() ? !findLeaseOutput(conn->id()) : !findOutput(conn->id())) {
                 qCDebug(KWIN_DRM, "New %soutput on GPU %s: %s", conn->isNonDesktop() ? "non-desktop " : "", qPrintable(m_devNode), qPrintable(conn->modelName()));
-                m_pipelines << conn->pipeline();
+                const auto pipeline = conn->pipeline();
+                m_pipelines << pipeline;
                 if (conn->isNonDesktop()) {
-                    conn->pipeline()->pending.active = false;
-                    conn->pipeline()->applyPendingChanges();
-                    auto leaseOutput = new DrmLeaseOutput(conn->pipeline(), m_leaseDevice);
+                    auto leaseOutput = new DrmLeaseOutput(pipeline, m_leaseDevice);
                     m_leaseOutputs << leaseOutput;
                 } else {
-                    auto output = new DrmOutput(conn->pipeline());
+                    auto output = new DrmOutput(pipeline);
                     m_drmOutputs << output;
                     m_outputs << output;
+                    addedOutputs << output;
                     Q_EMIT outputAdded(output);
                 }
+                pipeline->setLayers(m_platform->renderBackend()->createPrimaryLayer(pipeline), m_platform->renderBackend()->createCursorLayer(pipeline));
+                pipeline->setActive(!conn->isNonDesktop());
+                pipeline->applyPendingChanges();
             }
         } else if (auto output = findOutput(conn->id())) {
             removeOutput(output);
@@ -316,14 +320,20 @@ bool DrmGpu::updateOutputs()
     if (testPendingConfiguration()) {
         for (const auto &pipeline : qAsConst(m_pipelines)) {
             pipeline->applyPendingChanges();
-            if (pipeline->output() && !pipeline->pending.crtc) {
-                pipeline->pending.enabled = false;
+            if (pipeline->output() && !pipeline->crtc()) {
+                pipeline->setEnable(false);
                 pipeline->output()->setEnabled(false);
             }
         }
     } else {
+        qCWarning(KWIN_DRM, "Failed to find a working setup for new outputs!");
         for (const auto &pipeline : qAsConst(m_pipelines)) {
             pipeline->revertPendingChanges();
+        }
+        for (const auto &output : qAsConst(addedOutputs)) {
+            output->setEnabled(false);
+            output->pipeline()->setEnable(false);
+            output->pipeline()->applyPendingChanges();
         }
     }
     m_leaseDevice->setDrmMaster(true);
@@ -340,15 +350,15 @@ bool DrmGpu::checkCrtcAssignment(QVector<DrmConnector *> connectors, const QVect
         // remaining connectors can't be powered
         for (const auto &conn : qAsConst(connectors)) {
             qCWarning(KWIN_DRM) << "disabling connector" << conn->modelName() << "without a crtc";
-            conn->pipeline()->pending.crtc = nullptr;
+            conn->pipeline()->setCrtc(nullptr);
         }
         return testPipelines();
     }
     auto connector = connectors.takeFirst();
     auto pipeline = connector->pipeline();
-    if (!pipeline->pending.enabled) {
+    if (!pipeline->enabled()) {
         // disabled pipelines don't need CRTCs
-        pipeline->pending.crtc = nullptr;
+        pipeline->setCrtc(nullptr);
         return checkCrtcAssignment(connectors, crtcs);
     }
     DrmCrtc *currentCrtc = nullptr;
@@ -362,26 +372,30 @@ bool DrmGpu::checkCrtcAssignment(QVector<DrmConnector *> connectors, const QVect
             currentCrtc = *it;
             auto crtcsLeft = crtcs;
             crtcsLeft.removeOne(currentCrtc);
-            pipeline->pending.crtc = currentCrtc;
-            if (checkCrtcAssignment(connectors, crtcsLeft)) {
-                return true;
-            }
+            pipeline->setCrtc(currentCrtc);
+            do {
+                if (checkCrtcAssignment(connectors, crtcsLeft)) {
+                    return true;
+                }
+            } while (pipeline->pruneModifier());
         }
     }
     for (const auto &crtc : qAsConst(crtcs)) {
         if (connector->isCrtcSupported(crtc) && crtc != currentCrtc) {
             auto crtcsLeft = crtcs;
             crtcsLeft.removeOne(crtc);
-            pipeline->pending.crtc = crtc;
-            if (checkCrtcAssignment(connectors, crtcsLeft)) {
-                return true;
-            }
+            pipeline->setCrtc(crtc);
+            do {
+                if (checkCrtcAssignment(connectors, crtcsLeft)) {
+                    return true;
+                }
+            } while (pipeline->pruneModifier());
         }
     }
     return false;
 }
 
-bool DrmGpu::testPendingConfiguration(TestMode mode)
+bool DrmGpu::testPendingConfiguration()
 {
     QVector<DrmConnector *> connectors;
     for (const auto &conn : qAsConst(m_connectors)) {
@@ -394,7 +408,7 @@ bool DrmGpu::testPendingConfiguration(TestMode mode)
     for (const auto &output : qAsConst(m_leaseOutputs)) {
         if (output->lease()) {
             connectors.removeOne(output->pipeline()->connector());
-            crtcs.removeOne(output->pipeline()->pending.crtc);
+            crtcs.removeOne(output->pipeline()->crtc());
         }
     }
     if (m_atomicModeSetting) {
@@ -403,23 +417,16 @@ bool DrmGpu::testPendingConfiguration(TestMode mode)
             return c1->getProp(DrmConnector::PropertyIndex::CrtcId)->current() > c2->getProp(DrmConnector::PropertyIndex::CrtcId)->current();
         });
     }
-    const auto &test = [&connectors, &crtcs, this, mode]() {
-        if (mode == TestMode::TestWithCrtcReallocation) {
-            return checkCrtcAssignment(connectors, crtcs);
-        } else {
-            return testPipelines();
-        }
-    };
-    if (test()) {
+    if (checkCrtcAssignment(connectors, crtcs)) {
         return true;
     } else {
         // try again without hw rotation
         bool hwRotationUsed = false;
         for (const auto &pipeline : qAsConst(m_pipelines)) {
-            hwRotationUsed |= (pipeline->pending.bufferTransformation != DrmPlane::Transformations(DrmPlane::Transformation::Rotate0));
-            pipeline->pending.bufferTransformation = DrmPlane::Transformation::Rotate0;
+            hwRotationUsed |= (pipeline->bufferOrientation() != DrmPlane::Transformations(DrmPlane::Transformation::Rotate0));
+            pipeline->setBufferOrientation(DrmPlane::Transformation::Rotate0);
         }
-        return hwRotationUsed ? test() : false;
+        return hwRotationUsed ? checkCrtcAssignment(connectors, crtcs) : false;
     }
 }
 
@@ -428,11 +435,8 @@ bool DrmGpu::testPipelines()
     // pipelines that are enabled but not active need to be activated for the test
     QVector<DrmPipeline *> inactivePipelines;
     for (const auto &pipeline : qAsConst(m_pipelines)) {
-        if (!pipeline->pending.layer) {
-            pipeline->pending.layer = m_platform->renderBackend()->createDrmPipelineLayer(pipeline);
-        }
-        if (!pipeline->pending.active) {
-            pipeline->pending.active = true;
+        if (!pipeline->active()) {
+            pipeline->setActive(true);
             inactivePipelines << pipeline;
         }
     }
@@ -440,7 +444,7 @@ bool DrmGpu::testPipelines()
     bool test = DrmPipeline::commitPipelines(m_pipelines, DrmPipeline::CommitMode::Test, unused);
     // disable inactive pipelines again
     for (const auto &pipeline : qAsConst(inactivePipelines)) {
-        pipeline->pending.active = false;
+        pipeline->setActive(false);
     }
     if (!inactivePipelines.isEmpty() && test) {
         test = DrmPipeline::commitPipelines(m_pipelines, DrmPipeline::CommitMode::Test, unused);
@@ -563,7 +567,7 @@ void DrmGpu::removeOutput(DrmOutput *output)
     qCDebug(KWIN_DRM) << "Removing output" << output;
     m_drmOutputs.removeOne(output);
     m_pipelines.removeOne(output->pipeline());
-    output->pipeline()->pending.layer.reset();
+    output->pipeline()->setLayers(nullptr, nullptr);
     m_outputs.removeOne(output);
     Q_EMIT outputRemoved(output);
     delete output;
@@ -579,11 +583,10 @@ const QVector<DrmPipeline *> DrmGpu::pipelines() const
     return m_pipelines;
 }
 
-DrmVirtualOutput *DrmGpu::createVirtualOutput(const QString &name, const QSize &size, double scale, VirtualOutputMode mode)
+DrmVirtualOutput *DrmGpu::createVirtualOutput(const QString &name, const QSize &size, double scale, DrmVirtualOutput::Type type)
 {
-    auto output = new DrmVirtualOutput(name, this, size);
+    auto output = new DrmVirtualOutput(name, this, size, type);
     output->setScale(scale);
-    output->setPlaceholder(mode == Placeholder);
     m_outputs << output;
     Q_EMIT outputEnabled(output);
     Q_EMIT outputAdded(output);
@@ -663,7 +666,7 @@ void DrmGpu::removeLeaseOutput(DrmLeaseOutput *output)
     qCDebug(KWIN_DRM) << "Removing leased output" << output;
     m_leaseOutputs.removeOne(output);
     m_pipelines.removeOne(output->pipeline());
-    output->pipeline()->pending.layer.reset();
+    output->pipeline()->setLayers(nullptr, nullptr);
     delete output;
 }
 
@@ -736,7 +739,7 @@ bool DrmGpu::maybeModeset()
         }
     }
     bool presentPendingForAll = std::all_of(pipelines.constBegin(), pipelines.constEnd(), [](const auto &pipeline) {
-        return pipeline->modesetPresentPending() || !pipeline->pending.active;
+        return pipeline->modesetPresentPending() || !pipeline->active();
     });
     if (!presentPendingForAll) {
         // commit only once all pipelines are ready for presentation
@@ -764,10 +767,10 @@ QVector<DrmObject *> DrmGpu::unusedObjects() const
     QVector<DrmObject *> ret = m_allObjects;
     for (const auto &pipeline : m_pipelines) {
         ret.removeOne(pipeline->connector());
-        if (pipeline->pending.crtc) {
-            ret.removeOne(pipeline->pending.crtc);
-            ret.removeOne(pipeline->pending.crtc->primaryPlane());
-            ret.removeOne(pipeline->pending.crtc->cursorPlane());
+        if (pipeline->crtc()) {
+            ret.removeOne(pipeline->crtc());
+            ret.removeOne(pipeline->crtc()->primaryPlane());
+            ret.removeOne(pipeline->crtc()->cursorPlane());
         }
     }
     return ret;
@@ -778,10 +781,29 @@ QSize DrmGpu::cursorSize() const
     return m_cursorSize;
 }
 
+void DrmGpu::releaseBuffers()
+{
+    for (const auto &plane : qAsConst(m_planes)) {
+        plane->releaseBuffers();
+    }
+    for (const auto &crtc : qAsConst(m_crtcs)) {
+        crtc->releaseBuffers();
+    }
+    for (const auto &pipeline : qAsConst(m_pipelines)) {
+        pipeline->primaryLayer()->releaseBuffers();
+    }
+    for (const auto &output : qAsConst(m_outputs)) {
+        if (const auto virtualOutput = qobject_cast<DrmVirtualOutput *>(output)) {
+            virtualOutput->outputLayer()->releaseBuffers();
+        }
+    }
+}
+
 void DrmGpu::recreateSurfaces()
 {
     for (const auto &pipeline : qAsConst(m_pipelines)) {
-        pipeline->pending.layer = m_platform->renderBackend()->createDrmPipelineLayer(pipeline);
+        pipeline->setLayers(m_platform->renderBackend()->createPrimaryLayer(pipeline), m_platform->renderBackend()->createCursorLayer(pipeline));
+        pipeline->applyPendingChanges();
     }
     for (const auto &output : qAsConst(m_outputs)) {
         if (const auto virtualOutput = qobject_cast<DrmVirtualOutput *>(output)) {

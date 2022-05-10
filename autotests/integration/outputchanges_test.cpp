@@ -6,12 +6,12 @@
 
 #include "kwin_wayland_test.h"
 
-#include "abstract_client.h"
-#include "abstract_output.h"
 #include "cursor.h"
+#include "output.h"
+#include "outputconfiguration.h"
 #include "platform.h"
 #include "wayland_server.h"
-#include "waylandoutputconfig.h"
+#include "window.h"
 #include "workspace.h"
 
 #include <KWayland/Client/surface.h>
@@ -37,7 +37,7 @@ private Q_SLOTS:
 
 void OutputChangesTest::initTestCase()
 {
-    qRegisterMetaType<AbstractClient *>();
+    qRegisterMetaType<Window *>();
 
     QSignalSpy applicationStartedSpy(kwinApp(), &Application::started);
     QVERIFY(applicationStartedSpy.isValid());
@@ -75,23 +75,23 @@ void OutputChangesTest::testWindowSticksToOutputAfterOutputIsDisabled()
     // Create a window.
     QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
-    auto client = Test::renderAndWaitForShown(surface.data(), QSize(100, 50), Qt::blue);
-    QVERIFY(client);
+    auto window = Test::renderAndWaitForShown(surface.data(), QSize(100, 50), Qt::blue);
+    QVERIFY(window);
 
     // Move the window to some predefined position so the test is more robust.
-    client->move(QPoint(42, 67));
-    QCOMPARE(client->frameGeometry(), QRect(42, 67, 100, 50));
+    window->move(QPoint(42, 67));
+    QCOMPARE(window->frameGeometry(), QRect(42, 67, 100, 50));
 
     // Disable the output where the window is on.
-    WaylandOutputConfig config;
+    OutputConfiguration config;
     {
-        auto changeSet = config.changeSet(static_cast<AbstractWaylandOutput *>(outputs[0]));
+        auto changeSet = config.changeSet(outputs[0]);
         changeSet->enabled = false;
     }
     kwinApp()->platform()->applyOutputChanges(config);
 
     // The window will be sent to the second output, which is at (1280, 0).
-    QCOMPARE(client->frameGeometry(), QRect(1280 + 42, 0 + 67, 100, 50));
+    QCOMPARE(window->frameGeometry(), QRect(1280 + 42, 0 + 67, 100, 50));
 }
 
 void OutputChangesTest::testWindowSticksToOutputAfterAnotherOutputIsDisabled()
@@ -101,27 +101,27 @@ void OutputChangesTest::testWindowSticksToOutputAfterAnotherOutputIsDisabled()
     // Create a window.
     QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
-    auto client = Test::renderAndWaitForShown(surface.data(), QSize(100, 50), Qt::blue);
-    QVERIFY(client);
+    auto window = Test::renderAndWaitForShown(surface.data(), QSize(100, 50), Qt::blue);
+    QVERIFY(window);
 
     // Move the window to the second output.
-    client->move(QPoint(1280 + 42, 67));
-    QCOMPARE(client->frameGeometry(), QRect(1280 + 42, 67, 100, 50));
+    window->move(QPoint(1280 + 42, 67));
+    QCOMPARE(window->frameGeometry(), QRect(1280 + 42, 67, 100, 50));
 
     // Disable the first output.
-    WaylandOutputConfig config;
+    OutputConfiguration config;
     {
-        auto changeSet = config.changeSet(static_cast<AbstractWaylandOutput *>(outputs[0]));
+        auto changeSet = config.changeSet(outputs[0]);
         changeSet->enabled = false;
     }
     {
-        auto changeSet = config.changeSet(static_cast<AbstractWaylandOutput *>(outputs[1]));
+        auto changeSet = config.changeSet(outputs[1]);
         changeSet->pos = QPoint(0, 0);
     }
     kwinApp()->platform()->applyOutputChanges(config);
 
     // The position of the window relative to its output should remain the same.
-    QCOMPARE(client->frameGeometry(), QRect(42, 67, 100, 50));
+    QCOMPARE(window->frameGeometry(), QRect(42, 67, 100, 50));
 }
 
 void OutputChangesTest::testWindowSticksToOutputAfterOutputIsMoved()
@@ -131,23 +131,23 @@ void OutputChangesTest::testWindowSticksToOutputAfterOutputIsMoved()
     // Create a window.
     QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
     QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
-    auto client = Test::renderAndWaitForShown(surface.data(), QSize(100, 50), Qt::blue);
-    QVERIFY(client);
+    auto window = Test::renderAndWaitForShown(surface.data(), QSize(100, 50), Qt::blue);
+    QVERIFY(window);
 
     // Move the window to some predefined position so the test is more robust.
-    client->move(QPoint(42, 67));
-    QCOMPARE(client->frameGeometry(), QRect(42, 67, 100, 50));
+    window->move(QPoint(42, 67));
+    QCOMPARE(window->frameGeometry(), QRect(42, 67, 100, 50));
 
     // Disable the first output.
-    WaylandOutputConfig config;
+    OutputConfiguration config;
     {
-        auto changeSet = config.changeSet(static_cast<AbstractWaylandOutput *>(outputs[0]));
+        auto changeSet = config.changeSet(outputs[0]);
         changeSet->pos = QPoint(-10, 20);
     }
     kwinApp()->platform()->applyOutputChanges(config);
 
     // The position of the window relative to its output should remain the same.
-    QCOMPARE(client->frameGeometry(), QRect(-10 + 42, 20 + 67, 100, 50));
+    QCOMPARE(window->frameGeometry(), QRect(-10 + 42, 20 + 67, 100, 50));
 }
 
 }

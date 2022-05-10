@@ -14,7 +14,10 @@
 // Include with base class for effects.
 #include <kwineffects.h>
 
-#include <KWaylandServer/slide_interface.h>
+namespace KWaylandServer
+{
+class SlideManagerInterface;
+}
 
 namespace KWin
 {
@@ -79,6 +82,8 @@ private:
 
     struct Animation
     {
+        EffectWindowDeletedRef deletedRef;
+        EffectWindowVisibleRef visibleRef;
         AnimationKind kind;
         TimeLine timeLine;
         std::chrono::milliseconds lastPresentTime = std::chrono::milliseconds::zero();

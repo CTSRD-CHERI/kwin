@@ -9,6 +9,7 @@
 #ifndef KWIN_SCENE_QPAINTER_VIRTUAL_BACKEND_H
 #define KWIN_SCENE_QPAINTER_VIRTUAL_BACKEND_H
 
+#include "outputlayer.h"
 #include "qpainterbackend.h"
 
 #include <QMap>
@@ -20,6 +21,20 @@ namespace KWin
 
 class VirtualBackend;
 
+class VirtualQPainterLayer : public OutputLayer
+{
+public:
+    VirtualQPainterLayer(Output *output);
+
+    OutputLayerBeginFrameInfo beginFrame() override;
+    void endFrame(const QRegion &renderedRegion, const QRegion &damagedRegion) override;
+    QImage *image();
+
+private:
+    Output *const m_output;
+    QImage m_image;
+};
+
 class VirtualQPainterBackend : public QPainterBackend
 {
     Q_OBJECT
@@ -27,14 +42,13 @@ public:
     VirtualQPainterBackend(VirtualBackend *backend);
     ~VirtualQPainterBackend() override;
 
-    QImage *bufferForScreen(AbstractOutput *output) override;
-    QRegion beginFrame(AbstractOutput *output) override;
-    void endFrame(AbstractOutput *output, const QRegion &renderedRegion, const QRegion &damagedRegion) override;
+    void present(Output *output) override;
+    VirtualQPainterLayer *primaryLayer(Output *output) override;
 
 private:
     void createOutputs();
 
-    QMap<AbstractOutput *, QImage> m_backBuffers;
+    QMap<Output *, QSharedPointer<VirtualQPainterLayer>> m_outputs;
     VirtualBackend *m_backend;
     int m_frameCounter = 0;
 };

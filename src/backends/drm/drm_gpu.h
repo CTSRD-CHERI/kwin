@@ -10,6 +10,8 @@
 #ifndef DRM_GPU_H
 #define DRM_GPU_H
 
+#include "drm_virtual_output.h"
+
 #include <QPointer>
 #include <QSize>
 #include <QSocketNotifier>
@@ -39,7 +41,6 @@ class DrmBackend;
 class EglGbmBackend;
 class DrmPipeline;
 class DrmAbstractOutput;
-class DrmVirtualOutput;
 class DrmLeaseOutput;
 class DrmRenderBackend;
 
@@ -74,21 +75,14 @@ public:
 
     bool updateOutputs();
 
-    enum VirtualOutputMode {
-        Placeholder,
-        Full,
-    };
-    DrmVirtualOutput *createVirtualOutput(const QString &name, const QSize &size, double scale, VirtualOutputMode mode);
+    DrmVirtualOutput *createVirtualOutput(const QString &name, const QSize &size, double scale, DrmVirtualOutput::Type type);
     void removeVirtualOutput(DrmVirtualOutput *output);
 
-    enum class TestMode {
-        TestOnly,
-        TestWithCrtcReallocation
-    };
-    bool testPendingConfiguration(TestMode mode = TestMode::TestWithCrtcReallocation);
+    bool testPendingConfiguration();
     bool needsModeset() const;
     bool maybeModeset();
 
+    void releaseBuffers();
     void recreateSurfaces();
 
 Q_SIGNALS:

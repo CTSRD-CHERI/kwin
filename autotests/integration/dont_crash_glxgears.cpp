@@ -8,12 +8,12 @@
 */
 #include "kwin_wayland_test.h"
 
-#include "abstract_client.h"
 #include "deleted.h"
 #include "platform.h"
 #include "wayland_server.h"
+#include "window.h"
 #include "workspace.h"
-#include "x11client.h"
+#include "x11window.h"
 
 #include <KDecoration2/Decoration>
 
@@ -46,22 +46,22 @@ void DontCrashGlxgearsTest::testGlxgears()
     // closing a glxgears window through Aurorae themes used to crash KWin
     // Let's make sure that doesn't happen anymore
 
-    QSignalSpy clientAddedSpy(workspace(), &Workspace::clientAdded);
-    QVERIFY(clientAddedSpy.isValid());
+    QSignalSpy windowAddedSpy(workspace(), &Workspace::windowAdded);
+    QVERIFY(windowAddedSpy.isValid());
 
     QProcess glxgears;
     glxgears.setProgram(QStringLiteral("glxgears"));
     glxgears.start();
     QVERIFY(glxgears.waitForStarted());
 
-    QVERIFY(clientAddedSpy.wait());
-    QCOMPARE(clientAddedSpy.count(), 1);
+    QVERIFY(windowAddedSpy.wait());
+    QCOMPARE(windowAddedSpy.count(), 1);
     QCOMPARE(workspace()->clientList().count(), 1);
-    X11Client *glxgearsClient = workspace()->clientList().first();
-    QVERIFY(glxgearsClient->isDecorated());
-    QSignalSpy closedSpy(glxgearsClient, &X11Client::windowClosed);
+    X11Window *glxgearsWindow = workspace()->clientList().first();
+    QVERIFY(glxgearsWindow->isDecorated());
+    QSignalSpy closedSpy(glxgearsWindow, &X11Window::windowClosed);
     QVERIFY(closedSpy.isValid());
-    KDecoration2::Decoration *decoration = glxgearsClient->decoration();
+    KDecoration2::Decoration *decoration = glxgearsWindow->decoration();
     QVERIFY(decoration);
 
     // send a mouse event to the position of the close button
