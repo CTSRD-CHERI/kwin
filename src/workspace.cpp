@@ -467,7 +467,6 @@ void Workspace::cleanupX11()
     m_nullFocus.reset();
     m_syncAlarmFilter.reset();
     m_wasUserInteractionFilter.reset();
-    m_xStackingQueryTree.reset();
 }
 
 Workspace::~Workspace()
@@ -508,6 +507,7 @@ void Workspace::setupWindowConnections(Window *window)
 {
     connect(window, &Window::desktopPresenceChanged, this, &Workspace::desktopPresenceChanged);
     connect(window, &Window::minimizedChanged, this, std::bind(&Workspace::windowMinimizedChanged, this, window));
+    connect(window, &Window::fullScreenChanged, ScreenEdges::self(), &ScreenEdges::checkBlocking);
 }
 
 void Workspace::constrain(Window *below, Window *above)
@@ -652,7 +652,6 @@ X11Window *Workspace::createX11Window(xcb_window_t windowId, bool is_mapped)
     if (X11Compositor *compositor = X11Compositor::self()) {
         connect(window, &X11Window::blockingCompositingChanged, compositor, &X11Compositor::updateClientCompositeBlocking);
     }
-    connect(window, &X11Window::clientFullScreenSet, ScreenEdges::self(), &ScreenEdges::checkBlocking);
     if (!window->manage(windowId, is_mapped)) {
         X11Window::deleteClient(window);
         return nullptr;
@@ -698,7 +697,6 @@ void Workspace::addX11Window(X11Window *window)
     m_x11Clients.append(window);
     m_allClients.append(window);
     addToStack(window);
-    markXStackingOrderAsDirty();
     updateClientArea(); // This cannot be in manage(), because the window got added only now
     window->updateLayer();
     if (window->isDesktop()) {
@@ -720,7 +718,7 @@ void Workspace::addX11Window(X11Window *window)
 void Workspace::addUnmanaged(Unmanaged *window)
 {
     m_unmanaged.append(window);
-    markXStackingOrderAsDirty();
+    addToStack(window);
 }
 
 /**
@@ -749,8 +747,8 @@ void Workspace::removeUnmanaged(Unmanaged *window)
 {
     Q_ASSERT(m_unmanaged.contains(window));
     m_unmanaged.removeAll(window);
+    removeFromStack(window);
     Q_EMIT unmanagedRemoved(window);
-    markXStackingOrderAsDirty();
 }
 
 void Workspace::addDeleted(Deleted *c, Window *orig)
@@ -758,7 +756,6 @@ void Workspace::addDeleted(Deleted *c, Window *orig)
     Q_ASSERT(!deleted.contains(c));
     deleted.append(c);
     replaceInStack(orig, c);
-    markXStackingOrderAsDirty();
 }
 
 void Workspace::removeDeleted(Deleted *c)
@@ -767,7 +764,6 @@ void Workspace::removeDeleted(Deleted *c)
     Q_EMIT deletedRemoved(c);
     deleted.removeAll(c);
     removeFromStack(c);
-    markXStackingOrderAsDirty();
     if (!c->wasClient()) {
         return;
     }
@@ -800,8 +796,7 @@ void Workspace::addWaylandWindow(Window *window)
     m_allClients.append(window);
     addToStack(window);
 
-    markXStackingOrderAsDirty();
-    updateStackingOrder(true);
+    updateStackingOrder();
     updateClientArea();
     if (window->wantsInput() && !window->isMinimized()) {
         activateWindow(window);
@@ -809,8 +804,7 @@ void Workspace::addWaylandWindow(Window *window)
     updateTabbox();
     connect(window, &Window::windowShown, this, [this, window] {
         window->updateLayer();
-        markXStackingOrderAsDirty();
-        updateStackingOrder(true);
+        updateStackingOrder();
         updateClientArea();
         if (window->wantsInput()) {
             activateWindow(window);
@@ -818,8 +812,7 @@ void Workspace::addWaylandWindow(Window *window)
     });
     connect(window, &Window::windowHidden, this, [this] {
         // TODO: update tabbox if it's displayed
-        markXStackingOrderAsDirty();
-        updateStackingOrder(true);
+        updateStackingOrder();
         updateClientArea();
     });
     Q_EMIT windowAdded(window);
@@ -854,7 +847,6 @@ void Workspace::removeAbstractClient(Window *window)
     }
 
     Q_EMIT windowRemoved(window);
-    markXStackingOrderAsDirty();
 
     updateStackingOrder(true);
     updateClientArea();
@@ -1235,7 +1227,7 @@ void Workspace::slotOutputDisabled(Output *output)
     disconnect(output, &Output::geometryChanged, this, &Workspace::desktopResized);
     desktopResized();
 
-    const auto stack = xStackingOrder();
+    const auto stack = stackingOrder();
     for (Window *window : stack) {
         if (window->output() == output) {
             window->setOutput(kwinApp()->platform()->outputAt(window->frameGeometry().center()));
@@ -1884,14 +1876,6 @@ Window *Workspace::findInternal(QWindow *w) const
     return nullptr;
 }
 
-void Workspace::markXStackingOrderAsDirty()
-{
-    m_xStackingDirty = true;
-    if (kwinApp()->x11Connection() && !kwinApp()->isClosingX11Connection()) {
-        m_xStackingQueryTree.reset(new Xcb::Tree(kwinApp()->x11RootWindow()));
-    }
-}
-
 void Workspace::setWasUserInteraction()
 {
     if (was_user_interaction) {
@@ -1928,8 +1912,7 @@ void Workspace::addInternalWindow(InternalWindow *window)
         Placement::self()->place(window, area);
     }
 
-    markXStackingOrderAsDirty();
-    updateStackingOrder(true);
+    updateStackingOrder();
     updateClientArea();
 
     Q_EMIT internalWindowAdded(window);
@@ -1939,8 +1922,7 @@ void Workspace::removeInternalWindow(InternalWindow *window)
 {
     m_internalWindows.removeOne(window);
 
-    markXStackingOrderAsDirty();
-    updateStackingOrder(true);
+    updateStackingOrder();
     updateClientArea();
 
     Q_EMIT internalWindowRemoved(window);

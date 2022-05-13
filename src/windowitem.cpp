@@ -29,6 +29,9 @@ WindowItem::WindowItem(Window *window, Item *parent)
     connect(window, &Window::shadowChanged, this, &WindowItem::updateShadowItem);
     updateShadowItem();
 
+    connect(window, &Window::frameGeometryChanged, this, &WindowItem::updatePosition);
+    updatePosition();
+
     if (waylandServer()) {
         connect(waylandServer(), &WaylandServer::lockStateChanged, this, &WindowItem::updateVisibility);
     }
@@ -40,7 +43,14 @@ WindowItem::WindowItem(Window *window, Item *parent)
     connect(workspace(), &Workspace::currentDesktopChanged, this, &WindowItem::updateVisibility);
     updateVisibility();
 
+    connect(window, &Window::opacityChanged, this, &WindowItem::updateOpacity);
+    updateOpacity();
+
     connect(window, &Window::windowClosed, this, &WindowItem::handleWindowClosed);
+}
+
+WindowItem::~WindowItem()
+{
 }
 
 SurfaceItem *WindowItem::surfaceItem() const
@@ -152,6 +162,11 @@ void WindowItem::updateVisibility()
     setVisible(computeVisibility());
 }
 
+void WindowItem::updatePosition()
+{
+    setPosition(m_window->pos());
+}
+
 void WindowItem::updateSurfaceItem(SurfaceItem *surfaceItem)
 {
     m_surfaceItem.reset(surfaceItem);
@@ -215,6 +230,11 @@ void WindowItem::updateDecorationItem()
     } else {
         m_decorationItem.reset();
     }
+}
+
+void WindowItem::updateOpacity()
+{
+    setOpacity(m_window->opacity());
 }
 
 WindowItemX11::WindowItemX11(Window *window, Item *parent)

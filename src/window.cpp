@@ -185,10 +185,7 @@ void Window::copyToDeleted(Window *c)
     if (m_effectWindow != nullptr) {
         m_effectWindow->setWindow(this);
     }
-    m_sceneWindow = std::exchange(c->m_sceneWindow, nullptr);
-    if (m_sceneWindow != nullptr) {
-        m_sceneWindow->setWindow(this);
-    }
+    m_windowItem = std::exchange(c->m_windowItem, nullptr);
     m_shadow = std::exchange(c->m_shadow, nullptr);
     if (m_shadow) {
         m_shadow->setWindow(this);
@@ -334,10 +331,7 @@ void Window::setOpacity(qreal opacity)
     }
     const qreal oldOpacity = m_opacity;
     m_opacity = opacity;
-    if (Compositor::compositing()) {
-        addRepaintFull();
-        Q_EMIT opacityChanged(this, oldOpacity);
-    }
+    Q_EMIT opacityChanged(this, oldOpacity);
 }
 
 bool Window::setupCompositing()
@@ -349,8 +343,8 @@ bool Window::setupCompositing()
     m_effectWindow = new EffectWindowImpl(this);
     updateShadow();
 
-    m_sceneWindow = new SceneWindow(this);
-    m_effectWindow->setSceneWindow(m_sceneWindow);
+    m_windowItem = createItem();
+    m_effectWindow->setWindowItem(m_windowItem);
 
     connect(windowItem(), &WindowItem::positionChanged, this, &Window::visibleGeometryChanged);
     connect(windowItem(), &WindowItem::boundingRectChanged, this, &Window::visibleGeometryChanged);
@@ -368,44 +362,7 @@ void Window::finishCompositing(ReleaseReason releaseReason)
     }
     deleteShadow();
     deleteEffectWindow();
-    deleteSceneWindow();
-}
-
-void Window::addRepaint(const QRect &rect)
-{
-    addRepaint(QRegion(rect));
-}
-
-void Window::addRepaint(int x, int y, int width, int height)
-{
-    addRepaint(QRegion(x, y, width, height));
-}
-
-void Window::addRepaint(const QRegion &region)
-{
-    if (auto item = windowItem()) {
-        item->scheduleRepaint(region);
-    }
-}
-
-void Window::addLayerRepaint(const QRect &rect)
-{
-    addLayerRepaint(QRegion(rect));
-}
-
-void Window::addLayerRepaint(int x, int y, int width, int height)
-{
-    addLayerRepaint(QRegion(x, y, width, height));
-}
-
-void Window::addLayerRepaint(const QRegion &region)
-{
-    addRepaint(region.translated(-pos()));
-}
-
-void Window::addRepaintFull()
-{
-    addLayerRepaint(visibleGeometry());
+    deleteItem();
 }
 
 void Window::addWorkspaceRepaint(int x, int y, int w, int h)
@@ -449,10 +406,10 @@ void Window::deleteEffectWindow()
     m_effectWindow = nullptr;
 }
 
-void Window::deleteSceneWindow()
+void Window::deleteItem()
 {
-    delete m_sceneWindow;
-    m_sceneWindow = nullptr;
+    delete m_windowItem;
+    m_windowItem = nullptr;
 }
 
 int Window::screen() const
@@ -508,16 +465,8 @@ void Window::updateShadow()
 
 SurfaceItem *Window::surfaceItem() const
 {
-    if (m_sceneWindow) {
-        return m_sceneWindow->surfaceItem();
-    }
-    return nullptr;
-}
-
-WindowItem *Window::windowItem() const
-{
-    if (m_sceneWindow) {
-        return m_sceneWindow->windowItem();
+    if (m_windowItem) {
+        return m_windowItem->surfaceItem();
     }
     return nullptr;
 }
@@ -580,6 +529,11 @@ void Window::discardShapeRegion()
 }
 
 bool Window::isClient() const
+{
+    return false;
+}
+
+bool Window::isUnmanaged() const
 {
     return false;
 }
@@ -953,7 +907,7 @@ Layer Window::belongsToLayer() const
     // and the docks move into the NotificationLayer (which is between Above- and
     // ActiveLayer, so that active fullscreen windows will still cover everything)
     // Since the desktop is also activated, nothing should be in the ActiveLayer, though
-    if (isInternal()) {
+    if (isUnmanaged() || isInternal()) {
         return UnmanagedLayer;
     }
     if (isLockScreen()) {

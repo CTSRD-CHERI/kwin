@@ -941,7 +941,7 @@ public:
      * @param action The action which gets triggered when the gesture triggers
      * @since 5.25
      */
-    virtual void registerTouchscreenSwipeShortcut(SwipeDirection direction, uint fingerCount, QAction *action) = 0;
+    virtual void registerTouchscreenSwipeShortcut(SwipeDirection direction, uint fingerCount, QAction *action, std::function<void(qreal)> progressCallback) = 0;
 
     /**
      * Retrieve the proxy class for an effect if it has one. Will return NULL if
@@ -2350,10 +2350,10 @@ public:
     ~EffectWindow() override;
 
     Q_SCRIPTABLE virtual void addRepaint(const QRect &r) = 0;
-    Q_SCRIPTABLE virtual void addRepaint(int x, int y, int w, int h) = 0;
+    Q_SCRIPTABLE void addRepaint(int x, int y, int w, int h);
     Q_SCRIPTABLE virtual void addRepaintFull() = 0;
     Q_SCRIPTABLE virtual void addLayerRepaint(const QRect &r) = 0;
-    Q_SCRIPTABLE virtual void addLayerRepaint(int x, int y, int w, int h) = 0;
+    Q_SCRIPTABLE void addLayerRepaint(int x, int y, int w, int h);
 
     virtual void refWindow() = 0;
     virtual void unrefWindow() = 0;
@@ -3109,8 +3109,8 @@ private:
 class KWINEFFECTS_EXPORT WindowPaintData : public PaintData
 {
 public:
-    explicit WindowPaintData(EffectWindow *w);
-    explicit WindowPaintData(EffectWindow *w, const QMatrix4x4 &screenProjectionMatrix);
+    WindowPaintData();
+    explicit WindowPaintData(const QMatrix4x4 &screenProjectionMatrix);
     WindowPaintData(const WindowPaintData &other);
     ~WindowPaintData() override;
     /**
@@ -4181,6 +4181,20 @@ template<typename T>
 void Effect::initConfig()
 {
     T::instance(effects->config());
+}
+
+/***************************************************************
+ EffectWindow
+***************************************************************/
+
+inline void EffectWindow::addRepaint(int x, int y, int w, int h)
+{
+    addRepaint(QRect(x, y, w, h));
+}
+
+inline void EffectWindow::addLayerRepaint(int x, int y, int w, int h)
+{
+    addLayerRepaint(QRect(x, y, w, h));
 }
 
 } // namespace

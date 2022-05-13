@@ -30,6 +30,9 @@ public:
     explicit Item(Item *parent = nullptr);
     ~Item() override;
 
+    qreal opacity() const;
+    void setOpacity(qreal opacity);
+
     QPoint position() const;
     void setPosition(const QPoint &point);
 
@@ -75,6 +78,11 @@ public:
      * system.
      */
     QRect mapToGlobal(const QRect &rect) const;
+    /**
+     * Maps the given @a rect from the scene's coordinate system to the item's coordinate
+     * system.
+     */
+    QRect mapFromGlobal(const QRect &rect) const;
 
     /**
      * Moves this item right before the specified @a sibling in the parent's children list.
@@ -134,6 +142,7 @@ private:
     QRect m_boundingRect;
     QPoint m_position;
     QSize m_size = QSize(0, 0);
+    qreal m_opacity = 1;
     int m_z = 0;
     bool m_explicitVisible = true;
     bool m_effectiveVisible = true;

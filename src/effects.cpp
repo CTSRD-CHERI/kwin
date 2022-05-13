@@ -640,6 +640,17 @@ void EffectsHandlerImpl::startMouseInterception(Effect *effect, Qt::CursorShape 
 void EffectsHandlerImpl::doStartMouseInterception(Qt::CursorShape shape)
 {
     input()->pointer()->setEffectsOverrideCursor(shape);
+
+    // We want to allow global shortcuts to be triggered when moving a
+    // window so it is possible to pick up a window and then move it to a
+    // different desktop by using the global shortcut to switch desktop.
+    // However, that means that some other things can also be triggered. If
+    // an effect that fill the screen gets triggered that way, we end up in a
+    // weird state where the move will restart after the effect closes. So to
+    // avoid that, abort move/resize if a full screen effect starts.
+    if (workspace()->moveResizeWindow()) {
+        workspace()->moveResizeWindow()->endInteractiveMoveResize();
+    }
 }
 
 void EffectsHandlerImpl::stopMouseInterception(Effect *effect)
@@ -786,9 +797,9 @@ void EffectsHandlerImpl::registerTouchpadPinchShortcut(PinchDirection direction,
     input()->registerTouchpadPinchShortcut(direction, fingerCount, action);
 }
 
-void EffectsHandlerImpl::registerTouchscreenSwipeShortcut(SwipeDirection direction, uint fingerCount, QAction *action)
+void EffectsHandlerImpl::registerTouchscreenSwipeShortcut(SwipeDirection direction, uint fingerCount, QAction *action, std::function<void(qreal)> progressCallback)
 {
-    input()->registerTouchscreenSwipeShortcut(direction, fingerCount, action);
+    input()->registerTouchscreenSwipeShortcut(direction, fingerCount, action, progressCallback);
 }
 
 void *EffectsHandlerImpl::getProxy(QString name)
@@ -1110,10 +1121,10 @@ EffectWindow *EffectsHandlerImpl::findWindow(const QUuid &id) const
 
 EffectWindowList EffectsHandlerImpl::stackingOrder() const
 {
-    QList<Window *> list = Workspace::self()->xStackingOrder();
+    QList<Window *> list = workspace()->stackingOrder();
     EffectWindowList ret;
     for (Window *t : list) {
-        if (EffectWindow *w = effectWindow(t)) {
+        if (EffectWindow *w = t->effectWindow()) {
             ret.append(w);
         }
     }
@@ -1886,7 +1897,7 @@ EffectScreen::Transform EffectScreenImpl::transform() const
 EffectWindowImpl::EffectWindowImpl(Window *window)
     : EffectWindow(window)
     , m_window(window)
-    , m_sceneWindow(nullptr)
+    , m_windowItem(nullptr)
 {
     // Deleted windows are not managed. So, when windowClosed signal is
     // emitted, effects can't distinguish managed windows from unmanaged
@@ -1907,37 +1918,27 @@ EffectWindowImpl::~EffectWindowImpl()
 
 void EffectWindowImpl::refVisible(int reason)
 {
-    m_sceneWindow->windowItem()->refVisible(reason);
+    m_windowItem->refVisible(reason);
 }
 
 void EffectWindowImpl::unrefVisible(int reason)
 {
-    m_sceneWindow->windowItem()->unrefVisible(reason);
+    m_windowItem->unrefVisible(reason);
 }
 
 void EffectWindowImpl::addRepaint(const QRect &r)
 {
-    m_window->addRepaint(r);
-}
-
-void EffectWindowImpl::addRepaint(int x, int y, int w, int h)
-{
-    m_window->addRepaint(x, y, w, h);
+    m_windowItem->scheduleRepaint(r);
 }
 
 void EffectWindowImpl::addRepaintFull()
 {
-    m_window->addRepaintFull();
+    m_windowItem->scheduleRepaint(m_windowItem->boundingRect());
 }
 
 void EffectWindowImpl::addLayerRepaint(const QRect &r)
 {
-    m_window->addLayerRepaint(r);
-}
-
-void EffectWindowImpl::addLayerRepaint(int x, int y, int w, int h)
-{
-    m_window->addLayerRepaint(x, y, w, h);
+    m_windowItem->scheduleRepaint(m_windowItem->mapFromGlobal(r));
 }
 
 const EffectWindowGroup *EffectWindowImpl::group() const
@@ -2091,9 +2092,9 @@ void EffectWindowImpl::setWindow(Window *w)
     setParent(w);
 }
 
-void EffectWindowImpl::setSceneWindow(SceneWindow *w)
+void EffectWindowImpl::setWindowItem(WindowItem *item)
 {
-    m_sceneWindow = w;
+    m_windowItem = item;
 }
 
 QRect EffectWindowImpl::decorationInnerRect() const
@@ -2191,19 +2192,6 @@ QVariant EffectWindowImpl::data(int role) const
     return dataMap.value(role);
 }
 
-EffectWindow *effectWindow(Window *w)
-{
-    EffectWindowImpl *ret = w->effectWindow();
-    return ret;
-}
-
-EffectWindow *effectWindow(SceneWindow *w)
-{
-    EffectWindowImpl *ret = w->window()->effectWindow();
-    ret->setSceneWindow(w);
-    return ret;
-}
-
 void EffectWindowImpl::elevate(bool elevate)
 {
     effects->setElevatedWindow(this, elevate);
@@ -2232,16 +2220,12 @@ void EffectWindowImpl::closeWindow()
 
 void EffectWindowImpl::referencePreviousWindowPixmap()
 {
-    if (m_sceneWindow) {
-        m_sceneWindow->referencePreviousPixmap();
-    }
+    // TODO: Implement.
 }
 
 void EffectWindowImpl::unreferencePreviousWindowPixmap()
 {
-    if (m_sceneWindow) {
-        m_sceneWindow->unreferencePreviousPixmap();
-    }
+    // TODO: Implement.
 }
 
 bool EffectWindowImpl::isManaged() const

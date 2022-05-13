@@ -33,6 +33,19 @@ Item::~Item()
     }
 }
 
+qreal Item::opacity() const
+{
+    return m_opacity;
+}
+
+void Item::setOpacity(qreal opacity)
+{
+    if (m_opacity != opacity) {
+        m_opacity = opacity;
+        scheduleRepaint(boundingRect());
+    }
+}
+
 int Item::z() const
 {
     return m_z;
@@ -204,6 +217,14 @@ QRect Item::mapToGlobal(const QRect &rect) const
         return QRect();
     }
     return rect.translated(rootPosition());
+}
+
+QRect Item::mapFromGlobal(const QRect &rect) const
+{
+    if (rect.isEmpty()) {
+        return QRect();
+    }
+    return rect.translated(-rootPosition());
 }
 
 void Item::stackBefore(Item *sibling)

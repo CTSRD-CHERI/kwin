@@ -338,7 +338,7 @@ static WindowQuadList clipQuads(const Item *item, const SceneOpenGL::RenderConte
 {
     const WindowQuadList quads = item->quads();
     if (context->clip != infiniteRegion() && !context->hardwareClipping) {
-        const QPoint offset = context->transforms.top().map(QPoint(0, 0));
+        const QPoint offset = context->transformStack.top().map(QPoint(0, 0));
 
         WindowQuadList ret;
         ret.reserve(quads.count());
@@ -372,7 +372,9 @@ void SceneOpenGL::createRenderNode(Item *item, RenderContext *context)
     QMatrix4x4 matrix;
     matrix.translate(item->position().x(), item->position().y());
     matrix *= item->transform();
-    context->transforms.push(context->transforms.top() * matrix);
+    context->transformStack.push(context->transformStack.top() * matrix);
+
+    context->opacityStack.push(context->opacityStack.top() * item->opacity());
 
     for (Item *childItem : sortedChildItems) {
         if (childItem->z() >= 0) {
@@ -391,8 +393,8 @@ void SceneOpenGL::createRenderNode(Item *item, RenderContext *context)
             context->renderNodes.append(RenderNode{
                 .texture = shadow->shadowTexture(),
                 .quads = quads,
-                .transformMatrix = context->transforms.top(),
-                .opacity = context->paintData.opacity(),
+                .transformMatrix = context->transformStack.top(),
+                .opacity = context->opacityStack.top(),
                 .hasAlpha = true,
                 .coordinateType = UnnormalizedCoordinates,
             });
@@ -404,8 +406,8 @@ void SceneOpenGL::createRenderNode(Item *item, RenderContext *context)
             context->renderNodes.append(RenderNode{
                 .texture = renderer->texture(),
                 .quads = quads,
-                .transformMatrix = context->transforms.top(),
-                .opacity = context->paintData.opacity(),
+                .transformMatrix = context->transformStack.top(),
+                .opacity = context->opacityStack.top(),
                 .hasAlpha = true,
                 .coordinateType = UnnormalizedCoordinates,
             });
@@ -420,8 +422,8 @@ void SceneOpenGL::createRenderNode(Item *item, RenderContext *context)
                 context->renderNodes.append(RenderNode{
                     .texture = bindSurfaceTexture(surfaceItem),
                     .quads = quads,
-                    .transformMatrix = context->transforms.top(),
-                    .opacity = context->paintData.opacity(),
+                    .transformMatrix = context->transformStack.top(),
+                    .opacity = context->opacityStack.top(),
                     .hasAlpha = hasAlpha,
                     .coordinateType = UnnormalizedCoordinates,
                 });
@@ -438,7 +440,8 @@ void SceneOpenGL::createRenderNode(Item *item, RenderContext *context)
         }
     }
 
-    context->transforms.pop();
+    context->transformStack.pop();
+    context->opacityStack.pop();
 }
 
 QMatrix4x4 SceneOpenGL::modelViewProjectionMatrix(int mask, const WindowPaintData &data) const
@@ -500,11 +503,11 @@ void SceneOpenGL::render(Item *item, int mask, const QRegion &region, const Wind
 
     RenderContext renderContext{
         .clip = region,
-        .paintData = data,
         .hardwareClipping = region != infiniteRegion() && ((mask & Scene::PAINT_WINDOW_TRANSFORMED) || (mask & Scene::PAINT_SCREEN_TRANSFORMED)),
     };
 
-    renderContext.transforms.push(QMatrix4x4());
+    renderContext.transformStack.push(QMatrix4x4());
+    renderContext.opacityStack.push(data.opacity());
 
     item->setTransform(transformForPaintData(mask, data));
 
@@ -518,29 +521,18 @@ void SceneOpenGL::render(Item *item, int mask, const QRegion &region, const Wind
         return;
     }
 
-    GLShader *shader = data.shader;
-    if (!shader) {
-        ShaderTraits traits = ShaderTrait::MapTexture;
-
-        if (data.opacity() != 1.0 || data.brightness() != 1.0 || data.crossFadeProgress() != 1.0) {
-            traits |= ShaderTrait::Modulate;
-        }
-
-        if (data.saturation() != 1.0) {
-            traits |= ShaderTrait::AdjustSaturation;
-        }
-
-        shader = ShaderManager::instance()->pushShader(traits);
-    }
-    shader->setUniform(GLShader::Saturation, data.saturation());
-
     const bool indexedQuads = GLVertexBuffer::supportsIndexedQuads();
     const GLenum primitiveType = indexedQuads ? GL_QUADS : GL_TRIANGLES;
     const int verticesPerQuad = indexedQuads ? 4 : 6;
     const size_t size = verticesPerQuad * quadCount * sizeof(GLVertex2D);
 
-    if (renderContext.hardwareClipping) {
-        glEnable(GL_SCISSOR_TEST);
+    ShaderTraits shaderTraits = ShaderTrait::MapTexture;
+
+    if (data.brightness() != 1.0 || data.crossFadeProgress() != 1.0) {
+        shaderTraits |= ShaderTrait::Modulate;
+    }
+    if (data.saturation() != 1.0) {
+        shaderTraits |= ShaderTrait::AdjustSaturation;
     }
 
     const GLVertexAttrib attribs[] = {
@@ -560,6 +552,10 @@ void SceneOpenGL::render(Item *item, int mask, const QRegion &region, const Wind
             continue;
         }
 
+        if (renderNode.opacity != 1.0) {
+            shaderTraits |= ShaderTrait::Modulate;
+        }
+
         renderNode.firstVertex = v;
         renderNode.vertexCount = renderNode.quads.count() * verticesPerQuad;
 
@@ -571,6 +567,16 @@ void SceneOpenGL::render(Item *item, int mask, const QRegion &region, const Wind
 
     vbo->unmap();
     vbo->bindArrays();
+
+    GLShader *shader = data.shader;
+    if (!shader) {
+        shader = ShaderManager::instance()->pushShader(shaderTraits);
+    }
+    shader->setUniform(GLShader::Saturation, data.saturation());
+
+    if (renderContext.hardwareClipping) {
+        glEnable(GL_SCISSOR_TEST);
+    }
 
     // Make sure the blend function is set up correctly in case we will be doing blending
     glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);

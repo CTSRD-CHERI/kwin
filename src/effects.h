@@ -107,7 +107,7 @@ public:
     void registerTouchpadSwipeShortcut(SwipeDirection direction, uint fingerCount, QAction *action) override;
     void registerRealtimeTouchpadPinchShortcut(PinchDirection dir, uint fingerCount, QAction *onUp, std::function<void(qreal)> progressCallback) override;
     void registerTouchpadPinchShortcut(PinchDirection direction, uint fingerCount, QAction *action) override;
-    void registerTouchscreenSwipeShortcut(SwipeDirection direction, uint fingerCount, QAction *action) override;
+    void registerTouchscreenSwipeShortcut(SwipeDirection direction, uint fingerCount, QAction *action, std::function<void(qreal)> progressCallback) override;
     void *getProxy(QString name) override;
     void startMousePolling() override;
     void stopMousePolling() override;
@@ -382,10 +382,8 @@ public:
     void unrefVisible(int reason) override;
 
     void addRepaint(const QRect &r) override;
-    void addRepaint(int x, int y, int w, int h) override;
     void addRepaintFull() override;
     void addLayerRepaint(const QRect &r) override;
-    void addLayerRepaint(int x, int y, int w, int h) override;
 
     void refWindow() override;
     void unrefWindow() override;
@@ -495,9 +493,8 @@ public:
     Window *window();
 
     void setWindow(Window *w); // internal
-    void setSceneWindow(SceneWindow *w); // internal
-    const SceneWindow *sceneWindow() const; // internal
-    SceneWindow *sceneWindow(); // internal
+    void setWindowItem(WindowItem *item); // internal
+    WindowItem *windowItem() const; // internal
 
     void elevate(bool elevate);
 
@@ -506,7 +503,7 @@ public:
 
 private:
     Window *m_window;
-    SceneWindow *m_sceneWindow; // This one is used only during paint pass.
+    WindowItem *m_windowItem; // This one is used only during paint pass.
     QHash<int, QVariant> dataMap;
     bool managed = false;
     bool m_waylandWindow;
@@ -660,17 +657,9 @@ inline EffectWindowGroupImpl::EffectWindowGroupImpl(Group *g)
 {
 }
 
-EffectWindow *effectWindow(Window *w);
-EffectWindow *effectWindow(SceneWindow *w);
-
-inline const SceneWindow *EffectWindowImpl::sceneWindow() const
+inline WindowItem *EffectWindowImpl::windowItem() const
 {
-    return m_sceneWindow;
-}
-
-inline SceneWindow *EffectWindowImpl::sceneWindow()
-{
-    return m_sceneWindow;
+    return m_windowItem;
 }
 
 inline const Window *EffectWindowImpl::window() const

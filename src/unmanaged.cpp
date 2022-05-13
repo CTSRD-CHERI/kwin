@@ -15,6 +15,7 @@
 #include "surfaceitem_x11.h"
 #include "utils/common.h"
 #include "wayland/surface_interface.h"
+#include "windowitem.h"
 #include "workspace.h"
 
 #include <QDebug>
@@ -69,6 +70,11 @@ Unmanaged::Unmanaged()
 
 Unmanaged::~Unmanaged()
 {
+}
+
+WindowItem *Unmanaged::createItem()
+{
+    return new WindowItemX11(this);
 }
 
 void Unmanaged::associate()
@@ -206,6 +212,11 @@ NET::WindowType Unmanaged::windowType(bool direct, int supportedTypes) const
 bool Unmanaged::isOutline() const
 {
     return m_outline;
+}
+
+bool Unmanaged::isUnmanaged() const
+{
+    return true;
 }
 
 QWindow *Unmanaged::findInternalWindow() const

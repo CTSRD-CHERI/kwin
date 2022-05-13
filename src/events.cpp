@@ -154,15 +154,6 @@ bool Workspace::workspaceEvent(xcb_generic_event_t *e)
         return false; // let Qt process it, it'll be intercepted again in eventFilter()
     }
 
-    // events that should be handled before windows can get them
-    switch (eventType) {
-    case XCB_CONFIGURE_NOTIFY:
-        if (reinterpret_cast<xcb_configure_notify_event_t *>(e)->event == kwinApp()->x11RootWindow()) {
-            markXStackingOrderAsDirty();
-        }
-        break;
-    };
-
     const xcb_window_t eventWindow = findEventWindow(e);
     if (eventWindow != XCB_WINDOW_NONE) {
         if (X11Window *window = findClient(Predicate::WindowMatch, eventWindow)) {
@@ -280,6 +271,13 @@ bool Workspace::workspaceEvent(xcb_generic_event_t *e)
             }
             xcb_configure_window(kwinApp()->x11Connection(), event->window, value_mask, values);
             return true;
+        }
+        break;
+    }
+    case XCB_CONFIGURE_NOTIFY: {
+        const auto configureNotifyEvent = reinterpret_cast<xcb_configure_notify_event_t *>(e);
+        if (configureNotifyEvent->override_redirect && configureNotifyEvent->event == kwinApp()->x11RootWindow()) {
+            updateXStackingOrder();
         }
         break;
     }

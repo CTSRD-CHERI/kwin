@@ -108,7 +108,8 @@ void DrmOutput::updateCursor()
 {
     static bool valid;
     static const bool forceSoftwareCursor = qEnvironmentVariableIntValue("KWIN_FORCE_SW_CURSOR", &valid) == 1 && valid;
-    if (forceSoftwareCursor) {
+    // hardware cursors are broken with the NVidia proprietary driver
+    if (forceSoftwareCursor || (!valid && m_gpu->isNVidia())) {
         m_setCursorSuccessful = false;
         return;
     }
@@ -145,6 +146,7 @@ void DrmOutput::updateCursor()
     layer->setVisible(cursor->geometry().intersects(geometry()));
     if (layer->isVisible()) {
         m_setCursorSuccessful = m_pipeline->setCursor(logicalToNativeMatrix(QRect(QPoint(), cursorRect.size()), scale(), transform()).map(cursor->hotspot()));
+        layer->setVisible(m_setCursorSuccessful);
     }
 }
 
@@ -425,6 +427,8 @@ void DrmOutput::renderCursorOpengl(const QSize &cursorSize)
         m_cursorTextureDirty = false;
     };
 
+    const auto [renderTarget, repaint] = layer->beginFrame();
+
     if (!m_cursorTexture) {
         allocateTexture();
 
@@ -441,8 +445,6 @@ void DrmOutput::renderCursorOpengl(const QSize &cursorSize)
             allocateTexture();
         }
     }
-
-    const auto [renderTarget, repaint] = layer->beginFrame();
 
     QMatrix4x4 mvp;
     mvp.ortho(QRect(QPoint(), renderTarget.size()));

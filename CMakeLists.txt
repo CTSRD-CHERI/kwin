@@ -250,7 +250,7 @@ if (KWIN_BUILD_DRM_BACKEND OR HAVE_WAYLAND_EGL)
     endif()
 endif()
 
-pkg_check_modules(Libxcvt IMPORTED_TARGET libxcvt>=0.1.1)
+pkg_check_modules(Libxcvt IMPORTED_TARGET libxcvt>=0.1.1 REQUIRED)
 add_feature_info(Libxcvt Libxcvt_FOUND "Required for generating modes in the drm backend")
 
 find_package(X11)

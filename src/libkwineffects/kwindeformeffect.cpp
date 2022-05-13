@@ -114,7 +114,7 @@ GLTexture *DeformEffectPrivate::maybeRender(EffectWindow *window, DeformOffscree
         QMatrix4x4 projectionMatrix;
         projectionMatrix.ortho(QRect(0, 0, geometry.width(), geometry.height()));
 
-        WindowPaintData data(window);
+        WindowPaintData data;
         data.setXTranslation(-geometry.x());
         data.setYTranslation(-geometry.y());
         data.setOpacity(1.0);
@@ -154,9 +154,6 @@ void DeformEffectPrivate::paint(EffectWindow *window, GLTexture *texture, const 
     quads.makeInterleavedArrays(primitiveType, map, texture->matrix(NormalizedCoordinates));
     vbo->unmap();
     vbo->bindArrays();
-    glEnable(GL_SCISSOR_TEST);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 
     const qreal rgb = data.brightness() * data.opacity();
     const qreal a = data.opacity();
@@ -169,12 +166,24 @@ void DeformEffectPrivate::paint(EffectWindow *window, GLTexture *texture, const 
     shader->setUniform(GLShader::TextureWidth, texture->width());
     shader->setUniform(GLShader::TextureHeight, texture->height());
 
+    const bool clipping = region != infiniteRegion();
+    const QRegion clipRegion = clipping ? effects->mapToRenderTarget(region) : infiniteRegion();
+
+    if (clipping) {
+        glEnable(GL_SCISSOR_TEST);
+    }
+
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+
     texture->bind();
-    vbo->draw(effects->mapToRenderTarget(region), primitiveType, 0, verticesPerQuad * quads.count(), true);
+    vbo->draw(clipRegion, primitiveType, 0, verticesPerQuad * quads.count(), clipping);
     texture->unbind();
 
     glDisable(GL_BLEND);
-    glDisable(GL_SCISSOR_TEST);
+    if (clipping) {
+        glDisable(GL_SCISSOR_TEST);
+    }
     vbo->unbindArrays();
 }
 

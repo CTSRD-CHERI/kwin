@@ -50,7 +50,6 @@ class Output;
 class ClientMachine;
 class Deleted;
 class EffectWindowImpl;
-class SceneWindow;
 class Shadow;
 class SurfaceItem;
 class VirtualDesktop;
@@ -641,6 +640,7 @@ public:
     QRect visibleGeometry() const;
     virtual bool isClient() const;
     virtual bool isDeleted() const;
+    virtual bool isUnmanaged() const;
 
     /**
      * Maps the specified @a point from the global screen coordinates to the frame coordinates.
@@ -720,20 +720,12 @@ public:
     bool hasAlpha() const;
     virtual bool setupCompositing();
     virtual void finishCompositing(ReleaseReason releaseReason = ReleaseReason::Release);
-    Q_INVOKABLE void addRepaint(const QRect &r);
-    Q_INVOKABLE void addRepaint(const QRegion &r);
-    Q_INVOKABLE void addRepaint(int x, int y, int w, int h);
-    Q_INVOKABLE void addLayerRepaint(const QRect &r);
-    Q_INVOKABLE void addLayerRepaint(const QRegion &r);
-    Q_INVOKABLE void addLayerRepaint(int x, int y, int w, int h);
-    Q_INVOKABLE virtual void addRepaintFull();
     // these call workspace->addRepaint(), but first transform the damage if needed
     void addWorkspaceRepaint(const QRect &r);
     void addWorkspaceRepaint(int x, int y, int w, int h);
     void addWorkspaceRepaint(const QRegion &region);
     EffectWindowImpl *effectWindow();
     const EffectWindowImpl *effectWindow() const;
-    SceneWindow *sceneWindow() const;
     SurfaceItem *surfaceItem() const;
     WindowItem *windowItem() const;
     /**
@@ -1544,6 +1536,9 @@ protected:
     void getWmOpaqueRegion();
     void discardShapeRegion();
 
+    virtual WindowItem *createItem() = 0;
+    void deleteItem();
+
     void getResourceClass();
     void setResourceClass(const QByteArray &name, const QByteArray &className = QByteArray());
     Xcb::Property fetchSkipCloseAnimation() const;
@@ -1553,7 +1548,6 @@ protected:
     void disownDataPassedToDeleted();
     void deleteShadow();
     void deleteEffectWindow();
-    void deleteSceneWindow();
     void setDepth(int depth);
 
     Output *m_output = nullptr;
@@ -1883,7 +1877,7 @@ private:
     Xcb::Window m_client;
     bool is_shape;
     EffectWindowImpl *m_effectWindow;
-    SceneWindow *m_sceneWindow = nullptr;
+    WindowItem *m_windowItem = nullptr;
     Shadow *m_shadow = nullptr;
     QByteArray resource_name;
     QByteArray resource_class;
@@ -2215,9 +2209,9 @@ inline const EffectWindowImpl *Window::effectWindow() const
     return m_effectWindow;
 }
 
-inline SceneWindow *Window::sceneWindow() const
+inline WindowItem *Window::windowItem() const
 {
-    return m_sceneWindow;
+    return m_windowItem;
 }
 
 inline bool Window::isOnAllDesktops() const
