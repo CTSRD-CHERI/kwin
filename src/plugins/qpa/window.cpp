@@ -10,7 +10,6 @@
 #include "window.h"
 #include "eglhelpers.h"
 #include "platform.h"
-#include "screens.h"
 
 #include "internalwindow.h"
 
@@ -29,7 +28,7 @@ Window::Window(QWindow *window)
     : QPlatformWindow(window)
     , m_eglDisplay(kwinApp()->platform()->sceneEglDisplay())
     , m_windowId(++s_windowId)
-    , m_scale(std::max(qreal(1), screens()->maxScale()))
+    , m_scale(kwinApp()->devicePixelRatio())
 {
 }
 
@@ -104,15 +103,15 @@ void Window::bindContentFBO()
     m_contentFBO->bind();
 }
 
-const QSharedPointer<QOpenGLFramebufferObject> &Window::contentFBO() const
+const std::shared_ptr<QOpenGLFramebufferObject> &Window::contentFBO() const
 {
     return m_contentFBO;
 }
 
-QSharedPointer<QOpenGLFramebufferObject> Window::swapFBO()
+std::shared_ptr<QOpenGLFramebufferObject> Window::swapFBO()
 {
-    QSharedPointer<QOpenGLFramebufferObject> fbo = m_contentFBO;
-    m_contentFBO.clear();
+    std::shared_ptr<QOpenGLFramebufferObject> fbo;
+    m_contentFBO.swap(fbo);
     return fbo;
 }
 

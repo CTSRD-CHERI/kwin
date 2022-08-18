@@ -15,14 +15,14 @@
 #include "drm_backend.h"
 #include "drm_buffer.h"
 #include "drm_buffer_gbm.h"
+#include "drm_egl_backend.h"
 #include "drm_gpu.h"
 #include "drm_layer.h"
+#include "drm_logging.h"
 #include "drm_object_connector.h"
 #include "drm_object_crtc.h"
 #include "drm_object_plane.h"
 #include "drm_output.h"
-#include "egl_gbm_backend.h"
-#include "logging.h"
 #include "session.h"
 
 #include <drm_fourcc.h>
@@ -53,15 +53,15 @@ bool DrmPipeline::testScanout()
         return false;
     }
     if (gpu()->atomicModeSetting()) {
-        return commitPipelines({this}, CommitMode::Test);
+        return commitPipelines({this}, CommitMode::Test) == Error::None;
     } else {
         // no other way to test than to do it.
         // As we only have a maximum of one test per scanout cycle, this is fine
-        return presentLegacy();
+        return presentLegacy() == Error::None;
     }
 }
 
-bool DrmPipeline::present()
+DrmPipeline::Error DrmPipeline::present()
 {
     Q_ASSERT(m_pending.crtc);
     if (gpu()->atomicModeSetting()) {
@@ -69,13 +69,10 @@ bool DrmPipeline::present()
     } else {
         if (m_pending.layer->hasDirectScanoutBuffer()) {
             // already presented
-            return true;
+            return Error::None;
         }
-        if (!presentLegacy()) {
-            return false;
-        }
+        return presentLegacy();
     }
-    return true;
 }
 
 bool DrmPipeline::maybeModeset()
@@ -84,7 +81,7 @@ bool DrmPipeline::maybeModeset()
     return gpu()->maybeModeset();
 }
 
-bool DrmPipeline::commitPipelines(const QVector<DrmPipeline *> &pipelines, CommitMode mode, const QVector<DrmObject *> &unusedObjects)
+DrmPipeline::Error DrmPipeline::commitPipelines(const QVector<DrmPipeline *> &pipelines, CommitMode mode, const QVector<DrmObject *> &unusedObjects)
 {
     Q_ASSERT(!pipelines.isEmpty());
     if (pipelines[0]->gpu()->atomicModeSetting()) {
@@ -94,129 +91,150 @@ bool DrmPipeline::commitPipelines(const QVector<DrmPipeline *> &pipelines, Commi
     }
 }
 
-bool DrmPipeline::commitPipelinesAtomic(const QVector<DrmPipeline *> &pipelines, CommitMode mode, const QVector<DrmObject *> &unusedObjects)
+DrmPipeline::Error DrmPipeline::commitPipelinesAtomic(const QVector<DrmPipeline *> &pipelines, CommitMode mode, const QVector<DrmObject *> &unusedObjects)
 {
-    drmModeAtomicReq *req = drmModeAtomicAlloc();
-    if (!req) {
-        qCCritical(KWIN_DRM) << "Failed to allocate drmModeAtomicReq!" << strerror(errno);
-        return false;
-    }
-    uint32_t flags = 0;
-    const auto &failed = [pipelines, req, &flags, unusedObjects]() {
-        drmModeAtomicFree(req);
-        printFlags(flags);
+    const auto &failed = [&pipelines, &unusedObjects]() {
         for (const auto &pipeline : pipelines) {
             pipeline->printDebugInfo();
             pipeline->atomicCommitFailed();
         }
         for (const auto &obj : unusedObjects) {
-            printProps(obj, PrintMode::OnlyChanged);
+            obj->printProps(DrmObject::PrintMode::OnlyChanged);
             obj->rollbackPending();
         }
-        return false;
     };
+
+    DrmUniquePtr<drmModeAtomicReq> req{drmModeAtomicAlloc()};
+    if (!req) {
+        qCCritical(KWIN_DRM) << "Failed to allocate drmModeAtomicReq!" << strerror(errno);
+        return Error::OutofMemory;
+    }
     for (const auto &pipeline : pipelines) {
-        if (pipeline->activePending() && !pipeline->m_pending.layer->checkTestBuffer()) {
-            qCWarning(KWIN_DRM) << "Checking test buffer failed for" << mode;
-            return failed();
+        if (pipeline->activePending()) {
+            if (!pipeline->m_pending.layer->checkTestBuffer()) {
+                qCWarning(KWIN_DRM) << "Checking test buffer failed for" << mode;
+                failed();
+                return Error::TestBufferFailed;
+            }
+            pipeline->prepareAtomicPresentation();
+            if (mode == CommitMode::TestAllowModeset || mode == CommitMode::CommitModeset) {
+                pipeline->prepareAtomicModeset();
+            }
+        } else {
+            pipeline->prepareAtomicDisable();
         }
-        if (!pipeline->populateAtomicValues(req, flags)) {
-            qCWarning(KWIN_DRM) << "Populating atomic values failed for" << mode;
-            return failed();
+        if (!pipeline->populateAtomicValues(req.get())) {
+            failed();
+            return errnoToError();
         }
     }
     for (const auto &unused : unusedObjects) {
         unused->disable();
-        if (unused->needsModeset()) {
-            flags |= DRM_MODE_ATOMIC_ALLOW_MODESET;
-        }
-        if (!unused->atomicPopulate(req)) {
+        if (!unused->atomicPopulate(req.get())) {
             qCWarning(KWIN_DRM) << "Populating atomic values failed for unused resource" << unused;
-            return failed();
+            failed();
+            return errnoToError();
         }
     }
-    bool modeset = flags & DRM_MODE_ATOMIC_ALLOW_MODESET;
-    Q_ASSERT(!modeset || mode != CommitMode::Commit);
-    if (modeset) {
+    const auto gpu = pipelines[0]->gpu();
+    switch (mode) {
+    case CommitMode::TestAllowModeset: {
+        bool withModeset = drmModeAtomicCommit(gpu->fd(), req.get(), DRM_MODE_ATOMIC_ALLOW_MODESET | DRM_MODE_ATOMIC_TEST_ONLY, nullptr) == 0;
+        if (!withModeset) {
+            qCDebug(KWIN_DRM) << "Atomic modeset test failed!" << strerror(errno);
+            failed();
+            return errnoToError();
+        }
+        bool withoutModeset = drmModeAtomicCommit(gpu->fd(), req.get(), DRM_MODE_ATOMIC_TEST_ONLY, nullptr) == 0;
+        for (const auto &pipeline : pipelines) {
+            pipeline->m_pending.needsModeset = !withoutModeset;
+        }
+        std::for_each(pipelines.begin(), pipelines.end(), std::mem_fn(&DrmPipeline::atomicTestSuccessful));
+        std::for_each(unusedObjects.begin(), unusedObjects.end(), std::mem_fn(&DrmObject::commitPending));
+        return Error::None;
+    }
+    case CommitMode::CommitModeset: {
         // The kernel fails commits with DRM_MODE_PAGE_FLIP_EVENT when a crtc is disabled in the commit
         // and already was disabled before, to work around some quirks in old userspace.
         // Instead of using DRM_MODE_PAGE_FLIP_EVENT | DRM_MODE_ATOMIC_NONBLOCK, do the modeset in a blocking
         // fashion without page flip events and directly call the pageFlipped method afterwards
-        flags = flags & (~DRM_MODE_PAGE_FLIP_EVENT);
-    } else {
-        flags |= DRM_MODE_ATOMIC_NONBLOCK;
-    }
-    if (drmModeAtomicCommit(pipelines[0]->gpu()->fd(), req, (flags & (~DRM_MODE_PAGE_FLIP_EVENT)) | DRM_MODE_ATOMIC_TEST_ONLY, nullptr) != 0) {
-        qCDebug(KWIN_DRM) << "Atomic test for" << mode << "failed!" << strerror(errno);
-        return failed();
-    }
-    if (mode != CommitMode::Test && drmModeAtomicCommit(pipelines[0]->gpu()->fd(), req, flags, nullptr) != 0) {
-        qCCritical(KWIN_DRM) << "Atomic commit failed! This should never happen!" << strerror(errno);
-        return failed();
-    }
-    for (const auto &pipeline : pipelines) {
-        pipeline->atomicCommitSuccessful(mode);
-    }
-    for (const auto &obj : unusedObjects) {
-        obj->commitPending();
-        if (mode != CommitMode::Test) {
-            obj->commit();
+        bool commit = drmModeAtomicCommit(gpu->fd(), req.get(), DRM_MODE_ATOMIC_ALLOW_MODESET, nullptr) == 0;
+        if (!commit) {
+            qCCritical(KWIN_DRM) << "Atomic modeset commit failed!" << strerror(errno);
+            failed();
+            return errnoToError();
         }
+        std::for_each(pipelines.begin(), pipelines.end(), std::mem_fn(&DrmPipeline::atomicModesetSuccessful));
+        for (const auto &obj : unusedObjects) {
+            obj->commitPending();
+            obj->commit();
+            if (auto crtc = dynamic_cast<DrmCrtc *>(obj)) {
+                crtc->flipBuffer();
+            } else if (auto plane = dynamic_cast<DrmPlane *>(obj)) {
+                plane->flipBuffer();
+            }
+        }
+        return Error::None;
     }
-    drmModeAtomicFree(req);
-    return true;
+    case CommitMode::Test: {
+        bool test = drmModeAtomicCommit(pipelines[0]->gpu()->fd(), req.get(), DRM_MODE_ATOMIC_TEST_ONLY, nullptr) == 0;
+        if (!test) {
+            qCDebug(KWIN_DRM) << "Atomic test failed!" << strerror(errno);
+            failed();
+            return errnoToError();
+        }
+        std::for_each(pipelines.begin(), pipelines.end(), std::mem_fn(&DrmPipeline::atomicTestSuccessful));
+        Q_ASSERT(unusedObjects.isEmpty());
+        return Error::None;
+    }
+    case CommitMode::Commit: {
+        bool commit = drmModeAtomicCommit(pipelines[0]->gpu()->fd(), req.get(), DRM_MODE_ATOMIC_NONBLOCK | DRM_MODE_PAGE_FLIP_EVENT, gpu) == 0;
+        if (!commit) {
+            qCCritical(KWIN_DRM) << "Atomic commit failed!" << strerror(errno);
+            failed();
+            return errnoToError();
+        }
+        std::for_each(pipelines.begin(), pipelines.end(), std::mem_fn(&DrmPipeline::atomicCommitSuccessful));
+        Q_ASSERT(unusedObjects.isEmpty());
+        return Error::None;
+    }
+    default:
+        Q_UNREACHABLE();
+    }
 }
 
-bool DrmPipeline::populateAtomicValues(drmModeAtomicReq *req, uint32_t &flags)
+void DrmPipeline::prepareAtomicPresentation()
 {
-    if (needsModeset()) {
-        prepareAtomicModeset();
-        flags |= DRM_MODE_ATOMIC_ALLOW_MODESET;
-    }
-    if (activePending()) {
-        flags |= DRM_MODE_PAGE_FLIP_EVENT;
-    }
-    if (m_pending.crtc) {
-        m_pending.crtc->setPending(DrmCrtc::PropertyIndex::VrrEnabled, m_pending.syncMode == RenderLoopPrivate::SyncMode::Adaptive);
-        m_pending.crtc->setPending(DrmCrtc::PropertyIndex::Gamma_LUT, m_pending.gamma ? m_pending.gamma->blobId() : 0);
-        const auto modeSize = m_pending.mode->size();
-        const auto fb = m_pending.layer->currentBuffer().get();
-        m_pending.crtc->primaryPlane()->set(QPoint(0, 0), fb ? fb->buffer()->size() : bufferSize(), QPoint(0, 0), modeSize);
-        m_pending.crtc->primaryPlane()->setBuffer(activePending() ? fb : nullptr);
+    m_pending.crtc->setPending(DrmCrtc::PropertyIndex::VrrEnabled, m_pending.syncMode == RenderLoopPrivate::SyncMode::Adaptive);
+    m_pending.crtc->setPending(DrmCrtc::PropertyIndex::Gamma_LUT, m_pending.gamma ? m_pending.gamma->blobId() : 0);
+    const auto modeSize = m_pending.mode->size();
+    const auto fb = m_pending.layer->currentBuffer().get();
+    m_pending.crtc->primaryPlane()->set(QPoint(0, 0), fb->buffer()->size(), QPoint(0, 0), modeSize);
+    m_pending.crtc->primaryPlane()->setBuffer(fb);
 
-        if (m_pending.crtc->cursorPlane()) {
-            const auto layer = cursorLayer();
-            bool active = activePending() && layer->isVisible();
-            m_pending.crtc->cursorPlane()->set(QPoint(0, 0), gpu()->cursorSize(), layer->position(), gpu()->cursorSize());
-            m_pending.crtc->cursorPlane()->setBuffer(active ? layer->currentBuffer().get() : nullptr);
-            m_pending.crtc->cursorPlane()->setPending(DrmPlane::PropertyIndex::CrtcId, active ? m_pending.crtc->id() : 0);
-        }
+    if (m_pending.crtc->cursorPlane()) {
+        const auto layer = cursorLayer();
+        m_pending.crtc->cursorPlane()->set(QPoint(0, 0), gpu()->cursorSize(), layer->position(), gpu()->cursorSize());
+        m_pending.crtc->cursorPlane()->setBuffer(layer->isVisible() ? layer->currentBuffer().get() : nullptr);
+        m_pending.crtc->cursorPlane()->setPending(DrmPlane::PropertyIndex::CrtcId, layer->isVisible() ? m_pending.crtc->id() : 0);
     }
-    if (!m_connector->atomicPopulate(req)) {
-        return false;
-    }
+}
+
+void DrmPipeline::prepareAtomicDisable()
+{
+    m_connector->disable();
     if (m_pending.crtc) {
-        if (!m_pending.crtc->atomicPopulate(req)) {
-            return false;
-        }
-        if (!m_pending.crtc->primaryPlane()->atomicPopulate(req)) {
-            return false;
-        }
-        if (m_pending.crtc->cursorPlane() && !m_pending.crtc->cursorPlane()->atomicPopulate(req)) {
-            return false;
+        m_pending.crtc->disable();
+        m_pending.crtc->primaryPlane()->disable();
+        if (auto cursor = m_pending.crtc->cursorPlane()) {
+            cursor->disable();
         }
     }
-    return true;
 }
 
 void DrmPipeline::prepareAtomicModeset()
 {
-    if (!m_pending.crtc) {
-        m_connector->setPending(DrmConnector::PropertyIndex::CrtcId, 0);
-        return;
-    }
-
-    m_connector->setPending(DrmConnector::PropertyIndex::CrtcId, activePending() ? m_pending.crtc->id() : 0);
+    m_connector->setPending(DrmConnector::PropertyIndex::CrtcId, m_pending.crtc->id());
     if (const auto &prop = m_connector->getProp(DrmConnector::PropertyIndex::Broadcast_RGB)) {
         prop->setEnum(m_pending.rgbRange);
     }
@@ -239,14 +257,33 @@ void DrmPipeline::prepareAtomicModeset()
         bpc->setPending(std::min(bpc->maxValue(), preferred));
     }
 
-    m_pending.crtc->setPending(DrmCrtc::PropertyIndex::Active, activePending());
-    m_pending.crtc->setPending(DrmCrtc::PropertyIndex::ModeId, activePending() ? m_pending.mode->blobId() : 0);
+    m_pending.crtc->setPending(DrmCrtc::PropertyIndex::Active, 1);
+    m_pending.crtc->setPending(DrmCrtc::PropertyIndex::ModeId, m_pending.mode->blobId());
 
-    m_pending.crtc->primaryPlane()->setPending(DrmPlane::PropertyIndex::CrtcId, activePending() ? m_pending.crtc->id() : 0);
+    m_pending.crtc->primaryPlane()->setPending(DrmPlane::PropertyIndex::CrtcId, m_pending.crtc->id());
     m_pending.crtc->primaryPlane()->setTransformation(m_pending.bufferOrientation);
     if (m_pending.crtc->cursorPlane()) {
         m_pending.crtc->cursorPlane()->setTransformation(DrmPlane::Transformation::Rotate0);
     }
+}
+
+bool DrmPipeline::populateAtomicValues(drmModeAtomicReq *req)
+{
+    if (!m_connector->atomicPopulate(req)) {
+        return false;
+    }
+    if (m_pending.crtc) {
+        if (!m_pending.crtc->atomicPopulate(req)) {
+            return false;
+        }
+        if (!m_pending.crtc->primaryPlane()->atomicPopulate(req)) {
+            return false;
+        }
+        if (m_pending.crtc->cursorPlane() && !m_pending.crtc->cursorPlane()->atomicPopulate(req)) {
+            return false;
+        }
+    }
+    return true;
 }
 
 uint32_t DrmPipeline::calculateUnderscan()
@@ -262,6 +299,22 @@ uint32_t DrmPipeline::calculateUnderscan()
     return hborder;
 }
 
+DrmPipeline::Error DrmPipeline::errnoToError()
+{
+    switch (errno) {
+    case EINVAL:
+        return Error::InvalidArguments;
+    case EBUSY:
+        return Error::FramePending;
+    case ENOMEM:
+        return Error::OutofMemory;
+    case EACCES:
+        return Error::NoPermission;
+    default:
+        return Error::Unknown;
+    }
+}
+
 void DrmPipeline::atomicCommitFailed()
 {
     m_connector->rollbackPending();
@@ -274,7 +327,7 @@ void DrmPipeline::atomicCommitFailed()
     }
 }
 
-void DrmPipeline::atomicCommitSuccessful(CommitMode mode)
+void DrmPipeline::atomicTestSuccessful()
 {
     m_connector->commitPending();
     if (m_pending.crtc) {
@@ -284,24 +337,34 @@ void DrmPipeline::atomicCommitSuccessful(CommitMode mode)
             m_pending.crtc->cursorPlane()->commitPending();
         }
     }
-    if (mode != CommitMode::Test) {
-        if (activePending()) {
-            m_pageflipPending = true;
+}
+
+void DrmPipeline::atomicCommitSuccessful()
+{
+    atomicTestSuccessful();
+    m_pending.needsModeset = false;
+    if (activePending()) {
+        m_pageflipPending = true;
+    }
+    m_connector->commit();
+    if (m_pending.crtc) {
+        m_pending.crtc->commit();
+        m_pending.crtc->primaryPlane()->setNext(m_pending.layer->currentBuffer());
+        m_pending.crtc->primaryPlane()->commit();
+        if (m_pending.crtc->cursorPlane()) {
+            m_pending.crtc->cursorPlane()->setNext(cursorLayer()->currentBuffer());
+            m_pending.crtc->cursorPlane()->commit();
         }
-        m_connector->commit();
-        if (m_pending.crtc) {
-            m_pending.crtc->commit();
-            m_pending.crtc->primaryPlane()->setNext(m_pending.layer->currentBuffer());
-            m_pending.crtc->primaryPlane()->commit();
-            if (m_pending.crtc->cursorPlane()) {
-                m_pending.crtc->cursorPlane()->setNext(cursorLayer()->currentBuffer());
-                m_pending.crtc->cursorPlane()->commit();
-            }
-        }
-        m_current = m_pending;
-        if (mode == CommitMode::CommitModeset && activePending()) {
-            pageFlipped(std::chrono::steady_clock::now().time_since_epoch());
-        }
+    }
+    m_current = m_pending;
+}
+
+void DrmPipeline::atomicModesetSuccessful()
+{
+    atomicCommitSuccessful();
+    m_pending.needsModeset = false;
+    if (activePending()) {
+        pageFlipped(std::chrono::steady_clock::now().time_since_epoch());
     }
 }
 
@@ -311,7 +374,7 @@ bool DrmPipeline::setCursor(const QPoint &hotspot)
     m_pending.cursorHotspot = hotspot;
     // explicitly check for the cursor plane and not for AMS, as we might not always have one
     if (m_pending.crtc->cursorPlane()) {
-        result = commitPipelines({this}, CommitMode::Test);
+        result = commitPipelines({this}, CommitMode::Test) == Error::None;
         if (result && m_output) {
             m_output->renderLoop()->scheduleRepaint();
         }
@@ -331,7 +394,7 @@ bool DrmPipeline::moveCursor()
     bool result;
     // explicitly check for the cursor plane and not for AMS, as we might not always have one
     if (m_pending.crtc->cursorPlane()) {
-        result = commitPipelines({this}, CommitMode::Test);
+        result = commitPipelines({this}, CommitMode::Test) == Error::None;
     } else {
         result = moveCursorLegacy();
     }
@@ -348,9 +411,6 @@ bool DrmPipeline::moveCursor()
 
 void DrmPipeline::applyPendingChanges()
 {
-    if (!m_pending.crtc) {
-        m_pending.active = false;
-    }
     m_next = m_pending;
 }
 
@@ -429,13 +489,7 @@ bool DrmPipeline::pruneModifier()
 
 bool DrmPipeline::needsModeset() const
 {
-    return m_pending.crtc != m_current.crtc
-        || m_pending.active != m_current.active
-        || m_pending.mode != m_current.mode
-        || m_pending.rgbRange != m_current.rgbRange
-        || m_pending.bufferOrientation != m_current.bufferOrientation
-        || m_connector->linkStatus() == DrmConnector::LinkStatus::Bad
-        || m_modesetPresentPending;
+    return m_pending.needsModeset;
 }
 
 bool DrmPipeline::activePending() const
@@ -468,7 +522,7 @@ DrmCrtc *DrmPipeline::currentCrtc() const
     return m_current.crtc;
 }
 
-DrmGammaRamp::DrmGammaRamp(DrmCrtc *crtc, const QSharedPointer<ColorTransformation> &transformation)
+DrmGammaRamp::DrmGammaRamp(DrmCrtc *crtc, const std::shared_ptr<ColorTransformation> &transformation)
     : m_gpu(crtc->gpu())
     , m_lut(transformation, crtc->gammaRampSize())
 {
@@ -520,42 +574,17 @@ void DrmPipeline::printFlags(uint32_t flags)
     }
 }
 
-void DrmPipeline::printProps(DrmObject *object, PrintMode mode)
-{
-    auto list = object->properties();
-    bool any = mode == PrintMode::All || std::any_of(list.constBegin(), list.constEnd(), [](const auto &prop) {
-                   return prop && !prop->isImmutable() && prop->needsCommit();
-               });
-    if (!any) {
-        return;
-    }
-    qCDebug(KWIN_DRM) << object->typeName() << object->id();
-    for (const auto &prop : list) {
-        if (prop) {
-            uint64_t current = prop->name().startsWith("SRC_") ? prop->current() >> 16 : prop->current();
-            if (prop->isImmutable() || !prop->needsCommit()) {
-                if (mode == PrintMode::All) {
-                    qCDebug(KWIN_DRM).nospace() << "\t" << prop->name() << ": " << current;
-                }
-            } else {
-                uint64_t pending = prop->name().startsWith("SRC_") ? prop->pending() >> 16 : prop->pending();
-                qCDebug(KWIN_DRM).nospace() << "\t" << prop->name() << ": " << current << "->" << pending;
-            }
-        }
-    }
-}
-
 void DrmPipeline::printDebugInfo() const
 {
     qCDebug(KWIN_DRM) << "Drm objects:";
-    printProps(m_connector, PrintMode::All);
+    m_connector->printProps(DrmObject::PrintMode::All);
     if (m_pending.crtc) {
-        printProps(m_pending.crtc, PrintMode::All);
+        m_pending.crtc->printProps(DrmObject::PrintMode::All);
         if (m_pending.crtc->primaryPlane()) {
-            printProps(m_pending.crtc->primaryPlane(), PrintMode::All);
+            m_pending.crtc->primaryPlane()->printProps(DrmObject::PrintMode::All);
         }
         if (m_pending.crtc->cursorPlane()) {
-            printProps(m_pending.crtc->cursorPlane(), PrintMode::All);
+            m_pending.crtc->cursorPlane()->printProps(DrmObject::PrintMode::All);
         }
     }
 }
@@ -565,7 +594,7 @@ DrmCrtc *DrmPipeline::crtc() const
     return m_pending.crtc;
 }
 
-QSharedPointer<DrmConnectorMode> DrmPipeline::mode() const
+std::shared_ptr<DrmConnectorMode> DrmPipeline::mode() const
 {
     return m_pending.mode;
 }
@@ -618,7 +647,7 @@ Output::RgbRange DrmPipeline::rgbRange() const
 void DrmPipeline::setCrtc(DrmCrtc *crtc)
 {
     if (crtc && m_pending.crtc && crtc->gammaRampSize() != m_pending.crtc->gammaRampSize() && m_pending.colorTransformation) {
-        m_pending.gamma = QSharedPointer<DrmGammaRamp>::create(crtc, m_pending.colorTransformation);
+        m_pending.gamma = std::make_shared<DrmGammaRamp>(crtc, m_pending.colorTransformation);
     }
     m_pending.crtc = crtc;
     if (crtc) {
@@ -628,7 +657,7 @@ void DrmPipeline::setCrtc(DrmCrtc *crtc)
     }
 }
 
-void DrmPipeline::setMode(const QSharedPointer<DrmConnectorMode> &mode)
+void DrmPipeline::setMode(const std::shared_ptr<DrmConnectorMode> &mode)
 {
     m_pending.mode = mode;
 }
@@ -643,7 +672,7 @@ void DrmPipeline::setEnable(bool enable)
     m_pending.enabled = enable;
 }
 
-void DrmPipeline::setLayers(const QSharedPointer<DrmPipelineLayer> &primaryLayer, const QSharedPointer<DrmOverlayLayer> &cursorLayer)
+void DrmPipeline::setLayers(const std::shared_ptr<DrmPipelineLayer> &primaryLayer, const std::shared_ptr<DrmOverlayLayer> &cursorLayer)
 {
     m_pending.layer = primaryLayer;
     m_pending.cursorLayer = cursorLayer;
@@ -674,9 +703,9 @@ void DrmPipeline::setRgbRange(Output::RgbRange range)
     m_pending.rgbRange = range;
 }
 
-void DrmPipeline::setColorTransformation(const QSharedPointer<ColorTransformation> &transformation)
+void DrmPipeline::setColorTransformation(const std::shared_ptr<ColorTransformation> &transformation)
 {
     m_pending.colorTransformation = transformation;
-    m_pending.gamma = QSharedPointer<DrmGammaRamp>::create(m_pending.crtc, transformation);
+    m_pending.gamma = std::make_shared<DrmGammaRamp>(m_pending.crtc, transformation);
 }
 }

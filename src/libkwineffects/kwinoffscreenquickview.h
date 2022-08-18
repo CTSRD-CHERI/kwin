@@ -27,6 +27,7 @@ class QKeyEvent;
 
 class QQmlContext;
 class QQuickItem;
+class QQuickWindow;
 
 namespace KWin
 {
@@ -109,6 +110,7 @@ public:
 
     /** The invisble root item of the window*/
     QQuickItem *contentItem() const;
+    QQuickWindow *window() const;
 
     /**
      * @brief Marks the window as visible/invisible
@@ -165,7 +167,7 @@ private:
     void handleSceneChanged();
 
     class Private;
-    QScopedPointer<Private> d;
+    std::unique_ptr<Private> d;
 };
 
 /**
@@ -191,7 +193,7 @@ public:
 
 private:
     class Private;
-    QScopedPointer<Private> d;
+    std::unique_ptr<Private> d;
 };
 
 }

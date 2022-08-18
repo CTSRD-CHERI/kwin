@@ -27,7 +27,6 @@
 #include "group.h"
 #include "rules.h"
 #include "screenedge.h"
-#include "screens.h"
 #include "unmanaged.h"
 #include "useractions.h"
 #include "utils/xcbutils.h"
@@ -207,7 +206,7 @@ bool Workspace::workspaceEvent(xcb_generic_event_t *e)
             // e->xmaprequest.window is different from e->xany.window
             // TODO this shouldn't be necessary now
             window->windowEvent(e);
-            FocusChain::self()->update(window, FocusChain::Update);
+            m_focusChain->update(window, FocusChain::Update);
         } else if (true /*|| e->xmaprequest.parent != root */) {
             // NOTICE don't check for the parent being the root window, this breaks when some app unmaps
             // a window, changes something and immediately maps it back, without giving KWin
@@ -441,9 +440,15 @@ bool X11Window::windowEvent(xcb_generic_event_t *e)
     }
     case XCB_MOTION_NOTIFY: {
         const auto *event = reinterpret_cast<xcb_motion_notify_event_t *>(e);
+
+        int x = Xcb::fromXNative(event->event_x);
+        int y = Xcb::fromXNative(event->event_y);
+        int root_x = Xcb::fromXNative(event->root_x);
+        int root_y = Xcb::fromXNative(event->root_y);
+
         motionNotifyEvent(event->event, event->state,
-                          event->event_x, event->event_y, event->root_x, event->root_y);
-        workspace()->updateFocusMousePosition(QPoint(event->root_x, event->root_y));
+                          x, y, root_x, root_y);
+        workspace()->updateFocusMousePosition(QPointF(root_x, root_y));
         break;
     }
     case XCB_ENTER_NOTIFY: {
@@ -454,15 +459,25 @@ bool X11Window::windowEvent(xcb_generic_event_t *e)
         // starts or only ends there, Enter/LeaveNotify are generated.
         // Fake a MotionEvent in such cases to make handle of mouse
         // events simpler (Qt does that too).
+        int x = Xcb::fromXNative(event->event_x);
+        int y = Xcb::fromXNative(event->event_y);
+        int root_x = Xcb::fromXNative(event->root_x);
+        int root_y = Xcb::fromXNative(event->root_y);
+
         motionNotifyEvent(event->event, event->state,
-                          event->event_x, event->event_y, event->root_x, event->root_y);
-        workspace()->updateFocusMousePosition(QPoint(event->root_x, event->root_y));
+                          x, y, root_x, root_y);
+        workspace()->updateFocusMousePosition(QPointF(root_x, root_y));
         break;
     }
     case XCB_LEAVE_NOTIFY: {
         auto *event = reinterpret_cast<xcb_leave_notify_event_t *>(e);
+
+        int x = Xcb::fromXNative(event->event_x);
+        int y = Xcb::fromXNative(event->event_y);
+        int root_x = Xcb::fromXNative(event->root_x);
+        int root_y = Xcb::fromXNative(event->root_y);
         motionNotifyEvent(event->event, event->state,
-                          event->event_x, event->event_y, event->root_x, event->root_y);
+                          x, y, root_x, root_y);
         leaveNotifyEvent(event);
         // not here, it'd break following enter notify handling
         // workspace()->updateFocusMousePosition( QPoint( e->xcrossing.x_root, e->xcrossing.y_root ));
@@ -625,9 +640,9 @@ void X11Window::configureRequestEvent(xcb_configure_request_event_t *e)
     }
 
     if (e->value_mask & (XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y | XCB_CONFIG_WINDOW_HEIGHT | XCB_CONFIG_WINDOW_WIDTH)) {
-        configureRequest(e->value_mask, e->x, e->y, e->width, e->height, 0, false);
+        configureRequest(e->value_mask, Xcb::fromXNative(e->x),
+                         Xcb::fromXNative(e->y), Xcb::fromXNative(e->width), Xcb::fromXNative(e->height), 0, false);
     }
-
     if (e->value_mask & XCB_CONFIG_WINDOW_STACK_MODE) {
         restackWindow(e->sibling, e->stack_mode, NET::FromApplication, userTime(), false);
     }
@@ -810,7 +825,7 @@ void X11Window::updateMouseGrab()
     xcb_ungrab_button(kwinApp()->x11Connection(), XCB_BUTTON_INDEX_ANY, m_wrapper, XCB_MOD_MASK_ANY);
 
 #if KWIN_BUILD_TABBOX
-    if (TabBox::TabBox::self()->forcedGlobalMouseGrab()) { // see TabBox::establishTabBoxGrab()
+    if (workspace()->tabbox()->forcedGlobalMouseGrab()) { // see TabBox::establishTabBoxGrab()
         m_wrapper.grabButton(XCB_GRAB_MODE_SYNC, XCB_GRAB_MODE_ASYNC);
         return;
     }
@@ -1076,7 +1091,7 @@ bool X11Window::motionNotifyEvent(xcb_window_t w, int state, int x, int y, int x
 
     handleInteractiveMoveResize(QPoint(x, y), QPoint(x_root, y_root));
     if (isInteractiveMove()) {
-        ScreenEdges::self()->check(QPoint(x_root, y_root), QDateTime::fromMSecsSinceEpoch(xTime(), Qt::UTC));
+        workspace()->screenEdges()->check(QPoint(x_root, y_root), QDateTime::fromMSecsSinceEpoch(xTime(), Qt::UTC));
     }
 
     return true;
@@ -1161,14 +1176,14 @@ void X11Window::focusOutEvent(xcb_focus_out_event_t *e)
 }
 
 // performs _NET_WM_MOVERESIZE
-void X11Window::NETMoveResize(int x_root, int y_root, NET::Direction direction)
+void X11Window::NETMoveResize(qreal x_root, qreal y_root, NET::Direction direction)
 {
     if (direction == NET::Move) {
         // move cursor to the provided position to prevent the window jumping there on first movement
         // the expectation is that the cursor is already at the provided position,
         // thus it's more a safety measurement
-        Cursors::self()->mouse()->setPos(QPoint(x_root, y_root));
-        performMouseCommand(Options::MouseMove, QPoint(x_root, y_root));
+        Cursors::self()->mouse()->setPos(QPointF(x_root, y_root));
+        performMouseCommand(Options::MouseMove, QPointF(x_root, y_root));
     } else if (isInteractiveMoveResize() && direction == NET::MoveResizeCancel) {
         finishInteractiveMoveResize(true);
         setInteractiveMoveResizePointerButtonDown(false);
@@ -1190,7 +1205,7 @@ void X11Window::NETMoveResize(int x_root, int y_root, NET::Direction direction)
             finishInteractiveMoveResize(false);
         }
         setInteractiveMoveResizePointerButtonDown(true);
-        setInteractiveMoveOffset(QPoint(x_root - x(), y_root - y())); // map from global
+        setInteractiveMoveOffset(QPointF(x_root - x(), y_root - y())); // map from global
         setInvertedInteractiveMoveOffset(rect().bottomRight() - interactiveMoveOffset());
         setUnrestrictedInteractiveMoveResize(false);
         setInteractiveMoveResizeGravity(convert[direction]);
@@ -1295,9 +1310,9 @@ void Unmanaged::configureNotifyEvent(xcb_configure_notify_event_t *e)
     if (effects) {
         static_cast<EffectsHandlerImpl *>(effects)->checkInputWindowStacking(); // keep them on top
     }
-    QRect newgeom(e->x, e->y, e->width, e->height);
+    QRectF newgeom(Xcb::fromXNative(e->x), Xcb::fromXNative(e->y), Xcb::fromXNative(e->width), Xcb::fromXNative(e->height));
     if (newgeom != m_frameGeometry) {
-        QRect old = m_frameGeometry;
+        QRectF old = m_frameGeometry;
         m_clientGeometry = newgeom;
         m_frameGeometry = newgeom;
         m_bufferGeometry = newgeom;

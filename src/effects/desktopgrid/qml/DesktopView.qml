@@ -12,26 +12,54 @@ import org.kde.plasma.core 2.0 as PlasmaCore
 import org.kde.plasma.components 3.0 as PC3
 import org.kde.kwin.private.desktopgrid 1.0
 
-
-DropArea {
+FocusScope {
     id: desktopView
 
     required property QtObject clientModel
     required property QtObject desktop
     readonly property bool dragActive: heap.dragActive || dragHandler.active || xAnim.running || yAnim.running
     property real panelOpacity: 1
+    focus: true
 
-    onEntered: {
-        drag.accepted = true;
+    function selectLastItem(direction) {
+        heap.selectLastItem(direction);
     }
-    onDropped: {
-        if (drag.source instanceof DropArea) {
-            if (desktopView === drag.source) {
+
+    DropArea {
+        anchors.fill: parent
+        onEntered: {
+            drag.accepted = true;
+        }
+        onDropped: drop => {
+            drop.accepted = true;
+            if (drag.source instanceof DesktopView) {
+                // dragging a desktop as a whole
+                if (drag.source === desktopView) {
+                    drop.action = Qt.IgnoreAction;
+                    return;
+                }
+                effect.swapDesktops(drag.source.desktop.x11DesktopNumber, desktop.x11DesktopNumber);
+            } else {
+                // dragging a KWin::Window
+                if (drag.source.desktop === desktopView.desktop.x11DesktopNumber) {
+                    drop.action = Qt.IgnoreAction;
+                    return;
+                }
+                drag.source.desktop = desktopView.desktop.x11DesktopNumber;
+            }
+        }
+    }
+    Connections {
+        target: effect
+        function onItemDroppedOutOfScreen(globalPos, item, screen) {
+            if (screen !== targetScreen) {
                 return;
             }
-            effect.swapDesktops(drag.source.desktop.x11DesktopNumber, desktop.x11DesktopNumber);
-        } else {
-            drag.source.desktop = desktopView.desktop.x11DesktopNumber;
+            const pos = screen.mapFromGlobal(globalPos);
+            if (!desktopView.contains(desktopView.mapFromItem(null, pos.x, pos.y))) {
+                return;
+            }
+            item.client.desktop = desktopView.desktop.x11DesktopNumber;
         }
     }
     Repeater {
@@ -51,13 +79,6 @@ DropArea {
             height: model.client.height
             z: model.client.stackingOrder
             opacity: model.client.dock ? desktopView.panelOpacity : 1
-            Behavior on opacity {
-                enabled: !container.effect.gestureInProgress
-                OpacityAnimator {
-                    duration: container.effect.animationDuration
-                    easing.type: Easing.InOutCubic
-                }
-            }
         }
     }
 
@@ -76,11 +97,13 @@ DropArea {
 
     WindowHeap {
         id: heap
-        function resetPosition () {
+        function resetPosition() {
             x = 0;
             y = 0;
         }
         Drag.active: dragHandler.active
+        Drag.proposedAction: Qt.MoveAction
+        Drag.supportedActions: Qt.MoveAction
         Drag.source: desktopView
         Drag.hotSpot: Qt.point(width * 0.5, height * 0.5)
         width: parent.width
@@ -91,26 +114,39 @@ DropArea {
         absolutePositioning: false
         animationEnabled: container.animationEnabled
         organized: container.organized
-        layout: effect.layout
-        supportsCloseWindows: false
-        supportsDragUpGesture: false
-        showCaptions: false
+        layout.mode: effect.layout
         model: KWinComponents.ClientFilterModel {
             activity: KWinComponents.Workspace.currentActivity
             desktop: desktopView.desktop
             screenName: targetScreen.name
             clientModel: desktopView.clientModel
             windowType: ~KWinComponents.ClientFilterModel.Dock &
-                    ~KWinComponents.ClientFilterModel.Desktop &
-                    ~KWinComponents.ClientFilterModel.Notification;
+                        ~KWinComponents.ClientFilterModel.Desktop &
+                        ~KWinComponents.ClientFilterModel.Notification
+        }
+        delegate: WindowHeapDelegate {
+            windowHeap: heap
+            closeButtonVisible: false
+            windowTitleVisible: false
         }
         onActivated: effect.deactivate(effect.animationDuration);
+        onWindowClicked: {
+            if (eventPoint.event.button === Qt.MiddleButton) {
+                window.closeWindow();
+            } else if (eventPoint.event.button === Qt.RightButton) {
+                if (window.desktop > -1) {
+                    window.desktop = -1;
+                } else {
+                    window.desktop = desktopView.desktop.x11DesktopNumber;
+                }
+            }
+        }
         Behavior on x {
             enabled: !dragHandler.active
             XAnimator {
                 id: xAnim
                 duration: container.effect.animationDuration
-                easing.type: Easing.InOutCubic
+                easing.type: Easing.OutCubic
             }
         }
         Behavior on y {
@@ -118,7 +154,7 @@ DropArea {
             YAnimator {
                 id: yAnim
                 duration: container.effect.animationDuration
-                easing.type: Easing.InOutCubic
+                easing.type: Easing.OutCubic
             }
         }
     }

@@ -8,6 +8,7 @@
 #include "tabletmodemanager.h"
 
 #include "backends/libinput/device.h"
+#include "backends/fakeinput/fakeinputdevice.h"
 #include "input.h"
 #include "input_event.h"
 #include "input_event_spy.h"
@@ -25,10 +26,12 @@
 namespace KWin
 {
 
-KWIN_SINGLETON_FACTORY_VARIABLE(TabletModeManager, s_manager)
-
 static bool shouldIgnoreDevice(InputDevice *device)
 {
+    if (qobject_cast<FakeInputDevice*>(device)) {
+        return true;
+    }
+
     auto libinput_device = qobject_cast<LibInput::Device *>(device);
     if (!libinput_device) {
         return false;
@@ -111,8 +114,7 @@ private:
     TabletModeManager *const m_parent;
 };
 
-TabletModeManager::TabletModeManager(QObject *parent)
-    : QObject(parent)
+TabletModeManager::TabletModeManager()
 {
     if (waylandServer()) {
         if (input()->hasTabletModeSwitch()) {
@@ -148,12 +150,12 @@ void KWin::TabletModeManager::refreshSettings()
         if (!m_detecting) {
             Q_EMIT tabletModeAvailableChanged(true);
         }
-        Q_EMIT tabletModeChanged(true);
     } else if (tabletModeConfig == QStringLiteral("off")) {
         m_configuredMode = ConfiguredMode::Off;
-        Q_EMIT tabletModeChanged(false);
     } else {
         m_configuredMode = ConfiguredMode::Auto;
+    }
+    if (effectiveTabletMode() != oldEffectiveTabletMode) {
         Q_EMIT tabletModeChanged(effectiveTabletMode());
     }
 }

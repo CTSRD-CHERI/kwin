@@ -12,7 +12,9 @@
 
 #include <config-kwin.h>
 
+#include "backends/x11/standalone/x11_standalone_platform.h"
 #include "platform.h"
+#include "session.h"
 #include "sm.h"
 #include "tabletmodemanager.h"
 #include "utils/xcbutils.h"
@@ -21,7 +23,6 @@
 #include <KConfigGroup>
 #include <KCrash>
 #include <KLocalizedString>
-#include <KPluginMetaData>
 #include <KSelectionOwner>
 
 #include <QComboBox>
@@ -108,8 +109,8 @@ class KWinSelectionOwner : public KSelectionOwner
 {
     Q_OBJECT
 public:
-    explicit KWinSelectionOwner(int screen)
-        : KSelectionOwner(make_selection_atom(screen), screen)
+    explicit KWinSelectionOwner()
+        : KSelectionOwner(make_selection_atom())
     {
     }
 
@@ -140,28 +141,24 @@ private:
         KSelectionOwner::getAtoms();
         if (xa_version == XCB_ATOM_NONE) {
             const QByteArray name(QByteArrayLiteral("VERSION"));
-            ScopedCPointer<xcb_intern_atom_reply_t> atom(xcb_intern_atom_reply(
+            UniqueCPtr<xcb_intern_atom_reply_t> atom(xcb_intern_atom_reply(
                 kwinApp()->x11Connection(),
                 xcb_intern_atom_unchecked(kwinApp()->x11Connection(), false, name.length(), name.constData()),
                 nullptr));
-            if (!atom.isNull()) {
+            if (atom) {
                 xa_version = atom->atom;
             }
         }
     }
 
-    xcb_atom_t make_selection_atom(int screen_P)
+    xcb_atom_t make_selection_atom()
     {
-        if (screen_P < 0) {
-            screen_P = QX11Info::appScreen();
-        }
-        QByteArray screen(QByteArrayLiteral("WM_S"));
-        screen.append(QByteArray::number(screen_P));
-        ScopedCPointer<xcb_intern_atom_reply_t> atom(xcb_intern_atom_reply(
+        QByteArray screen(QByteArrayLiteral("WM_S0"));
+        UniqueCPtr<xcb_intern_atom_reply_t> atom(xcb_intern_atom_reply(
             kwinApp()->x11Connection(),
             xcb_intern_atom_unchecked(kwinApp()->x11Connection(), false, screen.length(), screen.constData()),
             nullptr));
-        if (atom.isNull()) {
+        if (!atom) {
             return XCB_ATOM_NONE;
         }
         return atom->atom;
@@ -186,9 +183,12 @@ ApplicationX11::ApplicationX11(int &argc, char **argv)
 ApplicationX11::~ApplicationX11()
 {
     setTerminating();
+    destroyPlugins();
     destroyCompositor();
+    destroyColorManager();
     destroyWorkspace();
-    if (!owner.isNull() && owner->ownerWindow() != XCB_WINDOW_NONE) { // If there was no --replace (no new WM)
+    // If there was no --replace (no new WM)
+    if (owner != nullptr && owner->ownerWindow() != XCB_WINDOW_NONE) {
         Xcb::setInputFocus(XCB_INPUT_FOCUS_POINTER_ROOT);
     }
 }
@@ -201,7 +201,9 @@ void ApplicationX11::setReplace(bool replace)
 void ApplicationX11::lostSelection()
 {
     sendPostedEvents();
+    destroyPlugins();
     destroyCompositor();
+    destroyColorManager();
     destroyWorkspace();
     // Remove windowmanager privileges
     Xcb::selectInput(kwinApp()->x11RootWindow(), XCB_EVENT_MASK_PROPERTY_CHANGE);
@@ -209,34 +211,17 @@ void ApplicationX11::lostSelection()
     quit();
 }
 
-static xcb_screen_t *findXcbScreen(xcb_connection_t *connection, int screen)
-{
-    for (xcb_screen_iterator_t it = xcb_setup_roots_iterator(xcb_get_setup(connection));
-         it.rem;
-         --screen, xcb_screen_next(&it)) {
-        if (screen == 0) {
-            return it.data;
-        }
-    }
-    return nullptr;
-}
-
 void ApplicationX11::performStartup()
 {
     crashChecking();
 
-    if (Application::x11ScreenNumber() == -1) {
-        Application::setX11ScreenNumber(QX11Info::appScreen());
-    }
-    setX11DefaultScreen(findXcbScreen(x11Connection(), x11ScreenNumber()));
-
-    owner.reset(new KWinSelectionOwner(Application::x11ScreenNumber()));
-    connect(owner.data(), &KSelectionOwner::failedToClaimOwnership, [] {
+    owner.reset(new KWinSelectionOwner());
+    connect(owner.get(), &KSelectionOwner::failedToClaimOwnership, [] {
         fputs(i18n("kwin: unable to claim manager selection, another wm running? (try using --replace)\n").toLocal8Bit().constData(), stderr);
         ::exit(1);
     });
-    connect(owner.data(), &KSelectionOwner::lostOwnership, this, &ApplicationX11::lostSelection);
-    connect(owner.data(), &KSelectionOwner::claimedOwnership, this, [this] {
+    connect(owner.get(), &KSelectionOwner::lostOwnership, this, &ApplicationX11::lostSelection);
+    connect(owner.get(), &KSelectionOwner::claimedOwnership, this, [this] {
         installNativeX11EventFilter();
         // first load options - done internally by a different thread
         createOptions();
@@ -245,16 +230,14 @@ void ApplicationX11::performStartup()
             std::exit(1);
         }
 
-        createColorManager();
-
         // Check  whether another windowmanager is running
         const uint32_t maskValues[] = {XCB_EVENT_MASK_SUBSTRUCTURE_REDIRECT};
-        ScopedCPointer<xcb_generic_error_t> redirectCheck(xcb_request_check(kwinApp()->x11Connection(),
-                                                                            xcb_change_window_attributes_checked(kwinApp()->x11Connection(),
-                                                                                                                 kwinApp()->x11RootWindow(),
-                                                                                                                 XCB_CW_EVENT_MASK,
-                                                                                                                 maskValues)));
-        if (!redirectCheck.isNull()) {
+        UniqueCPtr<xcb_generic_error_t> redirectCheck(xcb_request_check(kwinApp()->x11Connection(),
+                                                                        xcb_change_window_attributes_checked(kwinApp()->x11Connection(),
+                                                                                                             kwinApp()->x11RootWindow(),
+                                                                                                             XCB_CW_EVENT_MASK,
+                                                                                                             maskValues)));
+        if (redirectCheck) {
             fputs(i18n("kwin: another window manager is running (try using --replace)\n").toLocal8Bit().constData(), stderr);
             if (!wasCrash()) { // if this is a crash-restart, DrKonqi may have stopped the process w/o killing the connection
                 ::exit(1);
@@ -263,6 +246,7 @@ void ApplicationX11::performStartup()
 
         createInput();
         createWorkspace();
+        createColorManager();
         createPlugins();
 
         Xcb::sync(); // Trigger possible errors, there's still a chance to abort
@@ -276,7 +260,7 @@ void ApplicationX11::performStartup()
 
     createAtoms();
 
-    TabletModeManager::create(this);
+    createTabletModeManager();
 }
 
 bool ApplicationX11::notify(QObject *o, QEvent *e)
@@ -355,64 +339,6 @@ int main(int argc, char *argv[])
     KWin::Application::setupMalloc();
     KWin::Application::setupLocalizedString();
 
-    int primaryScreen = 0;
-    xcb_connection_t *c = xcb_connect(nullptr, &primaryScreen);
-    if (!c || xcb_connection_has_error(c)) {
-        fprintf(stderr, "%s: FATAL ERROR while trying to open display %s\n",
-                argv[0], qgetenv("DISPLAY").constData());
-        exit(1);
-    }
-
-    const int number_of_screens = xcb_setup_roots_length(xcb_get_setup(c));
-    xcb_disconnect(c);
-    c = nullptr;
-
-    // multi head
-    auto isMultiHead = []() -> bool {
-        QByteArray multiHead = qgetenv("KDE_MULTIHEAD");
-        if (!multiHead.isEmpty()) {
-            return (multiHead.toLower() == "true");
-        }
-        return true;
-    };
-    if (number_of_screens != 1 && isMultiHead()) {
-        KWin::Application::setX11MultiHead(true);
-        KWin::Application::setX11ScreenNumber(primaryScreen);
-        int pos; // Temporarily needed to reconstruct DISPLAY var if multi-head
-        QByteArray display_name = qgetenv("DISPLAY");
-
-        if ((pos = display_name.lastIndexOf('.')) != -1) {
-            display_name.remove(pos, 10); // 10 is enough to be sure we removed ".s"
-        }
-
-        for (int i = 0; i < number_of_screens; i++) {
-            // If execution doesn't pass by here, then kwin
-            // acts exactly as previously
-            if (i != KWin::Application::x11ScreenNumber() && fork() == 0) {
-                KWin::Application::setX11ScreenNumber(i);
-                QByteArray dBusSuffix = qgetenv("KWIN_DBUS_SERVICE_SUFFIX");
-                if (!dBusSuffix.isNull()) {
-                    dBusSuffix.append(".");
-                }
-                dBusSuffix.append(QByteArrayLiteral("head-")).append(QByteArray::number(i));
-                qputenv("KWIN_DBUS_SERVICE_SUFFIX", dBusSuffix);
-                // Break here because we are the child process, we don't
-                // want to fork() anymore
-                break;
-            }
-        }
-        // In the next statement, display_name shouldn't contain a screen
-        // number. If it had it, it was removed at the "pos" check
-        const QString envir = QStringLiteral("DISPLAY=%1.%2")
-                                  .arg(display_name.data())
-                                  .arg(KWin::Application::x11ScreenNumber());
-
-        if (putenv(strdup(envir.toLatin1().constData()))) {
-            fprintf(stderr, "%s: WARNING: unable to set DISPLAY environment variable\n", argv[0]);
-            perror("putenv()");
-        }
-    }
-
     if (signal(SIGTERM, KWin::sighandler) == SIG_IGN) {
         signal(SIGTERM, SIG_IGN);
     }
@@ -483,19 +409,8 @@ int main(int argc, char *argv[])
         exit(1);
     }
 
-    // find and load the X11 platform plugin
-    const KPluginMetaData plugin = KPluginMetaData::findPluginById(QStringLiteral("org.kde.kwin.platforms"), QStringLiteral("KWinX11Platform"));
-
-    if (!plugin.isValid()) {
-        std::cerr << "FATAL ERROR: KWin could not find the KWinX11Platform plugin" << std::endl;
-        return 1;
-    }
-    a.initPlatform(plugin);
-    if (!a.platform()) {
-        std::cerr << "FATAL ERROR: could not instantiate the platform plugin" << std::endl;
-        return 1;
-    }
-
+    a.setSession(KWin::Session::create(KWin::Session::Type::Noop));
+    a.setPlatform(std::make_unique<KWin::X11StandalonePlatform>());
     a.start();
 
     return a.exec();

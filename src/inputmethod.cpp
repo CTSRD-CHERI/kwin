@@ -13,7 +13,6 @@
 #include "input.h"
 #include "inputpanelv1window.h"
 #include "keyboard_input.h"
-#include "screens.h"
 #include "utils/common.h"
 #include "virtualkeyboard_dbus.h"
 #include "wayland_server.h"
@@ -50,10 +49,7 @@ using namespace KWaylandServer;
 namespace KWin
 {
 
-KWIN_SINGLETON_FACTORY(InputMethod)
-
-InputMethod::InputMethod(QObject *parent)
-    : QObject(parent)
+InputMethod::InputMethod()
 {
     m_enabled = kwinApp()->config()->group("Wayland").readEntry("VirtualKeyboardEnabled", true);
     // this is actually too late. Other processes are started before init,
@@ -69,7 +65,6 @@ InputMethod::InputMethod(QObject *parent)
 InputMethod::~InputMethod()
 {
     stopInputMethod();
-    s_self = nullptr;
 }
 
 void InputMethod::init()
@@ -81,7 +76,7 @@ void InputMethod::init()
         m_inputMethodCrashes = 0;
     });
 #if KWIN_BUILD_SCREENLOCKER
-    connect(ScreenLockerWatcher::self(), &ScreenLockerWatcher::aboutToLock, this, &InputMethod::hide);
+    connect(kwinApp()->screenLockerWatcher(), &ScreenLockerWatcher::aboutToLock, this, &InputMethod::hide);
 #endif
 
     new VirtualKeyboardDBus(this);
@@ -131,7 +126,8 @@ void InputMethod::hide()
 
 bool InputMethod::shouldShowOnActive() const
 {
-    return input()->touch() == input()->lastInputHandler()
+    static bool alwaysShowIm = qEnvironmentVariableIntValue("KWIN_IM_SHOW_ALWAYS") != 0;
+    return alwaysShowIm || input()->touch() == input()->lastInputHandler()
         || input()->tablet() == input()->lastInputHandler();
 }
 
@@ -620,17 +616,17 @@ void InputMethod::updateInputPanelState()
         m_panel->allow();
     }
 
-    QRect overlap = QRect(0, 0, 0, 0);
+    QRectF overlap = QRectF(0, 0, 0, 0);
     if (m_trackedWindow) {
         const bool bottomKeyboard = m_panel && m_panel->mode() != InputPanelV1Window::Overlay && m_panel->isShown();
-        m_trackedWindow->setVirtualKeyboardGeometry(bottomKeyboard ? m_panel->inputGeometry() : QRect());
+        m_trackedWindow->setVirtualKeyboardGeometry(bottomKeyboard ? m_panel->inputGeometry() : QRectF());
 
         if (m_panel && m_panel->mode() != InputPanelV1Window::Overlay) {
             overlap = m_trackedWindow->frameGeometry() & m_panel->inputGeometry();
             overlap.moveTo(m_trackedWindow->mapToLocal(overlap.topLeft()));
         }
     }
-    t->setInputPanelState(m_panel && m_panel->isShown(), overlap);
+    t->setInputPanelState(m_panel && m_panel->isShown(), overlap.toRect());
 }
 
 void InputMethod::setInputMethodCommand(const QString &command)

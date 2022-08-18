@@ -118,6 +118,7 @@ Q_SIGNALS:
      * @param count The new number of screens
      */
     void numberScreensChanged(int count);
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
     /**
      * This signal is emitted when the size of @p screen changes.
      * Don't forget to fetch an updated client area.
@@ -125,6 +126,7 @@ Q_SIGNALS:
      * @deprecated Use QScreen::geometryChanged signal instead.
      */
     void screenResized(int screen);
+#endif
     /**
      * Signal emitted whenever the current activity changed.
      * @param id id of the new activity
@@ -233,6 +235,8 @@ public:
     VirtualDesktop *currentVirtualDesktop() const;
     void setCurrentVirtualDesktop(VirtualDesktop *desktop);
 
+    Q_INVOKABLE int screenAt(const QPointF &pos) const;
+
     /**
      * Returns the geometry a Client can use with the specified option.
      * This method should be preferred over other methods providing screen sizes as the
@@ -244,8 +248,8 @@ public:
      * @returns The specified screen geometry
      * @deprecated use clientArea(ClientAreaOption option, KWin::Output *output, KWin::VirtualDesktop *desktop)
      */
-    Q_SCRIPTABLE QRect clientArea(ClientAreaOption option, int screen, int desktop) const; // TODO Plasma 6: Drop
-    Q_SCRIPTABLE QRect clientArea(ClientAreaOption option, KWin::Output *output, KWin::VirtualDesktop *desktop) const;
+    Q_SCRIPTABLE QRectF clientArea(ClientAreaOption option, int screen, int desktop) const; // TODO Plasma 6: Drop
+    Q_SCRIPTABLE QRectF clientArea(ClientAreaOption option, KWin::Output *output, KWin::VirtualDesktop *desktop) const;
     /**
      * Overloaded method for convenience.
      * @param option The type of area which should be considered
@@ -254,15 +258,15 @@ public:
      * @returns The specified screen geometry
      * @deprecated use clientArea(ClientAreaOption option, const QPoint &point, KWin::VirtualDesktop *desktop)
      */
-    Q_SCRIPTABLE QRect clientArea(ClientAreaOption option, const QPoint &point, int desktop) const; // TODO Plasma 6: Drop
-    Q_SCRIPTABLE QRect clientArea(ClientAreaOption option, const QPoint &point, KWin::VirtualDesktop *desktop) const;
+    Q_SCRIPTABLE QRectF clientArea(ClientAreaOption option, const QPoint &point, int desktop) const; // TODO Plasma 6: Drop
+    Q_SCRIPTABLE QRectF clientArea(ClientAreaOption option, const QPoint &point, KWin::VirtualDesktop *desktop) const;
     /**
      * Overloaded method for convenience.
      * @param client The Client for which the area should be retrieved
      * @returns The specified screen geometry
      */
-    Q_SCRIPTABLE QRect clientArea(ClientAreaOption option, KWin::Window *client) const;
-    Q_SCRIPTABLE QRect clientArea(ClientAreaOption option, const KWin::Window *client) const;
+    Q_SCRIPTABLE QRectF clientArea(ClientAreaOption option, KWin::Window *client) const;
+    Q_SCRIPTABLE QRectF clientArea(ClientAreaOption option, const KWin::Window *client) const;
     /**
      * Returns the name for the given @p desktop.
      */

@@ -21,7 +21,7 @@ QRegion DrmOutputLayer::currentDamage() const
     return {};
 }
 
-QSharedPointer<GLTexture> DrmOutputLayer::texture() const
+std::shared_ptr<GLTexture> DrmOutputLayer::texture() const
 {
     return nullptr;
 }
@@ -61,5 +61,3 @@ bool DrmOverlayLayer::isVisible() const
     return m_visible;
 }
 }
-
-#include "drm_layer.moc"

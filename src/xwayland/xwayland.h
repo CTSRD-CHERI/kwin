@@ -10,7 +10,11 @@
 #ifndef KWIN_XWL_XWAYLAND
 #define KWIN_XWL_XWAYLAND
 
+#include <memory>
+
 #include "xwayland_interface.h"
+
+#include <memory>
 
 class KSelectionOwner;
 class QSocketNotifier;
@@ -18,19 +22,20 @@ class QSocketNotifier;
 namespace KWin
 {
 class Output;
-class ApplicationWaylandAbstract;
+class Application;
 
 namespace Xwl
 {
 class XrandrEventFilter;
 class XwaylandLauncher;
+class DataBridge;
 
-class KWIN_EXPORT Xwayland : public XwaylandInterface
+class KWIN_EXPORT Xwayland : public QObject, public XwaylandInterface
 {
     Q_OBJECT
 
 public:
-    Xwayland(ApplicationWaylandAbstract *app, QObject *parent = nullptr);
+    Xwayland(Application *app);
     ~Xwayland() override;
 
     void start();
@@ -72,8 +77,9 @@ private:
     KWaylandServer::AbstractDropHandler *xwlDropHandler() override;
     QSocketNotifier *m_socketNotifier = nullptr;
 
-    ApplicationWaylandAbstract *m_app;
-    QScopedPointer<KSelectionOwner> m_selectionOwner;
+    Application *m_app;
+    std::unique_ptr<KSelectionOwner> m_selectionOwner;
+    std::unique_ptr<DataBridge> m_dataBridge;
 
     XrandrEventFilter *m_xrandrEventsFilter = nullptr;
     XwaylandLauncher *m_launcher;

@@ -27,7 +27,7 @@ MagicLampEffect::MagicLampEffect()
 
 bool MagicLampEffect::supported()
 {
-    return DeformEffect::supported() && effects->animationsSupported();
+    return OffscreenEffect::supported() && effects->animationsSupported();
 }
 
 void MagicLampEffect::reconfigure(ReconfigureFlags)
@@ -46,13 +46,7 @@ void MagicLampEffect::prePaintScreen(ScreenPrePaintData &data, std::chrono::mill
 {
     auto animationIt = m_animations.begin();
     while (animationIt != m_animations.end()) {
-        std::chrono::milliseconds delta = std::chrono::milliseconds::zero();
-        if (animationIt->lastPresentTime.count()) {
-            delta = presentTime - animationIt->lastPresentTime;
-        }
-        animationIt->lastPresentTime = presentTime;
-
-        (*animationIt).timeLine.update(delta);
+        (*animationIt).timeLine.advance(presentTime);
         ++animationIt;
     }
 
@@ -75,7 +69,7 @@ void MagicLampEffect::prePaintWindow(EffectWindow *w, WindowPrePaintData &data, 
     effects->prePaintWindow(w, data, presentTime);
 }
 
-void MagicLampEffect::deform(EffectWindow *w, int mask, WindowPaintData &data, WindowQuadList &quads)
+void MagicLampEffect::apply(EffectWindow *w, int mask, WindowPaintData &data, WindowQuadList &quads)
 {
     Q_UNUSED(mask)
     Q_UNUSED(data)
@@ -84,8 +78,8 @@ void MagicLampEffect::deform(EffectWindow *w, int mask, WindowPaintData &data, W
         // 0 = not minimized, 1 = fully minimized
         const qreal progress = (*animationIt).timeLine.value();
 
-        QRect geo = w->frameGeometry();
-        QRect icon = w->iconGeometry();
+        QRect geo = w->frameGeometry().toRect();
+        QRect icon = w->iconGeometry().toRect();
         IconPosition position = Top;
         // If there's no icon geometry, minimize to the center of the screen
         if (!icon.isValid()) {
@@ -152,7 +146,7 @@ void MagicLampEffect::deform(EffectWindow *w, int mask, WindowPaintData &data, W
             if (panel) {
                 // Assumption: width of horizonal panel is greater than its height and vice versa
                 // The panel has to border one screen edge, so get it's screen area
-                QRect panelScreen = effects->clientArea(ScreenArea, panel);
+                QRectF panelScreen = effects->clientArea(ScreenArea, panel);
                 if (panel->width() >= panel->height()) {
                     // horizontal panel
                     if (panel->y() <= panelScreen.height() / 2) {
@@ -170,9 +164,9 @@ void MagicLampEffect::deform(EffectWindow *w, int mask, WindowPaintData &data, W
                 }
             } else {
                 // we did not find a panel, so it might be autohidden
-                QRect iconScreen = effects->clientArea(ScreenArea, icon.topLeft(), effects->currentDesktop());
+                QRectF iconScreen = effects->clientArea(ScreenArea, icon.topLeft(), effects->currentDesktop());
                 // as the icon geometry could be overlap a screen edge we use an intersection
-                QRect rect = iconScreen.intersected(icon);
+                QRectF rect = iconScreen.intersected(icon);
                 // here we need a different assumption: icon geometry borders one screen edge
                 // this assumption might be wrong for e.g. task applet being the only applet in panel
                 // in this case the icon borders two screen edges

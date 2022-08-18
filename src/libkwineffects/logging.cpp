@@ -9,4 +9,3 @@
 #include "logging_p.h"
 Q_LOGGING_CATEGORY(LIBKWINEFFECTS, "libkwineffects", QtWarningMsg)
 Q_LOGGING_CATEGORY(LIBKWINGLUTILS, "libkwinglutils", QtWarningMsg)
-Q_LOGGING_CATEGORY(LIBKWINXRENDERUTILS, "libkwinxrenderutils", QtWarningMsg)

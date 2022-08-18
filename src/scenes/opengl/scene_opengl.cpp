@@ -14,20 +14,14 @@
 #include "scene_opengl.h"
 #include "openglsurfacetexture.h"
 
-#include "platform.h"
-#include "wayland_server.h"
-
 #include <kwinglplatform.h>
 #include <kwinoffscreenquickview.h>
 
 #include "composite.h"
-#include "cursor.h"
 #include "decorations/decoratedclient.h"
 #include "effects.h"
 #include "main.h"
 #include "output.h"
-#include "overlaywindow.h"
-#include "renderloop.h"
 #include "shadowitem.h"
 #include "surfaceitem.h"
 #include "utils/common.h"
@@ -37,7 +31,6 @@
 #include <cmath>
 #include <cstddef>
 
-#include <QGraphicsScale>
 #include <QMatrix4x4>
 #include <QPainter>
 #include <QStringList>
@@ -52,9 +45,8 @@ namespace KWin
  * SceneOpenGL
  ***********************************************/
 
-SceneOpenGL::SceneOpenGL(OpenGLBackend *backend, QObject *parent)
-    : Scene(parent)
-    , m_backend(backend)
+SceneOpenGL::SceneOpenGL(OpenGLBackend *backend)
+    : m_backend(backend)
 {
     // We only support the OpenGL 2+ shader API, not GL_ARB_shader_objects
     if (!hasGLVersion(2, 0)) {
@@ -77,13 +69,13 @@ SceneOpenGL::~SceneOpenGL()
     }
 }
 
-SceneOpenGL *SceneOpenGL::createScene(OpenGLBackend *backend, QObject *parent)
+std::unique_ptr<SceneOpenGL> SceneOpenGL::createScene(OpenGLBackend *backend)
 {
     if (SceneOpenGL::supported(backend)) {
-        return new SceneOpenGL(backend, parent);
+        return std::make_unique<SceneOpenGL>(backend);
+    } else {
+        return nullptr;
     }
-
-    return nullptr;
 }
 
 bool SceneOpenGL::initFailed() const
@@ -97,32 +89,6 @@ void SceneOpenGL::paint(RenderTarget *renderTarget, const QRegion &region)
     GLVertexBuffer::streamingBuffer()->beginFrame();
     paintScreen(region);
     GLVertexBuffer::streamingBuffer()->endOfFrame();
-}
-
-QMatrix4x4 SceneOpenGL::transformation(int mask, const ScreenPaintData &data) const
-{
-    QMatrix4x4 matrix;
-
-    if (!(mask & PAINT_SCREEN_TRANSFORMED)) {
-        return matrix;
-    }
-
-    matrix.translate(data.translation());
-    const QVector3D scale = data.scale();
-    matrix.scale(scale.x(), scale.y(), scale.z());
-
-    if (data.rotationAngle() == 0.0) {
-        return matrix;
-    }
-
-    // Apply the rotation
-    // cannot use data.rotation->applyTo(&matrix) as QGraphicsRotation uses projectedRotate to map back to 2D
-    matrix.translate(data.rotationOrigin());
-    const QVector3D axis = data.rotationAxis();
-    matrix.rotate(data.rotationAngle(), axis.x(), axis.y(), axis.z());
-    matrix.translate(-data.rotationOrigin());
-
-    return matrix;
 }
 
 void SceneOpenGL::paintBackground(const QRegion &region)
@@ -215,22 +181,22 @@ QVector<QByteArray> SceneOpenGL::openGLPlatformInterfaceExtensions() const
     return m_backend->extensions().toVector();
 }
 
-QSharedPointer<GLTexture> SceneOpenGL::textureForOutput(Output *output) const
+std::shared_ptr<GLTexture> SceneOpenGL::textureForOutput(Output *output) const
 {
     return m_backend->textureForOutput(output);
 }
 
-SurfaceTexture *SceneOpenGL::createSurfaceTextureInternal(SurfacePixmapInternal *pixmap)
+std::unique_ptr<SurfaceTexture> SceneOpenGL::createSurfaceTextureInternal(SurfacePixmapInternal *pixmap)
 {
     return m_backend->createSurfaceTextureInternal(pixmap);
 }
 
-SurfaceTexture *SceneOpenGL::createSurfaceTextureWayland(SurfacePixmapWayland *pixmap)
+std::unique_ptr<SurfaceTexture> SceneOpenGL::createSurfaceTextureWayland(SurfacePixmapWayland *pixmap)
 {
     return m_backend->createSurfaceTextureWayland(pixmap);
 }
 
-SurfaceTexture *SceneOpenGL::createSurfaceTextureX11(SurfacePixmapX11 *pixmap)
+std::unique_ptr<SurfaceTexture> SceneOpenGL::createSurfaceTextureX11(SurfacePixmapX11 *pixmap)
 {
     return m_backend->createSurfaceTextureX11(pixmap);
 }
@@ -255,22 +221,6 @@ bool SceneOpenGL::supported(OpenGLBackend *backend)
         return false;
     }
     return true;
-}
-
-void SceneOpenGL::paintSimpleScreen(int mask, const QRegion &region)
-{
-    m_screenProjectionMatrix = renderTargetProjectionMatrix();
-
-    Scene::paintSimpleScreen(mask, region);
-}
-
-void SceneOpenGL::paintGenericScreen(int mask, const ScreenPaintData &data)
-{
-    const QMatrix4x4 screenMatrix = transformation(mask, data);
-
-    m_screenProjectionMatrix = renderTargetProjectionMatrix() * screenMatrix;
-
-    Scene::paintGenericScreen(mask, data);
 }
 
 void SceneOpenGL::doPaintBackground(const QVector<float> &vertices)
@@ -413,10 +363,10 @@ void SceneOpenGL::createRenderNode(Item *item, RenderContext *context)
             });
         }
     } else if (auto surfaceItem = qobject_cast<SurfaceItem *>(item)) {
-        WindowQuadList quads = clipQuads(item, context);
-        if (!quads.isEmpty()) {
-            SurfacePixmap *pixmap = surfaceItem->pixmap();
-            if (pixmap) {
+        SurfacePixmap *pixmap = surfaceItem->pixmap();
+        if (pixmap) {
+            WindowQuadList quads = clipQuads(item, context);
+            if (!quads.isEmpty()) {
                 // Don't bother with blending if the entire surface is opaque
                 bool hasAlpha = pixmap->hasAlphaChannel() && !surfaceItem->shape().subtracted(surfaceItem->opaque()).isEmpty();
                 context->renderNodes.append(RenderNode{
@@ -425,7 +375,7 @@ void SceneOpenGL::createRenderNode(Item *item, RenderContext *context)
                     .transformMatrix = context->transformStack.top(),
                     .opacity = context->opacityStack.top(),
                     .hasAlpha = hasAlpha,
-                    .coordinateType = UnnormalizedCoordinates,
+                    .coordinateType = NormalizedCoordinates,
                 });
             }
         }
@@ -444,55 +394,19 @@ void SceneOpenGL::createRenderNode(Item *item, RenderContext *context)
     context->opacityStack.pop();
 }
 
-QMatrix4x4 SceneOpenGL::modelViewProjectionMatrix(int mask, const WindowPaintData &data) const
+QMatrix4x4 SceneOpenGL::modelViewProjectionMatrix(const WindowPaintData &data) const
 {
-    const QMatrix4x4 pMatrix = data.projectionMatrix();
-    const QMatrix4x4 mvMatrix = data.modelViewMatrix();
-
     // An effect may want to override the default projection matrix in some cases,
     // such as when it is rendering a window on a render target that doesn't have
     // the same dimensions as the default framebuffer.
     //
     // Note that the screen transformation is not applied here.
+    const QMatrix4x4 pMatrix = data.projectionMatrix();
     if (!pMatrix.isIdentity()) {
-        return pMatrix * mvMatrix;
+        return pMatrix;
+    } else {
+        return renderTargetProjectionMatrix();
     }
-
-    // If an effect has specified a model-view matrix, we multiply that matrix
-    // with the default projection matrix.  If the effect hasn't specified a
-    // model-view matrix, mvMatrix will be the identity matrix.
-    if (mask & Scene::PAINT_SCREEN_TRANSFORMED) {
-        return screenProjectionMatrix() * mvMatrix;
-    }
-
-    return renderTargetProjectionMatrix() * mvMatrix;
-}
-
-static QMatrix4x4 transformForPaintData(int mask, const WindowPaintData &data)
-{
-    // TODO: Switch to QTransform.
-    QMatrix4x4 matrix;
-
-    if (!(mask & Scene::PAINT_WINDOW_TRANSFORMED)) {
-        return matrix;
-    }
-
-    matrix.translate(data.translation());
-    const QVector3D scale = data.scale();
-    matrix.scale(scale.x(), scale.y(), scale.z());
-
-    if (data.rotationAngle() == 0.0) {
-        return matrix;
-    }
-
-    // Apply the rotation
-    // cannot use data.rotation.applyTo(&matrix) as QGraphicsRotation uses projectedRotate to map back to 2D
-    matrix.translate(data.rotationOrigin());
-    const QVector3D axis = data.rotationAxis();
-    matrix.rotate(data.rotationAngle(), axis.x(), axis.y(), axis.z());
-    matrix.translate(-data.rotationOrigin());
-
-    return matrix;
 }
 
 void SceneOpenGL::render(Item *item, int mask, const QRegion &region, const WindowPaintData &data)
@@ -509,7 +423,7 @@ void SceneOpenGL::render(Item *item, int mask, const QRegion &region, const Wind
     renderContext.transformStack.push(QMatrix4x4());
     renderContext.opacityStack.push(data.opacity());
 
-    item->setTransform(transformForPaintData(mask, data));
+    item->setTransform(data.toMatrix());
 
     createRenderNode(item, &renderContext);
 
@@ -589,7 +503,7 @@ void SceneOpenGL::render(Item *item, int mask, const QRegion &region, const Wind
         scissorRegion = mapToRenderTarget(region);
     }
 
-    const QMatrix4x4 modelViewProjection = modelViewProjectionMatrix(mask, data);
+    const QMatrix4x4 projectionMatrix = modelViewProjectionMatrix(data);
     for (int i = 0; i < renderContext.renderNodes.count(); i++) {
         const RenderNode &renderNode = renderContext.renderNodes[i];
         if (renderNode.vertexCount == 0) {
@@ -598,8 +512,7 @@ void SceneOpenGL::render(Item *item, int mask, const QRegion &region, const Wind
 
         setBlendEnabled(renderNode.hasAlpha || renderNode.opacity < 1.0);
 
-        shader->setUniform(GLShader::ModelViewProjectionMatrix,
-                           modelViewProjection * renderNode.transformMatrix);
+        shader->setUniform(GLShader::ModelViewProjectionMatrix, projectionMatrix * renderNode.transformMatrix);
         if (opacity != renderNode.opacity) {
             shader->setUniform(GLShader::ModulationConstant,
                                modulate(renderNode.opacity, data.brightness()));
@@ -638,13 +551,13 @@ public:
     static DecorationShadowTextureCache &instance();
 
     void unregister(SceneOpenGLShadow *shadow);
-    QSharedPointer<GLTexture> getTexture(SceneOpenGLShadow *shadow);
+    std::shared_ptr<GLTexture> getTexture(SceneOpenGLShadow *shadow);
 
 private:
     DecorationShadowTextureCache() = default;
     struct Data
     {
-        QSharedPointer<GLTexture> texture;
+        std::shared_ptr<GLTexture> texture;
         QVector<SceneOpenGLShadow *> shadows;
     };
     QHash<KDecoration2::DecorationShadow *, Data> m_cache;
@@ -684,7 +597,7 @@ void DecorationShadowTextureCache::unregister(SceneOpenGLShadow *shadow)
     }
 }
 
-QSharedPointer<GLTexture> DecorationShadowTextureCache::getTexture(SceneOpenGLShadow *shadow)
+std::shared_ptr<GLTexture> DecorationShadowTextureCache::getTexture(SceneOpenGLShadow *shadow)
 {
     Q_ASSERT(shadow->hasDecorationShadow());
     unregister(shadow);
@@ -698,7 +611,7 @@ QSharedPointer<GLTexture> DecorationShadowTextureCache::getTexture(SceneOpenGLSh
     }
     Data d;
     d.shadows << shadow;
-    d.texture = QSharedPointer<GLTexture>::create(shadow->decorationShadowImage());
+    d.texture = std::make_shared<GLTexture>(shadow->decorationShadowImage());
     m_cache.insert(decoShadow.data(), d);
     return d.texture;
 }
@@ -791,7 +704,7 @@ bool SceneOpenGLShadow::prepareBackend()
 
     Scene *scene = Compositor::self()->scene();
     scene->makeOpenGLContextCurrent();
-    m_texture = QSharedPointer<GLTexture>::create(image);
+    m_texture = std::make_shared<GLTexture>(image);
 
     if (m_texture->internalFormat() == GL_R8) {
         // Swizzle red to alpha and all other channels to zero
@@ -877,7 +790,7 @@ void SceneOpenGLDecorationRenderer::render(const QRegion &region)
         return;
     }
 
-    QRect left, top, right, bottom;
+    QRectF left, top, right, bottom;
     client()->window()->layoutDecorationRects(left, top, right, bottom);
 
     const qreal devicePixelRatio = effectiveDevicePixelRatio();
@@ -892,10 +805,10 @@ void SceneOpenGLDecorationRenderer::render(const QRegion &region)
 
     const QRect dirtyRect = region.boundingRect();
 
-    renderPart(top.intersected(dirtyRect), top, topPosition, devicePixelRatio);
-    renderPart(bottom.intersected(dirtyRect), bottom, bottomPosition, devicePixelRatio);
-    renderPart(left.intersected(dirtyRect), left, leftPosition, devicePixelRatio, true);
-    renderPart(right.intersected(dirtyRect), right, rightPosition, devicePixelRatio, true);
+    renderPart(top.toRect().intersected(dirtyRect), top.toRect(), topPosition, devicePixelRatio);
+    renderPart(bottom.toRect().intersected(dirtyRect), bottom.toRect(), bottomPosition, devicePixelRatio);
+    renderPart(left.toRect().intersected(dirtyRect), left.toRect(), leftPosition, devicePixelRatio, true);
+    renderPart(right.toRect().intersected(dirtyRect), right.toRect(), rightPosition, devicePixelRatio, true);
 }
 
 void SceneOpenGLDecorationRenderer::renderPart(const QRect &rect, const QRect &partRect,
@@ -913,7 +826,7 @@ void SceneOpenGLDecorationRenderer::renderPart(const QRect &rect, const QRect &p
     int verticalPadding = padding.top() + padding.bottom();
     int horizontalPadding = padding.left() + padding.right();
 
-    QSize imageSize = rect.size() * devicePixelRatio;
+    QSize imageSize(toNativeSize(rect.width()), toNativeSize(rect.height()));
     if (rotated) {
         imageSize = QSize(imageSize.height(), imageSize.width());
     }
@@ -979,14 +892,13 @@ static int align(int value, int align)
 
 void SceneOpenGLDecorationRenderer::resizeTexture()
 {
-    QRect left, top, right, bottom;
+    QRectF left, top, right, bottom;
     client()->window()->layoutDecorationRects(left, top, right, bottom);
     QSize size;
 
-    size.rwidth() = qMax(qMax(top.width(), bottom.width()),
-                         qMax(left.height(), right.height()));
-    size.rheight() = top.height() + bottom.height() + left.width() + right.width();
-    size *= effectiveDevicePixelRatio();
+    size.rwidth() = toNativeSize(qMax(qMax(top.width(), bottom.width()),
+                                      qMax(left.height(), right.height())));
+    size.rheight() = toNativeSize(top.height()) + toNativeSize(bottom.height()) + toNativeSize(left.width()) + toNativeSize(right.width());
 
     size.rheight() += 4 * (2 * TexturePad);
     size.rwidth() += 2 * TexturePad;
@@ -1004,6 +916,11 @@ void SceneOpenGLDecorationRenderer::resizeTexture()
     } else {
         m_texture.reset();
     }
+}
+
+int SceneOpenGLDecorationRenderer::toNativeSize(int size) const
+{
+    return std::ceil(size * effectiveDevicePixelRatio());
 }
 
 } // namespace

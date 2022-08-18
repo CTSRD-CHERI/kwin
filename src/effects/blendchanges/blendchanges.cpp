@@ -16,7 +16,7 @@
 namespace KWin
 {
 BlendChanges::BlendChanges()
-    : DeformEffect()
+    : OffscreenEffect()
 {
     QDBusConnection::sessionBus().registerObject(QStringLiteral("/org/kde/KWin/BlendChanges"),
                                                  QStringLiteral("org.kde.KWin.BlendChanges"),
@@ -41,6 +41,10 @@ void KWin::BlendChanges::start(int delay)
     if (!supported() || m_state != Off) {
         return;
     }
+    if (effects->hasActiveFullScreenEffect()) {
+        return;
+    }
+
     const EffectWindowList allWindows = effects->stackingOrder();
     for (auto window : allWindows) {
         redirect(window);
@@ -63,16 +67,16 @@ void BlendChanges::drawWindow(EffectWindow *window, int mask, const QRegion &reg
     }
     // then the old on top, it works better than changing both alphas with the current blend mode
     if (m_state != Off) {
-        DeformEffect::drawWindow(window, mask, region, data);
+        OffscreenEffect::drawWindow(window, mask, region, data);
     }
 }
 
-void BlendChanges::deform(EffectWindow *window, int mask, WindowPaintData &data, WindowQuadList &quads)
+void BlendChanges::apply(EffectWindow *window, int mask, WindowPaintData &data, WindowQuadList &quads)
 {
     Q_UNUSED(window)
     Q_UNUSED(mask)
     Q_UNUSED(quads)
-    data.setOpacity(1.0 - m_timeline.value());
+    data.setOpacity((1.0 - m_timeline.value()) * data.opacity());
 }
 
 bool BlendChanges::isActive() const
@@ -83,7 +87,6 @@ bool BlendChanges::isActive() const
 void BlendChanges::postPaintScreen()
 {
     if (m_timeline.done()) {
-        m_lastPresentTime = std::chrono::milliseconds::zero();
         m_timeline.reset();
         m_state = Off;
 
@@ -101,12 +104,7 @@ void BlendChanges::prePaintScreen(ScreenPrePaintData &data, std::chrono::millise
         return;
     }
     if (m_state == Blending) {
-        std::chrono::milliseconds delta(0);
-        if (m_lastPresentTime.count()) {
-            delta = presentTime - m_lastPresentTime;
-        }
-        m_lastPresentTime = presentTime;
-        m_timeline.update(delta);
+        m_timeline.advance(presentTime);
     }
 
     effects->prePaintScreen(data, presentTime);

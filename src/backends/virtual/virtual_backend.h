@@ -6,8 +6,7 @@
 
     SPDX-License-Identifier: GPL-2.0-or-later
 */
-#ifndef KWIN_VIRTUAL_BACKEND_H
-#define KWIN_VIRTUAL_BACKEND_H
+#pragma once
 
 #include "platform.h"
 
@@ -26,29 +25,25 @@ class VirtualOutput;
 class KWIN_EXPORT VirtualBackend : public Platform
 {
     Q_OBJECT
-    Q_INTERFACES(KWin::Platform)
-    Q_PLUGIN_METADATA(IID "org.kde.kwin.Platform" FILE "virtual.json")
 
 public:
     VirtualBackend(QObject *parent = nullptr);
     ~VirtualBackend() override;
 
-    Session *session() const override;
     bool initialize() override;
 
     bool saveFrames() const
     {
-        return !m_screenshotDir.isNull();
+        return m_screenshotDir != nullptr;
     }
     QString screenshotDirPath() const;
 
-    QPainterBackend *createQPainterBackend() override;
-    OpenGLBackend *createOpenGLBackend() override;
+    std::unique_ptr<QPainterBackend> createQPainterBackend() override;
+    std::unique_ptr<OpenGLBackend> createOpenGLBackend() override;
 
     Q_INVOKABLE void setVirtualOutputs(int count, QVector<QRect> geometries = QVector<QRect>(), QVector<int> scales = QVector<int>());
 
     Outputs outputs() const override;
-    Outputs enabledOutputs() const override;
 
     QVector<CompositingType> supportedCompositors() const override
     {
@@ -69,10 +64,7 @@ Q_SIGNALS:
 private:
     QVector<VirtualOutput *> m_outputs;
     QVector<VirtualOutput *> m_outputsEnabled;
-    QScopedPointer<QTemporaryDir> m_screenshotDir;
-    Session *m_session;
+    std::unique_ptr<QTemporaryDir> m_screenshotDir;
 };
 
-}
-
-#endif
+} // namespace KWin

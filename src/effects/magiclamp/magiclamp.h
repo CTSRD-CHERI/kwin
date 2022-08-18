@@ -10,7 +10,7 @@
 #ifndef KWIN_MAGICLAMP_H
 #define KWIN_MAGICLAMP_H
 
-#include <kwindeformeffect.h>
+#include <kwinoffscreeneffect.h>
 
 namespace KWin
 {
@@ -19,10 +19,9 @@ struct MagicLampAnimation
 {
     EffectWindowVisibleRef visibleRef;
     TimeLine timeLine;
-    std::chrono::milliseconds lastPresentTime = std::chrono::milliseconds::zero();
 };
 
-class MagicLampEffect : public DeformEffect
+class MagicLampEffect : public OffscreenEffect
 {
     Q_OBJECT
 
@@ -43,7 +42,7 @@ public:
     static bool supported();
 
 protected:
-    void deform(EffectWindow *window, int mask, WindowPaintData &data, WindowQuadList &quads) override;
+    void apply(EffectWindow *window, int mask, WindowPaintData &data, WindowQuadList &quads) override;
 
 public Q_SLOTS:
     void slotWindowDeleted(KWin::EffectWindow *w);

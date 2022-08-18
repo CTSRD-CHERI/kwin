@@ -31,7 +31,6 @@
 #include "platform.h"
 #include "pointer_input.h"
 #include "screenedge.h"
-#include "screens.h"
 #include "unmanaged.h"
 #include "utils/xcbutils.h"
 #include "virtualdesktops.h"
@@ -71,8 +70,8 @@ TabBoxHandlerImpl::TabBoxHandlerImpl(TabBox *tabBox)
     connect(vds, &VirtualDesktopManager::countChanged, m_desktopFocusChain, &DesktopChainManager::resize);
     connect(vds, &VirtualDesktopManager::currentChanged, m_desktopFocusChain, &DesktopChainManager::addDesktop);
 #if KWIN_BUILD_ACTIVITIES
-    if (Activities::self()) {
-        connect(Activities::self(), &Activities::currentChanged, m_desktopFocusChain, &DesktopChainManager::useChain);
+    if (Workspace::self()->activities()) {
+        connect(Workspace::self()->activities(), &Activities::currentChanged, m_desktopFocusChain, &DesktopChainManager::useChain);
     }
 #endif
 }
@@ -83,7 +82,7 @@ TabBoxHandlerImpl::~TabBoxHandlerImpl()
 
 int TabBoxHandlerImpl::activeScreen() const
 {
-    return kwinApp()->platform()->enabledOutputs().indexOf(workspace()->activeOutput());
+    return workspace()->outputs().indexOf(workspace()->activeOutput());
 }
 
 int TabBoxHandlerImpl::currentDesktop() const
@@ -110,7 +109,7 @@ QString TabBoxHandlerImpl::desktopName(int desktop) const
 QWeakPointer<TabBoxClient> TabBoxHandlerImpl::nextClientFocusChain(TabBoxClient *client) const
 {
     if (TabBoxClientImpl *c = static_cast<TabBoxClientImpl *>(client)) {
-        auto next = FocusChain::self()->nextMostRecentlyUsed(c->client());
+        auto next = Workspace::self()->focusChain()->nextMostRecentlyUsed(c->client());
         if (next) {
             return qWeakPointerCast<TabBoxClient, TabBoxClientImpl>(next->tabBoxClient());
         }
@@ -120,7 +119,7 @@ QWeakPointer<TabBoxClient> TabBoxHandlerImpl::nextClientFocusChain(TabBoxClient 
 
 QWeakPointer<TabBoxClient> TabBoxHandlerImpl::firstClientFocusChain() const
 {
-    if (auto c = FocusChain::self()->firstMostRecentlyUsed()) {
+    if (auto c = Workspace::self()->focusChain()->firstMostRecentlyUsed()) {
         return qWeakPointerCast<TabBoxClient, TabBoxClientImpl>(c->tabBoxClient());
     } else {
         return QWeakPointer<TabBoxClient>();
@@ -130,7 +129,7 @@ QWeakPointer<TabBoxClient> TabBoxHandlerImpl::firstClientFocusChain() const
 bool TabBoxHandlerImpl::isInFocusChain(TabBoxClient *client) const
 {
     if (TabBoxClientImpl *c = static_cast<TabBoxClientImpl *>(client)) {
-        return FocusChain::self()->contains(c->client());
+        return Workspace::self()->focusChain()->contains(c->client());
     }
     return false;
 }
@@ -441,18 +440,9 @@ QUuid TabBoxClientImpl::internalId() const
 /*********************************************************
  * TabBox
  *********************************************************/
-TabBox *TabBox::s_self = nullptr;
 
-TabBox *TabBox::create(QObject *parent)
-{
-    Q_ASSERT(!s_self);
-    s_self = new TabBox(parent);
-    return s_self;
-}
-
-TabBox::TabBox(QObject *parent)
-    : QObject(parent)
-    , m_displayRefcount(0)
+TabBox::TabBox()
+    : m_displayRefcount(0)
     , m_desktopGrab(false)
     , m_tabGrab(false)
     , m_noModifierGrab(false)
@@ -465,6 +455,7 @@ TabBox::TabBox(QObject *parent)
     m_defaultConfig.setClientDesktopMode(TabBoxConfig::OnlyCurrentDesktopClients);
     m_defaultConfig.setClientActivitiesMode(TabBoxConfig::OnlyCurrentActivityClients);
     m_defaultConfig.setClientApplicationsMode(TabBoxConfig::AllWindowsAllApplications);
+    m_defaultConfig.setOrderMinimizedMode(TabBoxConfig::NoGroupByMinimized);
     m_defaultConfig.setClientMinimizedMode(TabBoxConfig::IgnoreMinimizedStatus);
     m_defaultConfig.setShowDesktopMode(TabBoxConfig::DoNotShowDesktopClient);
     m_defaultConfig.setClientMultiScreenMode(TabBoxConfig::IgnoreMultiScreen);
@@ -475,6 +466,7 @@ TabBox::TabBox(QObject *parent)
     m_alternativeConfig.setClientDesktopMode(TabBoxConfig::AllDesktopsClients);
     m_alternativeConfig.setClientActivitiesMode(TabBoxConfig::OnlyCurrentActivityClients);
     m_alternativeConfig.setClientApplicationsMode(TabBoxConfig::AllWindowsAllApplications);
+    m_alternativeConfig.setOrderMinimizedMode(TabBoxConfig::NoGroupByMinimized);
     m_alternativeConfig.setClientMinimizedMode(TabBoxConfig::IgnoreMinimizedStatus);
     m_alternativeConfig.setShowDesktopMode(TabBoxConfig::DoNotShowDesktopClient);
     m_alternativeConfig.setClientMultiScreenMode(TabBoxConfig::IgnoreMultiScreen);
@@ -505,10 +497,7 @@ TabBox::TabBox(QObject *parent)
     connect(Workspace::self(), &Workspace::configChanged, this, &TabBox::reconfigure);
 }
 
-TabBox::~TabBox()
-{
-    s_self = nullptr;
-}
+TabBox::~TabBox() = default;
 
 void TabBox::handlerReady()
 {
@@ -525,7 +514,7 @@ void TabBox::key(const KLazyLocalizedString &actionName, Slot slot, const QKeySe
     a->setObjectName(QString::fromUtf8(actionName.untranslatedText()));
     a->setText(actionName.toString());
     KGlobalAccel::self()->setGlobalShortcut(a, QList<QKeySequence>() << shortcut);
-    input()->registerShortcut(shortcut, a, TabBox::self(), slot);
+    input()->registerShortcut(shortcut, a, this, slot);
     auto cuts = KGlobalAccel::self()->shortcut(a);
     globalShortcutChanged(a, cuts.isEmpty() ? QKeySequence() : cuts.first());
 }
@@ -768,7 +757,7 @@ void TabBox::reconfigure()
     QString borderConfig = QStringLiteral("BorderActivate");
     for (int i = 0; i < 2; ++i) {
         for (ElectricBorder border : qAsConst(*borders)) {
-            ScreenEdges::self()->unreserve(border, this);
+            workspace()->screenEdges()->unreserve(border, this);
         }
         borders->clear();
         QStringList list = config.readEntry(borderConfig, QStringList());
@@ -779,7 +768,7 @@ void TabBox::reconfigure()
                 continue;
             }
             borders->append(ElectricBorder(i));
-            ScreenEdges::self()->reserve(ElectricBorder(i), this, "toggle");
+            workspace()->screenEdges()->reserve(ElectricBorder(i), this, "toggle");
         }
         borders = &m_borderAlternativeActivate;
         borderConfig = QStringLiteral("BorderAlternativeActivate");
@@ -801,7 +790,7 @@ void TabBox::reconfigure()
             }
             QAction *a = new QAction(this);
             connect(a, &QAction::triggered, this, std::bind(&TabBox::toggleMode, this, mode));
-            ScreenEdges::self()->reserveTouch(ElectricBorder(i), a);
+            workspace()->screenEdges()->reserveTouch(ElectricBorder(i), a);
             actions.insert(ElectricBorder(i), a);
         }
     };
@@ -817,6 +806,8 @@ void TabBox::loadConfig(const KConfigGroup &config, TabBoxConfig &tabBoxConfig)
         config.readEntry<int>("ActivitiesMode", TabBoxConfig::defaultActivitiesMode())));
     tabBoxConfig.setClientApplicationsMode(TabBoxConfig::ClientApplicationsMode(
         config.readEntry<int>("ApplicationsMode", TabBoxConfig::defaultApplicationsMode())));
+    tabBoxConfig.setOrderMinimizedMode(TabBoxConfig::OrderMinimizedMode(
+        config.readEntry<int>("OrderMinimizedMode", TabBoxConfig::defaultOrderMinimizedMode())));
     tabBoxConfig.setClientMinimizedMode(TabBoxConfig::ClientMinimizedMode(
         config.readEntry<int>("MinimizedMode", TabBoxConfig::defaultMinimizedMode())));
     tabBoxConfig.setShowDesktopMode(TabBoxConfig::ShowDesktopMode(
@@ -916,7 +907,7 @@ void TabBox::grabbedKeyEvent(QKeyEvent *event)
 
 struct KeySymbolsDeleter
 {
-    static inline void cleanup(xcb_key_symbols_t *symbols)
+    void operator()(xcb_key_symbols_t *symbols)
     {
         xcb_key_symbols_free(symbols);
     }
@@ -929,8 +920,8 @@ static bool areKeySymXsDepressed(const uint keySyms[], int nKeySyms)
 {
     Xcb::QueryKeymap keys;
 
-    QScopedPointer<xcb_key_symbols_t, KeySymbolsDeleter> symbols(xcb_key_symbols_alloc(connection()));
-    if (symbols.isNull() || !keys) {
+    std::unique_ptr<xcb_key_symbols_t, KeySymbolsDeleter> symbols(xcb_key_symbols_alloc(connection()));
+    if (!symbols || !keys) {
         return false;
     }
     const auto keymap = keys->keys;
@@ -938,7 +929,7 @@ static bool areKeySymXsDepressed(const uint keySyms[], int nKeySyms)
     bool depressed = false;
     for (int iKeySym = 0; iKeySym < nKeySyms; iKeySym++) {
         uint keySymX = keySyms[iKeySym];
-        xcb_keycode_t *keyCodes = xcb_key_symbols_get_keycode(symbols.data(), keySymX);
+        xcb_keycode_t *keyCodes = xcb_key_symbols_get_keycode(symbols.get(), keySymX);
         if (!keyCodes) {
             continue;
         }
@@ -1033,7 +1024,7 @@ static bool areModKeysDepressed(const QKeySequence &seq)
 
 void TabBox::navigatingThroughWindows(bool forward, const QKeySequence &shortcut, TabBoxMode mode)
 {
-    if (!m_ready || isGrabbed() || !Workspace::self()->isOnCurrentHead()) {
+    if (!m_ready || isGrabbed()) {
         return;
     }
     if (!options->focusPolicyIsReasonable()) {
@@ -1095,7 +1086,7 @@ void TabBox::slotWalkBackThroughCurrentAppWindowsAlternative()
 
 void TabBox::slotWalkThroughDesktops()
 {
-    if (!m_ready || isGrabbed() || !Workspace::self()->isOnCurrentHead()) {
+    if (!m_ready || isGrabbed()) {
         return;
     }
     if (areModKeysDepressed(m_cutWalkThroughDesktops)) {
@@ -1109,7 +1100,7 @@ void TabBox::slotWalkThroughDesktops()
 
 void TabBox::slotWalkBackThroughDesktops()
 {
-    if (!m_ready || isGrabbed() || !Workspace::self()->isOnCurrentHead()) {
+    if (!m_ready || isGrabbed()) {
         return;
     }
     if (areModKeysDepressed(m_cutWalkThroughDesktopsReverse)) {
@@ -1123,7 +1114,7 @@ void TabBox::slotWalkBackThroughDesktops()
 
 void TabBox::slotWalkThroughDesktopList()
 {
-    if (!m_ready || isGrabbed() || !Workspace::self()->isOnCurrentHead()) {
+    if (!m_ready || isGrabbed()) {
         return;
     }
     if (areModKeysDepressed(m_cutWalkThroughDesktopList)) {
@@ -1137,7 +1128,7 @@ void TabBox::slotWalkThroughDesktopList()
 
 void TabBox::slotWalkBackThroughDesktopList()
 {
-    if (!m_ready || isGrabbed() || !Workspace::self()->isOnCurrentHead()) {
+    if (!m_ready || isGrabbed()) {
         return;
     }
     if (areModKeysDepressed(m_cutWalkThroughDesktopListReverse)) {

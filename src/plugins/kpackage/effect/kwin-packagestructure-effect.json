@@ -7,6 +7,7 @@
                 "Name": "Vlad Zahorodnii",
                 "Name[ar]": "Vlad Zahorodnii",
                 "Name[az]": "Vlad Zahorodnii",
+                "Name[bg]": "Vlad Zahorodnii",
                 "Name[ca@valencia]": "Vlad Zahorodnii",
                 "Name[ca]": "Vlad Zahorodnii",
                 "Name[cs]": "Vlad Zahorodnii",
@@ -37,12 +38,14 @@
                 "Name[uk]": "Влад Загородній",
                 "Name[vi]": "Vlad Zahorodnii",
                 "Name[x-test]": "xxVlad Zahorodniixx",
-                "Name[zh_CN]": "Vlad Zahorodnii"
+                "Name[zh_CN]": "Vlad Zahorodnii",
+                "Name[zh_TW]": "Vlad Zahorodnii"
             }
         ],
         "Name": "KWin Effect",
         "Name[ar]": "تأثيرات كوين",
         "Name[az]": "KWin effekti",
+        "Name[bg]": "KWin Ефект",
         "Name[ca@valencia]": "Efecte de KWin",
         "Name[ca]": "Efecte del KWin",
         "Name[cs]": "Efekt KWinu",
@@ -54,6 +57,7 @@
         "Name[fr]": "Effet pour KWin",
         "Name[hu]": "KWin effektus",
         "Name[ia]": "Effecto de KWin",
+        "Name[id]": "Efek KWin",
         "Name[it]": "Effetto di KWin",
         "Name[ko]": "KWin 효과",
         "Name[lt]": "KWin efektas",
@@ -73,6 +77,7 @@
         "Name[vi]": "Hiệu ứng KWin",
         "Name[x-test]": "xxKWin Effectxx",
         "Name[zh_CN]": "KWin 特效",
+        "Name[zh_TW]": "KWin 效果",
         "Version": "1"
     }
 }

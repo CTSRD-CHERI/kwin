@@ -10,6 +10,7 @@
 #include "kwin_export.h"
 
 #include <QObject>
+#include <memory>
 
 namespace KWaylandServer
 {
@@ -29,9 +30,8 @@ public:
     ~TouchInterface() override;
 
     SurfaceInterface *focusedSurface() const;
-    void setFocusedSurface(SurfaceInterface *surface);
 
-    void sendDown(qint32 id, quint32 serial, const QPointF &localPos);
+    void sendDown(qint32 id, quint32 serial, const QPointF &localPos, SurfaceInterface *surface);
     void sendUp(qint32 id, quint32 serial);
     void sendFrame();
     void sendCancel();
@@ -39,7 +39,7 @@ public:
 
 private:
     explicit TouchInterface(SeatInterface *seat);
-    QScopedPointer<TouchInterfacePrivate> d;
+    std::unique_ptr<TouchInterfacePrivate> d;
 
     friend class SeatInterface;
     friend class TouchInterfacePrivate;

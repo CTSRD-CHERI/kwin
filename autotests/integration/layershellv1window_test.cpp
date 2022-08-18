@@ -61,11 +61,10 @@ void LayerShellV1WindowTest::initTestCase()
 
     kwinApp()->start();
     QVERIFY(applicationStartedSpy.wait());
-    const auto outputs = kwinApp()->platform()->enabledOutputs();
+    const auto outputs = workspace()->outputs();
     QCOMPARE(outputs.count(), 2);
     QCOMPARE(outputs[0]->geometry(), QRect(0, 0, 1280, 1024));
     QCOMPARE(outputs[1]->geometry(), QRect(1280, 0, 1280, 1024));
-    Test::initWaylandWorkspace();
 }
 
 void LayerShellV1WindowTest::init()
@@ -97,26 +96,26 @@ void LayerShellV1WindowTest::testOutput()
     QVERIFY(output);
 
     // Create a layer shell surface.
-    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
-    QScopedPointer<Test::LayerSurfaceV1> shellSurface(Test::createLayerSurfaceV1(surface.data(), QStringLiteral("test"), output));
+    std::unique_ptr<KWayland::Client::Surface> surface(Test::createSurface());
+    std::unique_ptr<Test::LayerSurfaceV1> shellSurface(Test::createLayerSurfaceV1(surface.get(), QStringLiteral("test"), output));
 
     // Set the initial state of the layer surface.
     shellSurface->set_size(280, 124);
     surface->commit(KWayland::Client::Surface::CommitFlag::None);
 
     // Wait for the compositor to position the surface.
-    QSignalSpy configureRequestedSpy(shellSurface.data(), &Test::LayerSurfaceV1::configureRequested);
+    QSignalSpy configureRequestedSpy(shellSurface.get(), &Test::LayerSurfaceV1::configureRequested);
     QVERIFY(configureRequestedSpy.isValid());
     QVERIFY(configureRequestedSpy.wait());
     const QSize requestedSize = configureRequestedSpy.last().at(1).toSize();
 
     // Map the layer surface.
     shellSurface->ack_configure(configureRequestedSpy.last().at(0).toUInt());
-    Window *window = Test::renderAndWaitForShown(surface.data(), requestedSize, Qt::red);
+    Window *window = Test::renderAndWaitForShown(surface.get(), requestedSize, Qt::red);
     QVERIFY(window);
 
     // Verify that the window is on the requested screen.
-    QVERIFY(output->geometry().contains(window->frameGeometry()));
+    QVERIFY(output->geometry().contains(window->frameGeometry().toRect()));
 
     // Destroy the window.
     shellSurface.reset();
@@ -126,38 +125,38 @@ void LayerShellV1WindowTest::testOutput()
 void LayerShellV1WindowTest::testAnchor_data()
 {
     QTest::addColumn<int>("anchor");
-    QTest::addColumn<QRect>("expectedGeometry");
+    QTest::addColumn<QRectF>("expectedGeometry");
 
     QTest::addRow("left") << int(Test::LayerSurfaceV1::anchor_left)
-                          << QRect(0, 450, 280, 124);
+                          << QRectF(0, 450, 280, 124);
 
     QTest::addRow("top left") << (Test::LayerSurfaceV1::anchor_top | Test::LayerSurfaceV1::anchor_left)
-                              << QRect(0, 0, 280, 124);
+                              << QRectF(0, 0, 280, 124);
 
     QTest::addRow("top") << int(Test::LayerSurfaceV1::anchor_top)
-                         << QRect(500, 0, 280, 124);
+                         << QRectF(500, 0, 280, 124);
 
     QTest::addRow("top right") << (Test::LayerSurfaceV1::anchor_top | Test::LayerSurfaceV1::anchor_right)
-                               << QRect(1000, 0, 280, 124);
+                               << QRectF(1000, 0, 280, 124);
 
     QTest::addRow("right") << int(Test::LayerSurfaceV1::anchor_right)
-                           << QRect(1000, 450, 280, 124);
+                           << QRectF(1000, 450, 280, 124);
 
     QTest::addRow("bottom right") << (Test::LayerSurfaceV1::anchor_bottom | Test::LayerSurfaceV1::anchor_right)
-                                  << QRect(1000, 900, 280, 124);
+                                  << QRectF(1000, 900, 280, 124);
 
     QTest::addRow("bottom") << int(Test::LayerSurfaceV1::anchor_bottom)
-                            << QRect(500, 900, 280, 124);
+                            << QRectF(500, 900, 280, 124);
 
     QTest::addRow("bottom left") << (Test::LayerSurfaceV1::anchor_bottom | Test::LayerSurfaceV1::anchor_left)
-                                 << QRect(0, 900, 280, 124);
+                                 << QRectF(0, 900, 280, 124);
 }
 
 void LayerShellV1WindowTest::testAnchor()
 {
     // Create a layer shell surface.
-    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
-    QScopedPointer<Test::LayerSurfaceV1> shellSurface(Test::createLayerSurfaceV1(surface.data(), QStringLiteral("test")));
+    std::unique_ptr<KWayland::Client::Surface> surface(Test::createSurface());
+    std::unique_ptr<Test::LayerSurfaceV1> shellSurface(Test::createLayerSurfaceV1(surface.get(), QStringLiteral("test")));
 
     // Set the initial state of the layer surface.
     QFETCH(int, anchor);
@@ -166,7 +165,7 @@ void LayerShellV1WindowTest::testAnchor()
     surface->commit(KWayland::Client::Surface::CommitFlag::None);
 
     // Wait for the compositor to position the surface.
-    QSignalSpy configureRequestedSpy(shellSurface.data(), &Test::LayerSurfaceV1::configureRequested);
+    QSignalSpy configureRequestedSpy(shellSurface.get(), &Test::LayerSurfaceV1::configureRequested);
     QVERIFY(configureRequestedSpy.isValid());
     QVERIFY(configureRequestedSpy.wait());
     const QSize requestedSize = configureRequestedSpy.last().at(1).toSize();
@@ -174,7 +173,7 @@ void LayerShellV1WindowTest::testAnchor()
 
     // Map the layer surface.
     shellSurface->ack_configure(configureRequestedSpy.last().at(0).toUInt());
-    Window *window = Test::renderAndWaitForShown(surface.data(), QSize(280, 124), Qt::red);
+    Window *window = Test::renderAndWaitForShown(surface.get(), QSize(280, 124), Qt::red);
     QVERIFY(window);
 
     // Verify that the window is placed at expected location.
@@ -189,46 +188,46 @@ void LayerShellV1WindowTest::testMargins_data()
 {
     QTest::addColumn<int>("anchor");
     QTest::addColumn<QMargins>("margins");
-    QTest::addColumn<QRect>("expectedGeometry");
+    QTest::addColumn<QRectF>("expectedGeometry");
 
     QTest::addRow("left") << int(Test::LayerSurfaceV1::anchor_left)
                           << QMargins(100, 0, 0, 0)
-                          << QRect(100, 450, 280, 124);
+                          << QRectF(100, 450, 280, 124);
 
     QTest::addRow("top left") << (Test::LayerSurfaceV1::anchor_top | Test::LayerSurfaceV1::anchor_left)
                               << QMargins(100, 200, 0, 0)
-                              << QRect(100, 200, 280, 124);
+                              << QRectF(100, 200, 280, 124);
 
     QTest::addRow("top") << int(Test::LayerSurfaceV1::anchor_top)
                          << QMargins(0, 200, 0, 0)
-                         << QRect(500, 200, 280, 124);
+                         << QRectF(500, 200, 280, 124);
 
     QTest::addRow("top right") << (Test::LayerSurfaceV1::anchor_top | Test::LayerSurfaceV1::anchor_right)
                                << QMargins(0, 200, 300, 0)
-                               << QRect(700, 200, 280, 124);
+                               << QRectF(700, 200, 280, 124);
 
     QTest::addRow("right") << int(Test::LayerSurfaceV1::anchor_right)
                            << QMargins(0, 0, 300, 0)
-                           << QRect(700, 450, 280, 124);
+                           << QRectF(700, 450, 280, 124);
 
     QTest::addRow("bottom right") << (Test::LayerSurfaceV1::anchor_bottom | Test::LayerSurfaceV1::anchor_right)
                                   << QMargins(0, 0, 300, 400)
-                                  << QRect(700, 500, 280, 124);
+                                  << QRectF(700, 500, 280, 124);
 
     QTest::addRow("bottom") << int(Test::LayerSurfaceV1::anchor_bottom)
                             << QMargins(0, 0, 0, 400)
-                            << QRect(500, 500, 280, 124);
+                            << QRectF(500, 500, 280, 124);
 
     QTest::addRow("bottom left") << (Test::LayerSurfaceV1::anchor_bottom | Test::LayerSurfaceV1::anchor_left)
                                  << QMargins(100, 0, 0, 400)
-                                 << QRect(100, 500, 280, 124);
+                                 << QRectF(100, 500, 280, 124);
 }
 
 void LayerShellV1WindowTest::testMargins()
 {
     // Create a layer shell surface.
-    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
-    QScopedPointer<Test::LayerSurfaceV1> shellSurface(Test::createLayerSurfaceV1(surface.data(), QStringLiteral("test")));
+    std::unique_ptr<KWayland::Client::Surface> surface(Test::createSurface());
+    std::unique_ptr<Test::LayerSurfaceV1> shellSurface(Test::createLayerSurfaceV1(surface.get(), QStringLiteral("test")));
 
     // Set the initial state of the layer surface.
     QFETCH(QMargins, margins);
@@ -239,14 +238,14 @@ void LayerShellV1WindowTest::testMargins()
     surface->commit(KWayland::Client::Surface::CommitFlag::None);
 
     // Wait for the compositor to position the surface.
-    QSignalSpy configureRequestedSpy(shellSurface.data(), &Test::LayerSurfaceV1::configureRequested);
+    QSignalSpy configureRequestedSpy(shellSurface.get(), &Test::LayerSurfaceV1::configureRequested);
     QVERIFY(configureRequestedSpy.isValid());
     QVERIFY(configureRequestedSpy.wait());
     const QSize requestedSize = configureRequestedSpy.last().at(1).toSize();
 
     // Map the layer surface.
     shellSurface->ack_configure(configureRequestedSpy.last().at(0).toUInt());
-    Window *window = Test::renderAndWaitForShown(surface.data(), requestedSize, Qt::red);
+    Window *window = Test::renderAndWaitForShown(surface.get(), requestedSize, Qt::red);
     QVERIFY(window);
 
     // Verify that the window is placed at expected location.
@@ -271,8 +270,8 @@ void LayerShellV1WindowTest::testLayer_data()
 void LayerShellV1WindowTest::testLayer()
 {
     // Create a layer shell surface.
-    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
-    QScopedPointer<Test::LayerSurfaceV1> shellSurface(Test::createLayerSurfaceV1(surface.data(), QStringLiteral("test")));
+    std::unique_ptr<KWayland::Client::Surface> surface(Test::createSurface());
+    std::unique_ptr<Test::LayerSurfaceV1> shellSurface(Test::createLayerSurfaceV1(surface.get(), QStringLiteral("test")));
 
     // Set the initial state of the layer surface.
     QFETCH(int, protocolLayer);
@@ -281,14 +280,14 @@ void LayerShellV1WindowTest::testLayer()
     surface->commit(KWayland::Client::Surface::CommitFlag::None);
 
     // Wait for the compositor to position the surface.
-    QSignalSpy configureRequestedSpy(shellSurface.data(), &Test::LayerSurfaceV1::configureRequested);
+    QSignalSpy configureRequestedSpy(shellSurface.get(), &Test::LayerSurfaceV1::configureRequested);
     QVERIFY(configureRequestedSpy.isValid());
     QVERIFY(configureRequestedSpy.wait());
     const QSize requestedSize = configureRequestedSpy.last().at(1).toSize();
 
     // Map the layer surface.
     shellSurface->ack_configure(configureRequestedSpy.last().at(0).toUInt());
-    Window *window = Test::renderAndWaitForShown(surface.data(), requestedSize, Qt::red);
+    Window *window = Test::renderAndWaitForShown(surface.get(), requestedSize, Qt::red);
     QVERIFY(window);
 
     // Verify that the window is placed at expected location.
@@ -303,19 +302,19 @@ void LayerShellV1WindowTest::testPlacementArea_data()
 {
     QTest::addColumn<int>("anchor");
     QTest::addColumn<int>("exclusiveZone");
-    QTest::addColumn<QRect>("placementArea");
+    QTest::addColumn<QRectF>("placementArea");
 
-    QTest::addRow("left") << int(Test::LayerSurfaceV1::anchor_left) << 300 << QRect(300, 0, 980, 1024);
-    QTest::addRow("top") << int(Test::LayerSurfaceV1::anchor_top) << 300 << QRect(0, 300, 1280, 724);
-    QTest::addRow("right") << int(Test::LayerSurfaceV1::anchor_right) << 300 << QRect(0, 0, 980, 1024);
-    QTest::addRow("bottom") << int(Test::LayerSurfaceV1::anchor_bottom) << 300 << QRect(0, 0, 1280, 724);
+    QTest::addRow("left") << int(Test::LayerSurfaceV1::anchor_left) << 300 << QRectF(300, 0, 980, 1024);
+    QTest::addRow("top") << int(Test::LayerSurfaceV1::anchor_top) << 300 << QRectF(0, 300, 1280, 724);
+    QTest::addRow("right") << int(Test::LayerSurfaceV1::anchor_right) << 300 << QRectF(0, 0, 980, 1024);
+    QTest::addRow("bottom") << int(Test::LayerSurfaceV1::anchor_bottom) << 300 << QRectF(0, 0, 1280, 724);
 }
 
 void LayerShellV1WindowTest::testPlacementArea()
 {
     // Create a layer shell surface.
-    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
-    QScopedPointer<Test::LayerSurfaceV1> shellSurface(Test::createLayerSurfaceV1(surface.data(), QStringLiteral("test")));
+    std::unique_ptr<KWayland::Client::Surface> surface(Test::createSurface());
+    std::unique_ptr<Test::LayerSurfaceV1> shellSurface(Test::createLayerSurfaceV1(surface.get(), QStringLiteral("test")));
 
     // Set the initial state of the layer surface.
     QFETCH(int, anchor);
@@ -326,14 +325,14 @@ void LayerShellV1WindowTest::testPlacementArea()
     surface->commit(KWayland::Client::Surface::CommitFlag::None);
 
     // Wait for the compositor to position the surface.
-    QSignalSpy configureRequestedSpy(shellSurface.data(), &Test::LayerSurfaceV1::configureRequested);
+    QSignalSpy configureRequestedSpy(shellSurface.get(), &Test::LayerSurfaceV1::configureRequested);
     QVERIFY(configureRequestedSpy.isValid());
     QVERIFY(configureRequestedSpy.wait());
     const QSize requestedSize = configureRequestedSpy.last().at(1).toSize();
 
     // Map the layer surface.
     shellSurface->ack_configure(configureRequestedSpy.last().at(0).toUInt());
-    Window *window = Test::renderAndWaitForShown(surface.data(), requestedSize, Qt::red);
+    Window *window = Test::renderAndWaitForShown(surface.get(), requestedSize, Qt::red);
     QVERIFY(window);
 
     // Verify that the work area has been adjusted.
@@ -348,26 +347,26 @@ void LayerShellV1WindowTest::testFill_data()
 {
     QTest::addColumn<int>("anchor");
     QTest::addColumn<QSize>("desiredSize");
-    QTest::addColumn<QRect>("expectedGeometry");
+    QTest::addColumn<QRectF>("expectedGeometry");
 
     QTest::addRow("horizontal") << (Test::LayerSurfaceV1::anchor_left | Test::LayerSurfaceV1::anchor_right)
                                 << QSize(0, 124)
-                                << QRect(0, 450, 1280, 124);
+                                << QRectF(0, 450, 1280, 124);
 
     QTest::addRow("vertical") << (Test::LayerSurfaceV1::anchor_top | Test::LayerSurfaceV1::anchor_bottom)
                               << QSize(280, 0)
-                              << QRect(500, 0, 280, 1024);
+                              << QRectF(500, 0, 280, 1024);
 
     QTest::addRow("all") << (Test::LayerSurfaceV1::anchor_left | Test::LayerSurfaceV1::anchor_top | Test::LayerSurfaceV1::anchor_right | Test::LayerSurfaceV1::anchor_bottom)
                          << QSize(0, 0)
-                         << QRect(0, 0, 1280, 1024);
+                         << QRectF(0, 0, 1280, 1024);
 }
 
 void LayerShellV1WindowTest::testFill()
 {
     // Create a layer shell surface.
-    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
-    QScopedPointer<Test::LayerSurfaceV1> shellSurface(Test::createLayerSurfaceV1(surface.data(), QStringLiteral("test")));
+    std::unique_ptr<KWayland::Client::Surface> surface(Test::createSurface());
+    std::unique_ptr<Test::LayerSurfaceV1> shellSurface(Test::createLayerSurfaceV1(surface.get(), QStringLiteral("test")));
 
     // Set the initial state of the layer surface.
     QFETCH(int, anchor);
@@ -377,14 +376,14 @@ void LayerShellV1WindowTest::testFill()
     surface->commit(KWayland::Client::Surface::CommitFlag::None);
 
     // Wait for the compositor to position the surface.
-    QSignalSpy configureRequestedSpy(shellSurface.data(), &Test::LayerSurfaceV1::configureRequested);
+    QSignalSpy configureRequestedSpy(shellSurface.get(), &Test::LayerSurfaceV1::configureRequested);
     QVERIFY(configureRequestedSpy.isValid());
     QVERIFY(configureRequestedSpy.wait());
     const QSize requestedSize = configureRequestedSpy.last().at(1).toSize();
 
     // Map the layer surface.
     shellSurface->ack_configure(configureRequestedSpy.last().at(0).toUInt());
-    Window *window = Test::renderAndWaitForShown(surface.data(), requestedSize, Qt::red);
+    Window *window = Test::renderAndWaitForShown(surface.get(), requestedSize, Qt::red);
     QVERIFY(window);
 
     // Verify that the window is placed at expected location.
@@ -398,11 +397,11 @@ void LayerShellV1WindowTest::testFill()
 void LayerShellV1WindowTest::testStack()
 {
     // Create a layer shell surface.
-    QScopedPointer<KWayland::Client::Surface> surface1(Test::createSurface());
-    QScopedPointer<Test::LayerSurfaceV1> shellSurface1(Test::createLayerSurfaceV1(surface1.data(), QStringLiteral("test")));
+    std::unique_ptr<KWayland::Client::Surface> surface1(Test::createSurface());
+    std::unique_ptr<Test::LayerSurfaceV1> shellSurface1(Test::createLayerSurfaceV1(surface1.get(), QStringLiteral("test")));
 
-    QScopedPointer<KWayland::Client::Surface> surface2(Test::createSurface());
-    QScopedPointer<Test::LayerSurfaceV1> shellSurface2(Test::createLayerSurfaceV1(surface2.data(), QStringLiteral("test")));
+    std::unique_ptr<KWayland::Client::Surface> surface2(Test::createSurface());
+    std::unique_ptr<Test::LayerSurfaceV1> shellSurface2(Test::createLayerSurfaceV1(surface2.get(), QStringLiteral("test")));
 
     // Set the initial state of the layer surface.
     shellSurface1->set_anchor(Test::LayerSurfaceV1::anchor_left);
@@ -416,19 +415,19 @@ void LayerShellV1WindowTest::testStack()
     surface2->commit(KWayland::Client::Surface::CommitFlag::None);
 
     // Wait for the compositor to position the surfaces.
-    QSignalSpy configureRequestedSpy1(shellSurface1.data(), &Test::LayerSurfaceV1::configureRequested);
-    QSignalSpy configureRequestedSpy2(shellSurface2.data(), &Test::LayerSurfaceV1::configureRequested);
+    QSignalSpy configureRequestedSpy1(shellSurface1.get(), &Test::LayerSurfaceV1::configureRequested);
+    QSignalSpy configureRequestedSpy2(shellSurface2.get(), &Test::LayerSurfaceV1::configureRequested);
     QVERIFY(configureRequestedSpy2.wait());
     const QSize requestedSize1 = configureRequestedSpy1.last().at(1).toSize();
     const QSize requestedSize2 = configureRequestedSpy2.last().at(1).toSize();
 
     // Map the layer surface.
     shellSurface1->ack_configure(configureRequestedSpy1.last().at(0).toUInt());
-    Window *window1 = Test::renderAndWaitForShown(surface1.data(), requestedSize1, Qt::red);
+    Window *window1 = Test::renderAndWaitForShown(surface1.get(), requestedSize1, Qt::red);
     QVERIFY(window1);
 
     shellSurface2->ack_configure(configureRequestedSpy2.last().at(0).toUInt());
-    Window *window2 = Test::renderAndWaitForShown(surface2.data(), requestedSize2, Qt::red);
+    Window *window2 = Test::renderAndWaitForShown(surface2.get(), requestedSize2, Qt::red);
     QVERIFY(window2);
 
     // Check that the second layer surface is placed next to the first.
@@ -449,8 +448,8 @@ void LayerShellV1WindowTest::testStack()
 void LayerShellV1WindowTest::testFocus()
 {
     // Create a layer shell surface.
-    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
-    QScopedPointer<Test::LayerSurfaceV1> shellSurface(Test::createLayerSurfaceV1(surface.data(), QStringLiteral("test")));
+    std::unique_ptr<KWayland::Client::Surface> surface(Test::createSurface());
+    std::unique_ptr<Test::LayerSurfaceV1> shellSurface(Test::createLayerSurfaceV1(surface.get(), QStringLiteral("test")));
 
     // Set the initial state of the layer surface.
     shellSurface->set_keyboard_interactivity(1);
@@ -458,14 +457,14 @@ void LayerShellV1WindowTest::testFocus()
     surface->commit(KWayland::Client::Surface::CommitFlag::None);
 
     // Wait for the compositor to position the surface.
-    QSignalSpy configureRequestedSpy(shellSurface.data(), &Test::LayerSurfaceV1::configureRequested);
+    QSignalSpy configureRequestedSpy(shellSurface.get(), &Test::LayerSurfaceV1::configureRequested);
     QVERIFY(configureRequestedSpy.isValid());
     QVERIFY(configureRequestedSpy.wait());
     const QSize requestedSize = configureRequestedSpy.last().at(1).toSize();
 
     // Map the layer surface.
     shellSurface->ack_configure(configureRequestedSpy.last().at(0).toUInt());
-    Window *window = Test::renderAndWaitForShown(surface.data(), requestedSize, Qt::red);
+    Window *window = Test::renderAndWaitForShown(surface.get(), requestedSize, Qt::red);
     QVERIFY(window);
 
     // The layer surface must be focused when it's mapped.
@@ -490,8 +489,8 @@ void LayerShellV1WindowTest::testActivate_data()
 void LayerShellV1WindowTest::testActivate()
 {
     // Create a layer shell surface.
-    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
-    QScopedPointer<Test::LayerSurfaceV1> shellSurface(Test::createLayerSurfaceV1(surface.data(), QStringLiteral("test")));
+    std::unique_ptr<KWayland::Client::Surface> surface(Test::createSurface());
+    std::unique_ptr<Test::LayerSurfaceV1> shellSurface(Test::createLayerSurfaceV1(surface.get(), QStringLiteral("test")));
 
     // Set the initial state of the layer surface.
     QFETCH(int, layer);
@@ -500,14 +499,14 @@ void LayerShellV1WindowTest::testActivate()
     surface->commit(KWayland::Client::Surface::CommitFlag::None);
 
     // Wait for the compositor to position the surface.
-    QSignalSpy configureRequestedSpy(shellSurface.data(), &Test::LayerSurfaceV1::configureRequested);
+    QSignalSpy configureRequestedSpy(shellSurface.get(), &Test::LayerSurfaceV1::configureRequested);
     QVERIFY(configureRequestedSpy.isValid());
     QVERIFY(configureRequestedSpy.wait());
     const QSize requestedSize = configureRequestedSpy.last().at(1).toSize();
 
     // Map the layer surface.
     shellSurface->ack_configure(configureRequestedSpy.last().at(0).toUInt());
-    Window *window = Test::renderAndWaitForShown(surface.data(), requestedSize, Qt::red);
+    Window *window = Test::renderAndWaitForShown(surface.get(), requestedSize, Qt::red);
     QVERIFY(window);
     QVERIFY(!window->isActive());
 
@@ -527,21 +526,21 @@ void LayerShellV1WindowTest::testActivate()
 void LayerShellV1WindowTest::testUnmap()
 {
     // Create a layer shell surface.
-    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
-    QScopedPointer<Test::LayerSurfaceV1> shellSurface(Test::createLayerSurfaceV1(surface.data(), QStringLiteral("test")));
+    std::unique_ptr<KWayland::Client::Surface> surface(Test::createSurface());
+    std::unique_ptr<Test::LayerSurfaceV1> shellSurface(Test::createLayerSurfaceV1(surface.get(), QStringLiteral("test")));
 
     // Set the initial state of the layer surface.
     shellSurface->set_size(280, 124);
     surface->commit(KWayland::Client::Surface::CommitFlag::None);
 
     // Wait for the compositor to position the surface.
-    QSignalSpy configureRequestedSpy(shellSurface.data(), &Test::LayerSurfaceV1::configureRequested);
+    QSignalSpy configureRequestedSpy(shellSurface.get(), &Test::LayerSurfaceV1::configureRequested);
     QVERIFY(configureRequestedSpy.isValid());
     QVERIFY(configureRequestedSpy.wait());
 
     // Map the layer surface.
     shellSurface->ack_configure(configureRequestedSpy.last().at(0).toUInt());
-    Window *window = Test::renderAndWaitForShown(surface.data(), QSize(280, 124), Qt::red);
+    Window *window = Test::renderAndWaitForShown(surface.get(), QSize(280, 124), Qt::red);
     QVERIFY(window);
 
     // Unmap the layer surface.
@@ -558,7 +557,7 @@ void LayerShellV1WindowTest::testUnmap()
 
     // Map the layer surface back.
     shellSurface->ack_configure(configureRequestedSpy.last().at(0).toUInt());
-    window = Test::renderAndWaitForShown(surface.data(), QSize(280, 124), Qt::red);
+    window = Test::renderAndWaitForShown(surface.get(), QSize(280, 124), Qt::red);
     QVERIFY(window);
 
     // Destroy the window.

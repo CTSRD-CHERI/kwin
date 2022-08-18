@@ -66,11 +66,10 @@ void DontCrashReinitializeCompositorTest::initTestCase()
 
     kwinApp()->start();
     QVERIFY(applicationStartedSpy.wait());
-    const auto outputs = kwinApp()->platform()->enabledOutputs();
+    const auto outputs = workspace()->outputs();
     QCOMPARE(outputs.count(), 2);
     QCOMPARE(outputs[0]->geometry(), QRect(0, 0, 1280, 1024));
     QCOMPARE(outputs[1]->geometry(), QRect(1280, 0, 1280, 1024));
-    Test::initWaylandWorkspace();
 
     QCOMPARE(Compositor::self()->backend()->compositingType(), KWin::OpenGLCompositing);
 }
@@ -113,11 +112,11 @@ void DontCrashReinitializeCompositorTest::testReinitializeCompositor()
     // Create the test window.
     using namespace KWayland::Client;
 
-    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
-    QVERIFY(!surface.isNull());
-    QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
-    QVERIFY(!shellSurface.isNull());
-    Window *window = Test::renderAndWaitForShown(surface.data(), QSize(100, 50), Qt::blue);
+    std::unique_ptr<KWayland::Client::Surface> surface(Test::createSurface());
+    QVERIFY(surface != nullptr);
+    std::unique_ptr<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.get()));
+    QVERIFY(shellSurface != nullptr);
+    Window *window = Test::renderAndWaitForShown(surface.get(), QSize(100, 50), Qt::blue);
     QVERIFY(window);
 
     // Make sure that only the test effect is loaded.

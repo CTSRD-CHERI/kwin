@@ -15,6 +15,7 @@
 #include "main.h"
 #include "scene.h"
 #include "unmanaged.h"
+#include "utils/filedescriptor.h"
 #include "utils/subsurfacemonitor.h"
 #include "wayland/abstract_data_source.h"
 #include "wayland/clientconnection.h"
@@ -45,6 +46,7 @@
 #include <QMetaType>
 #include <QMouseEvent>
 #include <QScopeGuard>
+#include <QSortFilterProxyModel>
 #include <QtConcurrentRun>
 
 #include <wayland-server-core.h>
@@ -591,8 +593,15 @@ DebugConsole::DebugConsole()
 {
     setAttribute(Qt::WA_ShowWithoutActivating);
     m_ui->setupUi(this);
+
+    auto windowsModel = new DebugConsoleModel(this);
+    QSortFilterProxyModel *proxyWindowsModel = new QSortFilterProxyModel(this);
+    proxyWindowsModel->setSourceModel(windowsModel);
+    m_ui->windowsView->setModel(proxyWindowsModel);
+    m_ui->windowsView->sortByColumn(0, Qt::AscendingOrder);
+    m_ui->windowsView->header()->setSortIndicatorShown(true);
     m_ui->windowsView->setItemDelegate(new DebugConsoleDelegate(this));
-    m_ui->windowsView->setModel(new DebugConsoleModel(this));
+
     m_ui->surfacesView->setModel(new SurfaceTreeModel(this));
     m_ui->clipboardContent->setModel(new DataSourceModel(this));
     m_ui->primaryContent->setModel(new DataSourceModel(this));
@@ -611,9 +620,9 @@ DebugConsole::DebugConsole()
     connect(m_ui->quitButton, &QAbstractButton::clicked, this, &DebugConsole::deleteLater);
     connect(m_ui->tabWidget, &QTabWidget::currentChanged, this, [this](int index) {
         // delay creation of input event filter until the tab is selected
-        if (index == 2 && m_inputFilter.isNull()) {
+        if (index == 2 && !m_inputFilter) {
             m_inputFilter.reset(new DebugConsoleFilter(m_ui->inputTextEdit));
-            input()->installInputEventSpy(m_inputFilter.data());
+            input()->installInputEventSpy(m_inputFilter.get());
         }
         if (index == 5) {
             updateKeyboardTab();
@@ -758,6 +767,10 @@ QString DebugConsoleDelegate::displayText(const QVariant &value, const QLocale &
     }
     case QMetaType::QRect: {
         const QRect r = value.toRect();
+        return QStringLiteral("%1,%2 %3x%4").arg(r.x()).arg(r.y()).arg(r.width()).arg(r.height());
+    }
+    case QMetaType::QRectF: {
+        const QRectF r = value.toRectF();
         return QStringLiteral("%1,%2 %3x%4").arg(r.x()).arg(r.y()).arg(r.width()).arg(r.height());
     }
     default:
@@ -1157,6 +1170,8 @@ QVariant DebugConsoleModel::propertyData(QObject *object, const QModelIndex &ind
                 return QStringLiteral("NET::OnScreenDisplay");
             case NET::CriticalNotification:
                 return QStringLiteral("NET::CriticalNotification");
+            case NET::AppletPopup:
+                return QStringLiteral("NET::AppletPopup");
             case NET::Unknown:
             default:
                 return QStringLiteral("NET::Unknown");
@@ -1636,9 +1651,7 @@ static QByteArray readData(int fd)
     pollfd pfd;
     pfd.fd = fd;
     pfd.events = POLLIN;
-    auto closeFd = qScopeGuard([fd] {
-        close(fd);
-    });
+    FileDescriptor closeFd{fd};
     QByteArray data;
     while (true) {
         const int ready = poll(&pfd, 1, 1000);

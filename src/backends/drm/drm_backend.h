@@ -11,7 +11,7 @@
 #include "platform.h"
 
 #include "dpmsinputeventfilter.h"
-#include "placeholderinputeventfilter.h"
+#include "drm_placeholderinputeventfilter.h"
 
 #include <QPointer>
 #include <QSize>
@@ -19,9 +19,12 @@
 
 #include <memory>
 
+struct gbm_bo;
+
 namespace KWin
 {
 
+class Session;
 class Udev;
 class UdevMonitor;
 class UdevDevice;
@@ -35,21 +38,22 @@ class DrmRenderBackend;
 class KWIN_EXPORT DrmBackend : public Platform
 {
     Q_OBJECT
-    Q_INTERFACES(KWin::Platform)
-    Q_PLUGIN_METADATA(IID "org.kde.kwin.Platform" FILE "drm.json")
+
 public:
-    explicit DrmBackend(QObject *parent = nullptr);
+    explicit DrmBackend(Session *session, QObject *parent = nullptr);
     ~DrmBackend() override;
 
-    InputBackend *createInputBackend() override;
-    QPainterBackend *createQPainterBackend() override;
-    OpenGLBackend *createOpenGLBackend() override;
-    QSharedPointer<DmaBufTexture> createDmaBufTexture(const QSize &size) override;
-    Session *session() const override;
+    Session *session() const;
+
+    std::unique_ptr<InputBackend> createInputBackend() override;
+    std::unique_ptr<QPainterBackend> createQPainterBackend() override;
+    std::unique_ptr<OpenGLBackend> createOpenGLBackend() override;
+
+    std::optional<DmaBufParams> testCreateDmaBuf(const QSize &size, quint32 format, const QVector<uint64_t> &modifiers) override;
+    std::shared_ptr<DmaBufTexture> createDmaBufTexture(const QSize &size, quint32 format, const uint64_t modifier) override;
     bool initialize() override;
 
     Outputs outputs() const override;
-    Outputs enabledOutputs() const override;
 
     void enableOutput(DrmAbstractOutput *output, bool enable);
 
@@ -64,7 +68,7 @@ public:
 
     DrmGpu *primaryGpu() const;
     DrmGpu *findGpu(dev_t deviceId) const;
-    DrmGpu *findGpuByFd(int fd) const;
+    size_t gpuCount() const;
 
     bool isActive() const;
 
@@ -72,6 +76,7 @@ public:
     DrmRenderBackend *renderBackend() const;
 
     void releaseBuffers();
+    void updateOutputs();
 
 public Q_SLOTS:
     void turnOutputsOn();
@@ -79,8 +84,6 @@ public Q_SLOTS:
 
 Q_SIGNALS:
     void activeChanged();
-    void gpuRemoved(DrmGpu *gpu);
-    void gpuAdded(DrmGpu *gpu);
 
 protected:
     bool applyOutputChanges(const OutputConfiguration &config) override;
@@ -92,14 +95,13 @@ private:
     void activate(bool active);
     void reactivate();
     void deactivate();
-    void updateOutputs();
-    bool readOutputsConfiguration(const QVector<DrmAbstractOutput *> &outputs);
     void handleUdevEvent();
+    void removeGpu(DrmGpu *gpu);
     DrmGpu *addGpu(const QString &fileName);
 
-    QScopedPointer<Udev> m_udev;
-    QScopedPointer<UdevMonitor> m_udevMonitor;
-    Session *m_session = nullptr;
+    std::unique_ptr<Udev> m_udev;
+    std::unique_ptr<UdevMonitor> m_udevMonitor;
+    Session *m_session;
     // all outputs, enabled and disabled
     QVector<DrmAbstractOutput *> m_outputs;
     // only enabled outputs
@@ -108,10 +110,12 @@ private:
 
     bool m_active = false;
     const QStringList m_explicitGpus;
-    QVector<DrmGpu *> m_gpus;
-    QScopedPointer<DpmsInputEventFilter> m_dpmsFilter;
-    QScopedPointer<PlaceholderInputEventFilter> m_placeholderFilter;
+    std::vector<std::unique_ptr<DrmGpu>> m_gpus;
+    std::unique_ptr<DpmsInputEventFilter> m_dpmsFilter;
+    std::unique_ptr<PlaceholderInputEventFilter> m_placeholderFilter;
     DrmRenderBackend *m_renderBackend = nullptr;
+
+    gbm_bo *createBo(const QSize &size, quint32 format, const QVector<uint64_t> &modifiers);
 };
 
 }

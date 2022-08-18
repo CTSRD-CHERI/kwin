@@ -556,10 +556,10 @@ bool Rules::update(Window *c, int selection)
 
 APPLY_FORCE_RULE(placement, Placement, Placement::Policy)
 
-bool Rules::applyGeometry(QRect &rect, bool init) const
+bool Rules::applyGeometry(QRectF &rect, bool init) const
 {
-    QPoint p = rect.topLeft();
-    QSize s = rect.size();
+    QPointF p = rect.topLeft();
+    QSizeF s = rect.size();
     bool ret = false; // no short-circuiting
     if (applyPosition(p, init)) {
         rect.moveTopLeft(p);
@@ -572,7 +572,7 @@ bool Rules::applyGeometry(QRect &rect, bool init) const
     return ret;
 }
 
-bool Rules::applyPosition(QPoint &pos, bool init) const
+bool Rules::applyPosition(QPointF &pos, bool init) const
 {
     if (this->position != invalidPoint && checkSetRule(positionrule, init)) {
         pos = this->position;
@@ -580,7 +580,7 @@ bool Rules::applyPosition(QPoint &pos, bool init) const
     return checkSetStop(positionrule);
 }
 
-bool Rules::applySize(QSize &s, bool init) const
+bool Rules::applySize(QSizeF &s, bool init) const
 {
     if (this->size.isValid() && checkSetRule(sizerule, init)) {
         s = this->size;
@@ -588,8 +588,8 @@ bool Rules::applySize(QSize &s, bool init) const
     return checkSetStop(sizerule);
 }
 
-APPLY_FORCE_RULE(minsize, MinSize, QSize)
-APPLY_FORCE_RULE(maxsize, MaxSize, QSize)
+APPLY_FORCE_RULE(minsize, MinSize, QSizeF)
+APPLY_FORCE_RULE(maxsize, MaxSize, QSizeF)
 APPLY_FORCE_RULE(opacityactive, OpacityActive, int)
 APPLY_FORCE_RULE(opacityinactive, OpacityInactive, int)
 APPLY_RULE(ignoregeometry, IgnoreGeometry, bool)
@@ -776,7 +776,7 @@ void WindowRules::update(Window *c, int selection)
         }
     }
     if (updated) {
-        RuleBook::self()->requestDiskStorage();
+        workspace()->rulebook()->requestDiskStorage();
     }
 }
 
@@ -812,15 +812,15 @@ void WindowRules::update(Window *c, int selection)
 
 CHECK_FORCE_RULE(Placement, Placement::Policy)
 
-QRect WindowRules::checkGeometry(QRect rect, bool init) const
+QRectF WindowRules::checkGeometry(QRectF rect, bool init) const
 {
-    return QRect(checkPosition(rect.topLeft(), init), checkSize(rect.size(), init));
+    return QRectF(checkPosition(rect.topLeft(), init), checkSize(rect.size(), init));
 }
 
-CHECK_RULE(Position, QPoint)
-CHECK_RULE(Size, QSize)
-CHECK_FORCE_RULE(MinSize, QSize)
-CHECK_FORCE_RULE(MaxSize, QSize)
+CHECK_RULE(Position, QPointF)
+CHECK_RULE(Size, QSizeF)
+CHECK_FORCE_RULE(MinSize, QSizeF)
+CHECK_FORCE_RULE(MaxSize, QSizeF)
 CHECK_FORCE_RULE(OpacityActive, int)
 CHECK_FORCE_RULE(OpacityInactive, int)
 CHECK_RULE(IgnoreGeometry, bool)
@@ -843,13 +843,13 @@ Output *WindowRules::checkOutput(Output *output, bool init) const
     if (rules.isEmpty()) {
         return output;
     }
-    int ret = kwinApp()->platform()->enabledOutputs().indexOf(output);
+    int ret = workspace()->outputs().indexOf(output);
     for (Rules *rule : rules) {
         if (rule->applyScreen(ret, init)) {
             break;
         }
     }
-    Output *ruleOutput = kwinApp()->platform()->findOutput(ret);
+    Output *ruleOutput = workspace()->outputs().value(ret);
     return ruleOutput ? ruleOutput : output;
 }
 
@@ -879,11 +879,8 @@ CHECK_RULE(DesktopFile, QString)
 #undef CHECK_RULE
 #undef CHECK_FORCE_RULE
 
-KWIN_SINGLETON_FACTORY(RuleBook)
-
-RuleBook::RuleBook(QObject *parent)
-    : QObject(parent)
-    , m_updateTimer(new QTimer(this))
+RuleBook::RuleBook()
+    : m_updateTimer(new QTimer(this))
     , m_updatesDisabled(false)
     , m_temporaryRulesMessages()
 {
@@ -908,7 +905,7 @@ void RuleBook::initializeX11()
         return;
     }
     m_temporaryRulesMessages.reset(new KXMessages(c, kwinApp()->x11RootWindow(), "_KDE_NET_WM_TEMPORARY_RULES", nullptr));
-    connect(m_temporaryRulesMessages.data(), &KXMessages::gotMessage, this, &RuleBook::temporaryRulesMessage);
+    connect(m_temporaryRulesMessages.get(), &KXMessages::gotMessage, this, &RuleBook::temporaryRulesMessage);
 }
 
 void RuleBook::cleanupX11()

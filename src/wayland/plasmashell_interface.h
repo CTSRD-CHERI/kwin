@@ -9,6 +9,7 @@
 #include "kwin_export.h"
 
 #include <QObject>
+#include <memory>
 
 class QSize;
 struct wl_resource;
@@ -47,7 +48,7 @@ Q_SIGNALS:
     void surfaceCreated(KWaylandServer::PlasmaShellSurfaceInterface *);
 
 private:
-    QScopedPointer<PlasmaShellInterfacePrivate> d;
+    std::unique_ptr<PlasmaShellInterfacePrivate> d;
 };
 
 /**
@@ -91,6 +92,7 @@ public:
         Notification, ///< The surface represents a notification
         ToolTip, ///< The surface represents a tooltip
         CriticalNotification, ///< The surface represents a critical notification, like battery is running out
+        AppletPopup, ///< The surface represents an applet popup window
     };
     /**
      * @returns The requested role, default value is @c Role::Normal.
@@ -223,7 +225,7 @@ Q_SIGNALS:
 private:
     friend class PlasmaShellInterfacePrivate;
     explicit PlasmaShellSurfaceInterface(SurfaceInterface *surface, wl_resource *resource);
-    QScopedPointer<PlasmaShellSurfaceInterfacePrivate> d;
+    std::unique_ptr<PlasmaShellSurfaceInterfacePrivate> d;
 };
 
 }

@@ -6,6 +6,7 @@
 #pragma once
 
 #include <QObject>
+#include <memory>
 
 #include "textinput.h"
 
@@ -35,7 +36,7 @@ public:
     ~TextInputManagerV2Interface() override;
 
 private:
-    QScopedPointer<TextInputManagerV2InterfacePrivate> d;
+    std::unique_ptr<TextInputManagerV2InterfacePrivate> d;
 };
 
 /**
@@ -67,7 +68,7 @@ public:
         StateReset = 2, // full state after reset
         StateEnter = 3, // full state after switching focus to a different widget on client side
     };
-    Q_ENUM(UpdateReason);
+    Q_ENUM(UpdateReason)
     /**
      * The preferred language as a RFC-3066 format language tag.
      *
@@ -277,7 +278,7 @@ private:
     friend class TextInputV2InterfacePrivate;
     explicit TextInputV2Interface(SeatInterface *seat);
 
-    QScopedPointer<TextInputV2InterfacePrivate> d;
+    std::unique_ptr<TextInputV2InterfacePrivate> d;
 };
 
 }

@@ -53,29 +53,25 @@
 */
 
 #include "scene.h"
+#include "composite.h"
+#include "deleted.h"
+#include "effects.h"
 #include "internalwindow.h"
 #include "output.h"
 #include "platform.h"
 #include "renderlayer.h"
+#include "renderloop.h"
+#include "shadow.h"
 #include "shadowitem.h"
 #include "surfaceitem.h"
 #include "unmanaged.h"
 #include "wayland/surface_interface.h"
+#include "wayland_server.h"
 #include "waylandwindow.h"
 #include "windowitem.h"
 #include "workspace.h"
 #include "x11window.h"
 
-#include <QQuickWindow>
-#include <QVector2D>
-
-#include "composite.h"
-#include "deleted.h"
-#include "effects.h"
-#include "renderloop.h"
-#include "shadow.h"
-#include "wayland_server.h"
-#include "x11window.h"
 #include <QtMath>
 
 namespace KWin
@@ -135,10 +131,7 @@ QRect SceneDelegate::viewport() const
 // Scene
 //****************************************
 
-Scene::Scene(QObject *parent)
-    : QObject(parent)
-{
-}
+Scene::Scene() = default;
 
 Scene::~Scene()
 {
@@ -263,7 +256,7 @@ void Scene::prePaint(Output *output)
     createStackingOrder();
 
     if (kwinApp()->operationMode() == Application::OperationModeX11) {
-        painted_screen = kwinApp()->platform()->enabledOutputs().constFirst();
+        painted_screen = workspace()->outputs().constFirst();
         setRenderTargetRect(geometry());
         setRenderTargetScale(1);
     } else {
@@ -292,6 +285,9 @@ void Scene::prePaint(Output *output)
     ScreenPrePaintData prePaintData;
     prePaintData.mask = 0;
     prePaintData.screen = EffectScreenImpl::get(painted_screen);
+
+    effects->makeOpenGLContextCurrent();
+    Q_EMIT preFrameRender();
 
     effects->prePaintScreen(prePaintData, m_expectedPresentTimestamp);
     m_paintContext.damage = prePaintData.paint;
@@ -528,7 +524,7 @@ void Scene::paintSimpleScreen(int, const QRegion &region)
         data->region = visible;
 
         if (!(data->mask & PAINT_WINDOW_TRANSFORMED)) {
-            data->region &= data->item->mapToGlobal(data->item->boundingRect());
+            data->region &= data->item->mapToGlobal(data->item->boundingRect()).toAlignedRect();
 
             if (!(data->mask & PAINT_WINDOW_TRANSLUCENT)) {
                 visible -= data->opaque;
@@ -584,7 +580,7 @@ void Scene::paintWindow(WindowItem *item, int mask, const QRegion &region)
         return;
     }
 
-    WindowPaintData data(screenProjectionMatrix());
+    WindowPaintData data(renderTargetProjectionMatrix());
     effects->paintWindow(item->window()->effectWindow(), mask, region, data);
 }
 
@@ -614,11 +610,6 @@ bool Scene::supportsNativeFence() const
     return false;
 }
 
-QMatrix4x4 Scene::screenProjectionMatrix() const
-{
-    return QMatrix4x4();
-}
-
 QPainter *Scene::scenePainter() const
 {
     return nullptr;
@@ -629,19 +620,19 @@ QVector<QByteArray> Scene::openGLPlatformInterfaceExtensions() const
     return QVector<QByteArray>{};
 }
 
-SurfaceTexture *Scene::createSurfaceTextureInternal(SurfacePixmapInternal *pixmap)
+std::unique_ptr<SurfaceTexture> Scene::createSurfaceTextureInternal(SurfacePixmapInternal *pixmap)
 {
     Q_UNUSED(pixmap)
     return nullptr;
 }
 
-SurfaceTexture *Scene::createSurfaceTextureX11(SurfacePixmapX11 *pixmap)
+std::unique_ptr<SurfaceTexture> Scene::createSurfaceTextureX11(SurfacePixmapX11 *pixmap)
 {
     Q_UNUSED(pixmap)
     return nullptr;
 }
 
-SurfaceTexture *Scene::createSurfaceTextureWayland(SurfacePixmapWayland *pixmap)
+std::unique_ptr<SurfaceTexture> Scene::createSurfaceTextureWayland(SurfacePixmapWayland *pixmap)
 {
     Q_UNUSED(pixmap)
     return nullptr;

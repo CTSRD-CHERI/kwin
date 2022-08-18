@@ -10,6 +10,7 @@
 #include "kwin_export.h"
 
 #include <QObject>
+#include <memory>
 
 /*
  * In terms of protocol XdgOutputInterface are a resource
@@ -46,7 +47,7 @@ public:
     XdgOutputV1Interface *createXdgOutput(OutputInterface *output, QObject *parent);
 
 private:
-    QScopedPointer<XdgOutputManagerV1InterfacePrivate> d;
+    std::unique_ptr<XdgOutputManagerV1InterfacePrivate> d;
 };
 
 /**
@@ -111,11 +112,14 @@ public:
     void done();
 
 private:
+    void sendRefresh();
+
     explicit XdgOutputV1Interface(OutputInterface *output, QObject *parent);
+    friend class XdgOutputV1InterfacePrivate;
     friend class XdgOutputManagerV1Interface;
     friend class XdgOutputManagerV1InterfacePrivate;
 
-    QScopedPointer<XdgOutputV1InterfacePrivate> d;
+    std::unique_ptr<XdgOutputV1InterfacePrivate> d;
 };
 
 }

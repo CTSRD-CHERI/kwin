@@ -78,10 +78,8 @@ class KWIN_EXPORT NightColorManager : public Plugin
     Q_OBJECT
 
 public:
-    explicit NightColorManager(QObject *parent = nullptr);
+    explicit NightColorManager();
     ~NightColorManager() override;
-
-    void init();
 
     void autoLocationUpdate(double latitude, double longitude);
 

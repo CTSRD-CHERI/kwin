@@ -12,19 +12,20 @@
 #include <config-kwin.h>
 
 #include "atoms.h"
-#include "platform.h"
 #include "colormanager.h"
 #include "composite.h"
 #include "cursor.h"
 #include "input.h"
 #include "inputmethod.h"
 #include "options.h"
+#include "platform.h"
 #include "pluginmanager.h"
-#include "screens.h"
 #if KWIN_BUILD_SCREENLOCKER
 #include "screenlockerwatcher.h"
 #endif
+#include "session.h"
 #include "sm.h"
+#include "tabletmodemanager.h"
 #include "utils/xcbutils.h"
 #include "wayland/surface_interface.h"
 #include "workspace.h"
@@ -35,7 +36,6 @@
 // KDE
 #include <KAboutData>
 #include <KLocalizedString>
-#include <KPluginMetaData>
 // Qt
 #include <QCommandLineParser>
 #include <QLibraryInfo>
@@ -61,39 +61,14 @@ namespace KWin
 {
 
 Options *options;
-
 Atoms *atoms;
-
-int screen_number = -1;
-bool is_multihead = false;
-
 int Application::crashes = 0;
-
-bool Application::isX11MultiHead()
-{
-    return is_multihead;
-}
-
-void Application::setX11MultiHead(bool multiHead)
-{
-    is_multihead = multiHead;
-}
-
-void Application::setX11ScreenNumber(int screenNumber)
-{
-    screen_number = screenNumber;
-}
-
-int Application::x11ScreenNumber()
-{
-    return screen_number;
-}
 
 Application::Application(Application::OperationMode mode, int &argc, char **argv)
     : QApplication(argc, argv)
     , m_eventFilter(new XcbEventFilter())
     , m_configLock(false)
-    , m_config()
+    , m_config(KSharedConfig::openConfig(QStringLiteral("kwinrc")))
     , m_kxkbConfig()
     , m_operationMode(mode)
 {
@@ -134,9 +109,6 @@ void Application::start()
 
     setQuitOnLastWindowClosed(false);
 
-    if (!m_config) {
-        m_config = KSharedConfig::openConfig();
-    }
     if (!m_config->isImmutable() && m_configLock) {
         // TODO: This shouldn't be necessary
         // config->setReadOnly( true );
@@ -152,10 +124,9 @@ void Application::start()
 Application::~Application()
 {
     delete options;
-    destroyPlugins();
-    destroyColorManager();
     destroyAtoms();
     destroyPlatform();
+    m_session.reset();
 }
 
 void Application::notifyStarted()
@@ -171,8 +142,7 @@ void Application::destroyAtoms()
 
 void Application::destroyPlatform()
 {
-    delete m_platform;
-    m_platform = nullptr;
+    m_platform.reset();
 }
 
 void Application::resetCrashesCount()
@@ -276,20 +246,11 @@ void Application::createWorkspace()
 void Application::createInput()
 {
 #if KWIN_BUILD_SCREENLOCKER
-    ScreenLockerWatcher::create(this);
+    m_screenLockerWatcher = std::make_unique<ScreenLockerWatcher>();
 #endif
     auto input = InputRedirection::create(this);
     input->init();
     m_platform->createPlatformCursor(this);
-}
-
-void Application::createScreens()
-{
-    if (Screens::self()) {
-        return;
-    }
-    Screens::create(this);
-    Q_EMIT screensCreated();
 }
 
 void Application::createAtoms()
@@ -304,27 +265,32 @@ void Application::createOptions()
 
 void Application::createPlugins()
 {
-    PluginManager::create(this);
+    m_pluginManager = std::make_unique<PluginManager>();
 }
 
 void Application::createColorManager()
 {
-    ColorManager::create(this);
+    m_colorManager = std::make_unique<ColorManager>();
 }
 
 void Application::createInputMethod()
 {
-    InputMethod::create(this);
+    m_inputMethod = std::make_unique<InputMethod>();
+}
+
+void Application::createTabletModeManager()
+{
+    m_tabletModeManager = std::make_unique<TabletModeManager>();
 }
 
 void Application::installNativeX11EventFilter()
 {
-    installNativeEventFilter(m_eventFilter.data());
+    installNativeEventFilter(m_eventFilter.get());
 }
 
 void Application::removeNativeX11EventFilter()
 {
-    removeNativeEventFilter(m_eventFilter.data());
+    removeNativeEventFilter(m_eventFilter.get());
 }
 
 void Application::destroyInput()
@@ -344,17 +310,17 @@ void Application::destroyCompositor()
 
 void Application::destroyPlugins()
 {
-    delete PluginManager::self();
+    m_pluginManager.reset();
 }
 
 void Application::destroyColorManager()
 {
-    delete ColorManager::self();
+    m_colorManager.reset();
 }
 
 void Application::destroyInputMethod()
 {
-    delete InputMethod::self();
+    m_inputMethod.reset();
 }
 
 void Application::registerEventFilter(X11EventFilter *filter)
@@ -376,6 +342,14 @@ static X11EventFilterContainer *takeEventFilter(X11EventFilter *eventFilter,
         }
     }
     return nullptr;
+}
+
+void Application::setXwaylandScale(qreal scale)
+{
+    if (scale != m_xwaylandScale) {
+        m_xwaylandScale = scale;
+        Q_EMIT xwaylandScaleChanged();
+    }
 }
 
 void Application::unregisterEventFilter(X11EventFilter *filter)
@@ -572,29 +546,51 @@ bool XcbEventFilter::nativeEventFilter(const QByteArray &eventType, void *messag
 
 QProcessEnvironment Application::processStartupEnvironment() const
 {
-    return QProcessEnvironment::systemEnvironment();
+    return m_processEnvironment;
 }
 
-void Application::initPlatform(const KPluginMetaData &plugin)
+void Application::setProcessStartupEnvironment(const QProcessEnvironment &environment)
+{
+    m_processEnvironment = environment;
+}
+
+void Application::setPlatform(std::unique_ptr<Platform> &&platform)
 {
     Q_ASSERT(!m_platform);
-    QPluginLoader loader(plugin.fileName());
-    m_platform = qobject_cast<Platform *>(loader.instance());
-    if (m_platform) {
-        m_platform->setParent(this);
-        Q_EMIT platformCreated();
-    } else {
-        qCWarning(KWIN_CORE) << "Could not create plugin" << plugin.name() << "error:" << loader.errorString();
-    }
+    m_platform = std::move(platform);
 }
 
-ApplicationWaylandAbstract::ApplicationWaylandAbstract(OperationMode mode, int &argc, char **argv)
-    : Application(mode, argc, argv)
+void Application::setSession(std::unique_ptr<Session> &&session)
 {
+    Q_ASSERT(!m_session);
+    m_session = std::move(session);
 }
 
-ApplicationWaylandAbstract::~ApplicationWaylandAbstract()
+PluginManager *Application::pluginManager() const
 {
+    return m_pluginManager.get();
 }
+
+InputMethod *Application::inputMethod() const
+{
+    return m_inputMethod.get();
+}
+
+ColorManager *Application::colorManager() const
+{
+    return m_colorManager.get();
+}
+
+XwaylandInterface *Application::xwayland() const
+{
+    return nullptr;
+}
+
+#if KWIN_BUILD_SCREENLOCKER
+ScreenLockerWatcher *Application::screenLockerWatcher() const
+{
+    return m_screenLockerWatcher.get();
+}
+#endif
 
 } // namespace

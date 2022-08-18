@@ -134,12 +134,14 @@ public:
 
     void addRepaintFull() override;
     void addRepaint(const QRect &r) override;
+    void addRepaint(const QRectF &r) override;
+
     void addRepaint(const QRegion &r) override;
     void addRepaint(int x, int y, int w, int h) override;
     EffectScreen *activeScreen() const override;
-    QRect clientArea(clientAreaOption, const EffectScreen *screen, int desktop) const override;
-    QRect clientArea(clientAreaOption, const EffectWindow *c) const override;
-    QRect clientArea(clientAreaOption, const QPoint &p, int desktop) const override;
+    QRectF clientArea(clientAreaOption, const EffectScreen *screen, int desktop) const override;
+    QRectF clientArea(clientAreaOption, const EffectWindow *c) const override;
+    QRectF clientArea(clientAreaOption, const QPoint &p, int desktop) const override;
     QSize virtualScreenSize() const override;
     QRect virtualScreenGeometry() const override;
     double animationTimeFactor() const override;
@@ -166,7 +168,7 @@ public:
 
     bool decorationsHaveAlpha() const override;
 
-    EffectFrame *effectFrame(EffectFrameStyle style, bool staticSize, const QPoint &position, Qt::Alignment alignment) const override;
+    std::unique_ptr<EffectFrame> effectFrame(EffectFrameStyle style, bool staticSize, const QPoint &position, Qt::Alignment alignment) const override;
 
     QVariant kwinOption(KWinOption kwopt) override;
     bool isScreenLocked() const override;
@@ -284,11 +286,11 @@ protected Q_SLOTS:
     void slotClientMaximized(KWin::Window *window, MaximizeMode maxMode);
     void slotOpacityChanged(KWin::Window *window, qreal oldOpacity);
     void slotClientModalityChanged();
-    void slotGeometryShapeChanged(KWin::Window *window, const QRect &old);
-    void slotFrameGeometryChanged(Window *window, const QRect &oldGeometry);
+    void slotGeometryShapeChanged(KWin::Window *window, const QRectF &old);
+    void slotFrameGeometryChanged(Window *window, const QRectF &oldGeometry);
     void slotWindowDamaged(KWin::Window *window, const QRegion &r);
-    void slotOutputEnabled(Output *output);
-    void slotOutputDisabled(Output *output);
+    void slotOutputAdded(Output *output);
+    void slotOutputRemoved(Output *output);
 
 protected:
     void connectNotify(const QMetaMethod &signal) override;
@@ -360,6 +362,9 @@ public:
     Output *platformOutput() const;
 
     QString name() const override;
+    QString manufacturer() const override;
+    QString model() const override;
+    QString serialNumber() const override;
     qreal devicePixelRatio() const override;
     QRect geometry() const override;
     int refreshRate() const override;
@@ -378,9 +383,6 @@ public:
     explicit EffectWindowImpl(Window *window);
     ~EffectWindowImpl() override;
 
-    void refVisible(int reason) override;
-    void unrefVisible(int reason) override;
-
     void addRepaint(const QRect &r) override;
     void addRepaintFull() override;
     void addLayerRepaint(const QRect &r) override;
@@ -398,30 +400,30 @@ public:
     QStringList activities() const override;
     int desktop() const override;
     QVector<uint> desktops() const override;
-    int x() const override;
-    int y() const override;
-    int width() const override;
-    int height() const override;
+    qreal x() const override;
+    qreal y() const override;
+    qreal width() const override;
+    qreal height() const override;
 
-    QSize basicUnit() const override;
-    QRect geometry() const override;
-    QRect frameGeometry() const override;
-    QRect bufferGeometry() const override;
-    QRect clientGeometry() const override;
+    QSizeF basicUnit() const override;
+    QRectF geometry() const override;
+    QRectF frameGeometry() const override;
+    QRectF bufferGeometry() const override;
+    QRectF clientGeometry() const override;
 
     QString caption() const override;
 
-    QRect expandedGeometry() const override;
+    QRectF expandedGeometry() const override;
     EffectScreen *screen() const override;
-    QPoint pos() const override;
-    QSize size() const override;
-    QRect rect() const override;
+    QPointF pos() const override;
+    QSizeF size() const override;
+    QRectF rect() const override;
 
     bool isMovable() const override;
     bool isMovableAcrossScreens() const override;
     bool isUserMove() const override;
     bool isUserResize() const override;
-    QRect iconGeometry() const override;
+    QRectF iconGeometry() const override;
 
     bool isDesktop() const override;
     bool isDock() const override;
@@ -437,6 +439,7 @@ public:
     bool isTooltip() const override;
     bool isNotification() const override;
     bool isCriticalNotification() const override;
+    bool isAppletPopup() const override;
     bool isOnScreenDisplay() const override;
     bool isComboBox() const override;
     bool isDNDIcon() const override;
@@ -454,7 +457,7 @@ public:
     bool isFullScreen() const override;
     bool isUnresponsive() const override;
 
-    QRect contentsRect() const override;
+    QRectF contentsRect() const override;
     bool decorationHasAlpha() const override;
     QIcon icon() const override;
     QString windowClass() const override;
@@ -471,7 +474,7 @@ public:
     qlonglong windowId() const override;
     QUuid internalId() const override;
 
-    QRect decorationInnerRect() const override;
+    QRectF decorationInnerRect() const override;
     KDecoration2::Decoration *decoration() const override;
     QByteArray readProperty(long atom, long type, int format) const override;
     void deleteProperty(long atom) const override;
@@ -502,6 +505,9 @@ public:
     QVariant data(int role) const override;
 
 private:
+    void refVisible(const EffectWindowVisibleRef *holder) override;
+    void unrefVisible(const EffectWindowVisibleRef *holder) override;
+
     Window *m_window;
     WindowItem *m_windowItem; // This one is used only during paint pass.
     QHash<int, QVariant> dataMap;

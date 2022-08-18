@@ -208,10 +208,7 @@ ScriptedEffect::ScriptedEffect()
     });
 }
 
-ScriptedEffect::~ScriptedEffect()
-{
-    qDeleteAll(m_shaders);
-}
+ScriptedEffect::~ScriptedEffect() = default;
 
 bool ScriptedEffect::init(const QString &effectName, const QString &pathToScript)
 {
@@ -325,7 +322,7 @@ QList<int> ScriptedEffect::touchEdgesForAction(const QString &action) const
         const QVector borders({ElectricTop, ElectricRight, ElectricBottom, ElectricLeft});
 
         for (const auto b : borders) {
-            if (ScreenEdges::self()->actionForTouchBorder(b) == ElectricActionShowDesktop) {
+            if (workspace()->screenEdges()->actionForTouchBorder(b) == ElectricActionShowDesktop) {
                 ret.append(b);
             }
         }
@@ -710,7 +707,7 @@ bool ScriptedEffect::registerScreenEdge(int edge, const QJSValue &callback)
     auto it = screenEdgeCallbacks().find(edge);
     if (it == screenEdgeCallbacks().end()) {
         // not yet registered
-        ScreenEdges::self()->reserve(static_cast<KWin::ElectricBorder>(edge), this, "borderActivated");
+        workspace()->screenEdges()->reserve(static_cast<KWin::ElectricBorder>(edge), this, "borderActivated");
         screenEdgeCallbacks().insert(edge, QJSValueList{callback});
     } else {
         it->append(callback);
@@ -762,7 +759,7 @@ bool ScriptedEffect::unregisterScreenEdge(int edge)
         // not previously registered
         return false;
     }
-    ScreenEdges::self()->unreserve(static_cast<KWin::ElectricBorder>(edge), this);
+    workspace()->screenEdges()->unreserve(static_cast<KWin::ElectricBorder>(edge), this);
     screenEdgeCallbacks().erase(it);
     return true;
 }
@@ -780,7 +777,7 @@ bool ScriptedEffect::registerTouchScreenEdge(int edge, const QJSValue &callback)
     connect(action, &QAction::triggered, this, [callback]() {
         QJSValue(callback).call();
     });
-    ScreenEdges::self()->reserveTouch(KWin::ElectricBorder(edge), action);
+    workspace()->screenEdges()->reserveTouch(KWin::ElectricBorder(edge), action);
     m_touchScreenEdgeCallbacks.insert(edge, action);
     return true;
 }
@@ -813,21 +810,20 @@ uint ScriptedEffect::addFragmentShader(ShaderTrait traits, const QString &fragme
     auto shader = ShaderManager::instance()->generateShaderFromFile(static_cast<KWin::ShaderTraits>(int(traits)), {}, fragment);
     if (!shader->isValid()) {
         m_engine->throwError(QStringLiteral("Shader failed to load"));
-        delete shader;
         // 0 is never a valid shader identifier, it's ensured the first shader gets id 1
         return 0;
     }
 
     const uint shaderId{m_nextShaderId};
     m_nextShaderId++;
-    m_shaders.insert(shaderId, shader);
+    m_shaders[shaderId] = std::move(shader);
     return shaderId;
 }
 
 GLShader *ScriptedEffect::findShader(uint shaderId) const
 {
     if (auto it = m_shaders.find(shaderId); it != m_shaders.end()) {
-        return it.value();
+        return it->second.get();
     }
     return nullptr;
 }

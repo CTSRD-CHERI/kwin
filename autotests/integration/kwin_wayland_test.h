@@ -68,7 +68,7 @@ namespace Test
 class VirtualInputDevice;
 }
 
-class WaylandTestApplication : public ApplicationWaylandAbstract
+class WaylandTestApplication : public Application
 {
     Q_OBJECT
 public:
@@ -83,6 +83,7 @@ public:
     Test::VirtualInputDevice *virtualPointer() const;
     Test::VirtualInputDevice *virtualKeyboard() const;
     Test::VirtualInputDevice *virtualTouch() const;
+    XwaylandInterface *xwayland() const override;
 
 protected:
     void performStartup() override;
@@ -95,12 +96,12 @@ private:
     void createVirtualInputDevices();
     void destroyVirtualInputDevices();
 
-    Xwl::Xwayland *m_xwayland = nullptr;
+    std::unique_ptr<Xwl::Xwayland> m_xwayland;
     QString m_inputMethodServerToStart;
 
-    QScopedPointer<Test::VirtualInputDevice> m_virtualPointer;
-    QScopedPointer<Test::VirtualInputDevice> m_virtualKeyboard;
-    QScopedPointer<Test::VirtualInputDevice> m_virtualTouch;
+    std::unique_ptr<Test::VirtualInputDevice> m_virtualPointer;
+    std::unique_ptr<Test::VirtualInputDevice> m_virtualKeyboard;
+    std::unique_ptr<Test::VirtualInputDevice> m_virtualTouch;
 };
 
 namespace Test
@@ -225,7 +226,7 @@ protected:
     void xdg_toplevel_close() override;
 
 private:
-    QScopedPointer<XdgSurface> m_xdgSurface;
+    std::unique_ptr<XdgSurface> m_xdgSurface;
 };
 
 /**
@@ -261,7 +262,7 @@ protected:
     void xdg_popup_popup_done() override;
 
 private:
-    QScopedPointer<XdgSurface> m_xdgSurface;
+    std::unique_ptr<XdgSurface> m_xdgSurface;
 };
 
 class XdgDecorationManagerV1 : public QtWayland::zxdg_decoration_manager_v1
@@ -444,7 +445,7 @@ public:
     }
     KWayland::Client::Surface *inputPanelSurface() const
     {
-        return m_inputSurface;
+        return m_inputSurface.get();
     }
     auto *context() const
     {
@@ -459,7 +460,7 @@ protected:
     void zwp_input_method_v1_deactivate(struct ::zwp_input_method_context_v1 *context) override;
 
 private:
-    QPointer<KWayland::Client::Surface> m_inputSurface;
+    std::unique_ptr<KWayland::Client::Surface> m_inputSurface;
     QtWayland::zwp_input_panel_surface_v1 *m_inputMethodSurface = nullptr;
     QPointer<Window> m_window;
     struct ::zwp_input_method_context_v1 *m_context = nullptr;
@@ -580,7 +581,7 @@ bool waitForWaylandKeyboard();
 
 void flushWaylandConnection();
 
-KWayland::Client::Surface *createSurface(QObject *parent = nullptr);
+std::unique_ptr<KWayland::Client::Surface> createSurface();
 KWayland::Client::SubSurface *createSubSurface(KWayland::Client::Surface *surface,
                                                KWayland::Client::Surface *parentSurface, QObject *parent = nullptr);
 
@@ -652,8 +653,6 @@ bool lockScreen();
  * @returns @c true if the screen could be unlocked, @c false otherwise
  */
 bool unlockScreen();
-
-void initWaylandWorkspace();
 
 Window *inputPanelWindow();
 MockInputMethod *inputMethod();

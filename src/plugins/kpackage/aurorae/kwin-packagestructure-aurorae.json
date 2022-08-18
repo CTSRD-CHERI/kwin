@@ -7,6 +7,7 @@
                 "Name": "Demitrius Belai",
                 "Name[ar]": "Demitrius Belai",
                 "Name[az]": "Demitrius Belai",
+                "Name[bg]": "Demitrius Belai",
                 "Name[ca@valencia]": "Demitrius Belai",
                 "Name[ca]": "Demitrius Belai",
                 "Name[cs]": "Demitrius Belai",
@@ -37,12 +38,14 @@
                 "Name[uk]": "Demitrius Belai",
                 "Name[vi]": "Demitrius Belai",
                 "Name[x-test]": "xxDemitrius Belaixx",
-                "Name[zh_CN]": "Demitrius Belai"
+                "Name[zh_CN]": "Demitrius Belai",
+                "Name[zh_TW]": "Demitrius Belai"
             }
         ],
         "Name": "KWin Aurorae",
         "Name[ar]": "أورورا كوين",
         "Name[az]": "KWin Aurorae",
+        "Name[bg]": "KWin Aurorae",
         "Name[ca@valencia]": "Aurorae de KWin",
         "Name[ca]": "Aurorae del KWin",
         "Name[cs]": "KWin Aurorae",
@@ -54,6 +57,7 @@
         "Name[fr]": "KWin Aurorae",
         "Name[hu]": "KWin Aurorae",
         "Name[ia]": "KWin Aurorae",
+        "Name[id]": "Aurorae KWin",
         "Name[it]": "KWin Aurorae",
         "Name[ko]": "KWin Aurorae",
         "Name[lt]": "KWin Aurorae",
@@ -72,6 +76,7 @@
         "Name[vi]": "Aurorae của KWin",
         "Name[x-test]": "xxKWin Auroraexx",
         "Name[zh_CN]": "KWin Aurorae 极光",
+        "Name[zh_TW]": "KWin Aurorae",
         "Version": "1"
     }
 }

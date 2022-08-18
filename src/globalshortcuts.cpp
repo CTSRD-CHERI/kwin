@@ -119,11 +119,10 @@ void GlobalShortcutsManager::init()
 {
     if (kwinApp()->shouldUseWaylandForCompositing()) {
         qputenv("KGLOBALACCELD_PLATFORM", QByteArrayLiteral("org.kde.kwin"));
-        m_kglobalAccel = new KGlobalAccelD(this);
+        m_kglobalAccel = std::make_unique<KGlobalAccelD>();
         if (!m_kglobalAccel->init()) {
             qCDebug(KWIN_CORE) << "Init of kglobalaccel failed";
-            delete m_kglobalAccel;
-            m_kglobalAccel = nullptr;
+            m_kglobalAccel.reset();
         } else {
             qCDebug(KWIN_CORE) << "KGlobalAcceld inited";
         }
@@ -178,7 +177,7 @@ void GlobalShortcutsManager::registerTouchpadSwipe(QAction *action, SwipeDirecti
 
 void GlobalShortcutsManager::registerRealtimeTouchpadSwipe(QAction *action, std::function<void(qreal)> progressCallback, SwipeDirection direction, uint fingerCount)
 {
-    addIfNotExists(GlobalShortcut(RealtimeFeedbackSwipeShortcut{DeviceType::Touchpad, direction, progressCallback, fingerCount}, action)), DeviceType::Touchpad;
+    addIfNotExists(GlobalShortcut(RealtimeFeedbackSwipeShortcut{DeviceType::Touchpad, direction, progressCallback, fingerCount}, action), DeviceType::Touchpad);
 }
 
 void GlobalShortcutsManager::registerTouchpadPinch(QAction *action, PinchDirection direction, uint fingerCount)
@@ -194,6 +193,20 @@ void GlobalShortcutsManager::registerRealtimeTouchpadPinch(QAction *onUp, std::f
 void GlobalShortcutsManager::registerTouchscreenSwipe(QAction *action, std::function<void(qreal)> progressCallback, SwipeDirection direction, uint fingerCount)
 {
     addIfNotExists(GlobalShortcut(RealtimeFeedbackSwipeShortcut{DeviceType::Touchscreen, direction, progressCallback, fingerCount}, action), DeviceType::Touchscreen);
+}
+
+void GlobalShortcutsManager::forceRegisterTouchscreenSwipe(QAction *action, std::function<void(qreal)> progressCallback, SwipeDirection direction, uint fingerCount)
+{
+    GlobalShortcut shortcut{RealtimeFeedbackSwipeShortcut{DeviceType::Touchscreen, direction, progressCallback, fingerCount}, action};
+    const auto it = std::find_if(m_shortcuts.begin(), m_shortcuts.end(), [&shortcut](const auto &s) {
+        return shortcut.shortcut() == s.shortcut();
+    });
+    if (it != m_shortcuts.end()) {
+        m_shortcuts.erase(it);
+    }
+    m_touchscreenGestureRecognizer->registerSwipeGesture(shortcut.swipeGesture());
+    connect(shortcut.action(), &QAction::destroyed, this, &GlobalShortcutsManager::objectDeleted);
+    m_shortcuts.push_back(std::move(shortcut));
 }
 
 bool GlobalShortcutsManager::processKey(Qt::KeyboardModifiers mods, int keyQt)

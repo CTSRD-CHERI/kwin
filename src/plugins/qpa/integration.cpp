@@ -18,11 +18,13 @@
 #include "main.h"
 #include "output.h"
 #include "platform.h"
-#include "screens.h"
+#include "workspace.h"
 
 #include <QCoreApplication>
+#include <QTimer>
 #include <QtConcurrentRun>
 
+#include <qpa/qplatformnativeinterface.h>
 #include <qpa/qplatformwindow.h>
 #include <qpa/qwindowsysteminterface.h>
 
@@ -47,6 +49,7 @@ Integration::Integration()
     : QObject()
     , QPlatformIntegration()
     , m_fontDb(new QGenericUnixFontDatabase())
+    , m_nativeInterface(new QPlatformNativeInterface())
     , m_services(new QGenericUnixServices())
 {
 }
@@ -91,11 +94,11 @@ void Integration::initialize()
 {
     // This method is called from QGuiApplication's constructor, before kwinApp is built
     QTimer::singleShot(0, this, [this] {
-        // The QPA is initialized before the platform plugin is loaded.
-        if (kwinApp()->platform()) {
-            handlePlatformCreated();
+        // The QPA is initialized before the workspace is created.
+        if (workspace()) {
+            handleWorkspaceCreated();
         } else {
-            connect(kwinApp(), &Application::platformCreated, this, &Integration::handlePlatformCreated);
+            connect(kwinApp(), &Application::workspaceCreated, this, &Integration::handleWorkspaceCreated);
         }
     });
 
@@ -127,7 +130,7 @@ QPlatformOffscreenSurface *Integration::createPlatformOffscreenSurface(QOffscree
 
 QPlatformFontDatabase *Integration::fontDatabase() const
 {
-    return m_fontDb.data();
+    return m_fontDb.get();
 }
 
 QPlatformTheme *Integration::createPlatformTheme(const QString &name) const
@@ -157,14 +160,14 @@ QPlatformOpenGLContext *Integration::createPlatformOpenGLContext(QOpenGLContext 
     return nullptr;
 }
 
-void Integration::handlePlatformCreated()
+void Integration::handleWorkspaceCreated()
 {
-    connect(kwinApp()->platform(), &Platform::outputEnabled,
+    connect(workspace(), &Workspace::outputAdded,
             this, &Integration::handleOutputEnabled);
-    connect(kwinApp()->platform(), &Platform::outputDisabled,
+    connect(workspace(), &Workspace::outputRemoved,
             this, &Integration::handleOutputDisabled);
 
-    const QVector<Output *> outputs = kwinApp()->platform()->enabledOutputs();
+    const QList<Output *> outputs = workspace()->outputs();
     for (Output *output : outputs) {
         handleOutputEnabled(output);
     }
@@ -198,9 +201,14 @@ void Integration::handleOutputDisabled(Output *output)
     QWindowSystemInterface::handleScreenRemoved(platformScreen);
 }
 
+QPlatformNativeInterface *Integration::nativeInterface() const
+{
+    return m_nativeInterface.get();
+}
+
 QPlatformServices *Integration::services() const
 {
-    return m_services.data();
+    return m_services.get();
 }
 
 }

@@ -24,23 +24,19 @@ namespace Wayland
 using namespace KWayland::Client;
 static const int s_refreshRate = 60000; // TODO: can we get refresh rate data from Wayland host?
 
-WaylandOutput::WaylandOutput(Surface *surface, WaylandBackend *backend)
+WaylandOutput::WaylandOutput(const QString &name, Surface *surface, WaylandBackend *backend)
     : Output(backend)
-    , m_renderLoop(new RenderLoop(this))
+    , m_renderLoop(std::make_unique<RenderLoop>())
     , m_surface(surface)
     , m_backend(backend)
 {
-    static int identifier = -1;
-    identifier++;
     setInformation(Information{
-        .name = QStringLiteral("WL-%1").arg(identifier),
+        .name = name,
+        .model = name,
         .capabilities = Capability::Dpms,
     });
 
-    connect(surface, &Surface::frameRendered, this, [this] {
-        m_rendered = true;
-        Q_EMIT frameRendered();
-    });
+    connect(surface, &Surface::frameRendered, this, &WaylandOutput::frameRendered);
     m_turnOffTimer.setSingleShot(true);
     m_turnOffTimer.setInterval(dimAnimationTime());
     connect(&m_turnOffTimer, &QTimer::timeout, this, [this] {
@@ -56,32 +52,32 @@ WaylandOutput::~WaylandOutput()
 
 RenderLoop *WaylandOutput::renderLoop() const
 {
-    return m_renderLoop;
+    return m_renderLoop.get();
 }
 
-void WaylandOutput::init(const QPoint &logicalPosition, const QSize &pixelSize)
+void WaylandOutput::init(const QSize &pixelSize)
 {
     m_renderLoop->setRefreshRate(s_refreshRate);
 
-    auto mode = QSharedPointer<OutputMode>::create(pixelSize, s_refreshRate);
+    auto mode = std::make_shared<OutputMode>(pixelSize, s_refreshRate);
     setModesInternal({mode}, mode);
-
-    moveTo(logicalPosition);
     setScale(backend()->initialOutputScale());
 }
 
-void WaylandOutput::setGeometry(const QPoint &logicalPosition, const QSize &pixelSize)
+void WaylandOutput::resize(const QSize &pixelSize)
 {
-    auto mode = QSharedPointer<OutputMode>::create(pixelSize, s_refreshRate);
+    auto mode = std::make_shared<OutputMode>(pixelSize, s_refreshRate);
     setModesInternal({mode}, mode);
-
-    moveTo(logicalPosition);
     Q_EMIT m_backend->screensQueried();
 }
 
 void WaylandOutput::updateEnablement(bool enable)
 {
-    setDpmsMode(enable ? DpmsMode::On : DpmsMode::Off);
+    if (enable) {
+        Q_EMIT m_backend->outputEnabled(this);
+    } else {
+        Q_EMIT m_backend->outputDisabled(this);
+    }
 }
 
 void WaylandOutput::setDpmsMode(DpmsMode mode)
@@ -103,8 +99,8 @@ void WaylandOutput::setDpmsMode(DpmsMode mode)
     }
 }
 
-XdgShellOutput::XdgShellOutput(Surface *surface, XdgShell *xdgShell, WaylandBackend *backend, int number)
-    : WaylandOutput(surface, backend)
+XdgShellOutput::XdgShellOutput(const QString &name, Surface *surface, XdgShell *xdgShell, WaylandBackend *backend, int number)
+    : WaylandOutput(name, surface, backend)
     , m_number(number)
 {
     m_xdgShellSurface = xdgShell->createSurface(surface, this);
@@ -112,6 +108,8 @@ XdgShellOutput::XdgShellOutput(Surface *surface, XdgShell *xdgShell, WaylandBack
 
     connect(m_xdgShellSurface, &XdgShellSurface::configureRequested, this, &XdgShellOutput::handleConfigure);
     connect(m_xdgShellSurface, &XdgShellSurface::closeRequested, qApp, &QCoreApplication::quit);
+    connect(this, &WaylandOutput::enabledChanged, this, &XdgShellOutput::updateWindowTitle);
+    connect(this, &WaylandOutput::dpmsModeChanged, this, &XdgShellOutput::updateWindowTitle);
 
     connect(backend, &WaylandBackend::pointerLockSupportedChanged, this, &XdgShellOutput::updateWindowTitle);
     connect(backend, &WaylandBackend::pointerLockChanged, this, [this](bool locked) {
@@ -144,7 +142,7 @@ void XdgShellOutput::handleConfigure(const QSize &size, XdgShellSurface::States 
     Q_UNUSED(states);
     m_xdgShellSurface->ackConfigure(serial);
     if (size.width() > 0 && size.height() > 0) {
-        setGeometry(geometry().topLeft(), size);
+        resize(size * scale());
         if (m_hasBeenConfigured) {
             Q_EMIT sizeChanged(size);
         }
@@ -164,14 +162,18 @@ void XdgShellOutput::updateWindowTitle()
     } else if (backend()->pointerConstraints()) {
         grab = i18n("Press right control key to grab pointer");
     }
-    const QString title = i18nc("Title of nested KWin Wayland with Wayland socket identifier as argument",
-                                "KDE Wayland Compositor #%1 (%2)", m_number, waylandServer()->socketName());
 
-    if (grab.isEmpty()) {
-        m_xdgShellSurface->setTitle(title);
-    } else {
-        m_xdgShellSurface->setTitle(title + QStringLiteral(" — ") + grab);
+    QString title = i18nc("Title of nested KWin Wayland with Wayland socket identifier as argument",
+                          "KDE Wayland Compositor #%1 (%2)", m_number, waylandServer()->socketName());
+
+    if (!isEnabled()) {
+        title += i18n("- Output disabled");
+    } else if (dpmsMode() != DpmsMode::On) {
+        title += i18n("- Output dimmed");
+    } else if (!grab.isEmpty()) {
+        title += QStringLiteral(" — ") + grab;
     }
+    m_xdgShellSurface->setTitle(title);
 }
 
 void XdgShellOutput::lockPointer(Pointer *pointer, bool lock)

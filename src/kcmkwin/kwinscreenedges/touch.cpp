@@ -27,7 +27,7 @@
 #include "kwintouchscreenscriptsettings.h"
 #include "kwintouchscreensettings.h"
 
-K_PLUGIN_FACTORY_WITH_JSON(KWinScreenEdgesConfigFactory, "kwintouchscreen.json", registerPlugin<KWin::KWinScreenEdgesConfig>(); registerPlugin<KWin::KWinTouchScreenData>();)
+K_PLUGIN_FACTORY_WITH_JSON(KWinScreenEdgesConfigFactory, "kcm_kwintouchscreen.json", registerPlugin<KWin::KWinScreenEdgesConfig>(); registerPlugin<KWin::KWinTouchScreenData>();)
 
 namespace KWin
 {
@@ -122,7 +122,7 @@ void KWinScreenEdgesConfig::monitorInit()
     m_form->monitorHideEdge(ElectricBottomLeft, true);
 
     m_form->monitorAddItem(i18n("No Action"));
-    m_form->monitorAddItem(i18n("Show Desktop"));
+    m_form->monitorAddItem(i18n("Peek at Desktop"));
     m_form->monitorAddItem(i18n("Lock Screen"));
     m_form->monitorAddItem(i18n("Show KRunner"));
     m_form->monitorAddItem(i18n("Activity Manager"));
@@ -165,7 +165,7 @@ void KWinScreenEdgesConfig::monitorInit()
         if (!config.readEntry(script.pluginId() + QStringLiteral("Enabled"), script.isEnabledByDefault())) {
             continue;
         }
-        m_effects << script.pluginId();
+        m_scripts << script.pluginId();
         m_form->monitorAddItem(script.name());
         m_scriptSettings[script.pluginId()] = new KWinTouchScreenScriptSettings(script.pluginId(), this);
     }

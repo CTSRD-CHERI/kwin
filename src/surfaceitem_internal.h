@@ -28,10 +28,10 @@ public:
     QRegion shape() const override;
 
 private Q_SLOTS:
-    void handleBufferGeometryChanged(Window *window, const QRect &old);
+    void handleBufferGeometryChanged(Window *window, const QRectF &old);
 
 protected:
-    SurfacePixmap *createPixmap() override;
+    std::unique_ptr<SurfacePixmap> createPixmap() override;
 };
 
 class KWIN_EXPORT SurfacePixmapInternal final : public SurfacePixmap
@@ -50,7 +50,7 @@ public:
 
 private:
     SurfaceItemInternal *m_item;
-    QSharedPointer<QOpenGLFramebufferObject> m_fbo;
+    std::shared_ptr<QOpenGLFramebufferObject> m_fbo;
     QImage m_rasterBuffer;
 };
 

@@ -43,18 +43,17 @@ PreviousWindowPixmapLock::~PreviousWindowPixmapLock()
 
     // Add synthetic repaint to prevent glitches after cross-fading
     // translucent windows.
-    effects->addRepaint(m_window->expandedGeometry());
+    effects->addRepaint(m_window->expandedGeometry().toAlignedRect());
 }
 
 AniData::AniData()
     : attribute(AnimationEffect::Opacity)
     , customCurve(0) // Linear
     , meta(0)
-    , startTime(0)
     , frozenTime(-1)
+    , startTime(0)
     , waitAtSource(false)
     , keepAlive(true)
-    , lastPresentTime(std::chrono::milliseconds::zero())
 {
 }
 
@@ -66,13 +65,12 @@ AniData::AniData(AnimationEffect::Attribute a, int meta_, const FPx2 &to_,
     , from(from_)
     , to(to_)
     , meta(meta_)
-    , startTime(AnimationEffect::clock() + delay)
     , frozenTime(-1)
+    , startTime(AnimationEffect::clock() + delay)
     , fullScreenEffectLock(std::move(fullScreenEffectLock_))
     , waitAtSource(waitAtSource_)
     , keepAlive(keepAlive)
     , previousWindowPixmapLock(std::move(previousWindowPixmapLock_))
-    , lastPresentTime(std::chrono::milliseconds::zero())
     , shader(shader)
 {
 }

@@ -7,6 +7,7 @@
 #pragma once
 
 #include "kwin_export.h"
+#include "utils/filedescriptor.h"
 
 #include <QObject>
 #include <QPointer>
@@ -35,13 +36,18 @@ public:
      * @param createNonMasterFd a function that creates non-master drm file descriptors for
      *          this device that clients can use to enumerate connectors and their properties
      */
-    explicit DrmLeaseDeviceV1Interface(Display *display, std::function<int()> createNonMasterFd);
+    explicit DrmLeaseDeviceV1Interface(Display *display, std::function<KWin::FileDescriptor()> createNonMasterFd);
     ~DrmLeaseDeviceV1Interface() override;
 
     /**
      * Must be called by the compositor when it loses or gains drm master
      */
     void setDrmMaster(bool hasDrmMaster);
+
+    /**
+     * Must be called after connectors have been added or removed
+     */
+    void done();
 
 Q_SIGNALS:
     /**
@@ -72,11 +78,13 @@ public:
     explicit DrmLeaseConnectorV1Interface(DrmLeaseDeviceV1Interface *leaseDevice, uint32_t id, const QString &name, const QString &description);
     ~DrmLeaseConnectorV1Interface() override;
 
+    uint32_t id() const;
+
     static DrmLeaseConnectorV1Interface *get(wl_resource *resource);
 
 private:
     friend class DrmLeaseConnectorV1InterfacePrivate;
-    QScopedPointer<DrmLeaseConnectorV1InterfacePrivate> d;
+    std::unique_ptr<DrmLeaseConnectorV1InterfacePrivate> d;
 };
 
 /**
@@ -91,13 +99,18 @@ public:
      * drive the outputs corresponding to the requested connectors.
      * Must only be called once in response to DrmLeaseDeviceV1Interface::leaseRequested
      */
-    void grant(int leaseFd, uint32_t lesseeId);
+    void grant(KWin::FileDescriptor &&leaseFd, uint32_t lesseeId);
 
     /**
      * Deny the lease request. The compositor may call this in response to
-     * DrmLeaseDeviceV1Interface::leaseRequested or when it detects a lease being ended with libdrm
+     * DrmLeaseDeviceV1Interface::leaseRequested
      */
     void deny();
+
+    /**
+     * revoke a granted lease request and offer the leased connectors again
+     */
+    void revoke();
 
     /**
      * The connectors this lease (request) encompasses
@@ -116,7 +129,7 @@ private:
     friend class DrmLeaseDeviceV1InterfacePrivate;
     friend class DrmLeaseRequestV1Interface;
     friend class DrmLeaseV1InterfacePrivate;
-    QScopedPointer<DrmLeaseV1InterfacePrivate> d;
+    std::unique_ptr<DrmLeaseV1InterfacePrivate> d;
 };
 
 }

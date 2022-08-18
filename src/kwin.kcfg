@@ -103,7 +103,7 @@
             <default>true</default>
         </entry>
         <entry name="RollOverDesktops" type="Bool">
-            <default>true</default>
+            <default>false</default>
         </entry>
         <entry name="FocusStealingPreventionLevel" type="Int">
             <default>1</default>
@@ -316,6 +316,9 @@
     <group name="Wayland">
         <entry name="InputMethod" type="Path" />
         <entry name="DoubleTapWakeup" type="Bool">
+            <default>true</default>
+        </entry>
+        <entry name="EnablePrimarySelection" type="Bool">
             <default>true</default>
         </entry>
     </group>

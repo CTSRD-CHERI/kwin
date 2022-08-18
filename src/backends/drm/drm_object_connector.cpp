@@ -9,15 +9,11 @@
 */
 #include "drm_object_connector.h"
 #include "drm_gpu.h"
+#include "drm_logging.h"
 #include "drm_object_crtc.h"
 #include "drm_output.h"
 #include "drm_pipeline.h"
 #include "drm_pointer.h"
-#include "logging.h"
-
-#include <main.h>
-// frameworks
-#include <KConfigGroup>
 
 #include <cerrno>
 #include <cstring>
@@ -118,7 +114,7 @@ DrmConnector::DrmConnector(DrmGpu *gpu, uint32_t connectorId)
 {
     if (m_conn) {
         for (int i = 0; i < m_conn->count_encoders; ++i) {
-            DrmScopedPointer<drmModeEncoder> enc(drmModeGetEncoder(gpu->fd(), m_conn->encoders[i]));
+            DrmUniquePtr<drmModeEncoder> enc(drmModeGetEncoder(gpu->fd(), m_conn->encoders[i]));
             if (!enc) {
                 qCWarning(KWIN_DRM) << "failed to get encoder" << m_conn->encoders[i];
                 continue;
@@ -198,12 +194,12 @@ QSize DrmConnector::physicalSize() const
     return m_physicalSize;
 }
 
-QList<QSharedPointer<DrmConnectorMode>> DrmConnector::modes() const
+QList<std::shared_ptr<DrmConnectorMode>> DrmConnector::modes() const
 {
     return m_modes;
 }
 
-QSharedPointer<DrmConnectorMode> DrmConnector::findMode(const drmModeModeInfo &modeInfo) const
+std::shared_ptr<DrmConnectorMode> DrmConnector::findMode(const drmModeModeInfo &modeInfo) const
 {
     const auto it = std::find_if(m_modes.constBegin(), m_modes.constEnd(), [&modeInfo](const auto &mode) {
         return checkIfEqual(mode->nativeMode(), &modeInfo);
@@ -254,21 +250,6 @@ bool DrmConnector::vrrCapable() const
     return false;
 }
 
-bool DrmConnector::needsModeset() const
-{
-    if (!gpu()->atomicModeSetting()) {
-        return false;
-    }
-    if (getProp(PropertyIndex::CrtcId)->needsCommit()) {
-        return true;
-    }
-    if (const auto &prop = getProp(PropertyIndex::MaxBpc); prop && prop->needsCommit()) {
-        return true;
-    }
-    const auto &rgb = getProp(PropertyIndex::Broadcast_RGB);
-    return rgb && rgb->needsCommit();
-}
-
 bool DrmConnector::hasRgbRange() const
 {
     const auto &rgb = getProp(PropertyIndex::Broadcast_RGB);
@@ -283,26 +264,27 @@ Output::RgbRange DrmConnector::rgbRange() const
 
 bool DrmConnector::updateProperties()
 {
-    if (!DrmObject::updateProperties()) {
+    if (auto connector = drmModeGetConnector(gpu()->fd(), id())) {
+        m_conn.reset(connector);
+    } else if (!m_conn) {
         return false;
     }
-    m_conn.reset(drmModeGetConnector(gpu()->fd(), id()));
-    if (!m_conn) {
+    if (!DrmObject::updateProperties()) {
         return false;
     }
     if (const auto &dpms = getProp(PropertyIndex::Dpms)) {
         dpms->setLegacy();
     }
 
-    auto underscan = m_props[static_cast<uint32_t>(PropertyIndex::Underscan)];
-    auto vborder = m_props[static_cast<uint32_t>(PropertyIndex::Underscan_vborder)];
-    auto hborder = m_props[static_cast<uint32_t>(PropertyIndex::Underscan_hborder)];
+    auto &underscan = m_props[static_cast<uint32_t>(PropertyIndex::Underscan)];
+    auto &vborder = m_props[static_cast<uint32_t>(PropertyIndex::Underscan_vborder)];
+    auto &hborder = m_props[static_cast<uint32_t>(PropertyIndex::Underscan_hborder)];
     if (underscan && vborder && hborder) {
         underscan->setEnum(vborder->current() > 0 ? UnderscanOptions::On : UnderscanOptions::Off);
     } else {
-        deleteProp(PropertyIndex::Underscan);
-        deleteProp(PropertyIndex::Underscan_vborder);
-        deleteProp(PropertyIndex::Underscan_hborder);
+        underscan.reset();
+        vborder.reset();
+        hborder.reset();
     }
 
     // parse edid
@@ -322,26 +304,16 @@ bool DrmConnector::updateProperties()
         m_physicalSize = m_edid.physicalSize();
     }
 
-    // the size might be completely borked. E.g. Samsung SyncMaster 2494HS reports 160x90 while in truth it's 520x292
-    // as this information is used to calculate DPI info, it's going to result in everything being huge
-    const QByteArray unknown = QByteArrayLiteral("unknown");
-    KConfigGroup group = kwinApp()->config()->group("EdidOverwrite").group(m_edid.eisaId().isEmpty() ? unknown : m_edid.eisaId()).group(m_edid.monitorName().isEmpty() ? unknown : m_edid.monitorName()).group(m_edid.serialNumber().isEmpty() ? unknown : m_edid.serialNumber());
-    if (group.hasKey("PhysicalSize")) {
-        const QSize overwriteSize = group.readEntry("PhysicalSize", m_physicalSize);
-        qCWarning(KWIN_DRM) << "Overwriting monitor physical size for" << m_edid.eisaId() << "/" << m_edid.monitorName() << "/" << m_edid.serialNumber() << " from " << m_physicalSize << "to " << overwriteSize;
-        m_physicalSize = overwriteSize;
-    }
-
     // update modes
     bool equal = m_conn->count_modes == m_driverModes.count();
     for (int i = 0; equal && i < m_conn->count_modes; i++) {
         equal &= checkIfEqual(m_driverModes[i]->nativeMode(), &m_conn->modes[i]);
     }
-    if (!equal) {
+    if (!equal && (m_driverModes.empty() || m_conn->count_modes > 0)) {
         // reload modes
         m_driverModes.clear();
         for (int i = 0; i < m_conn->count_modes; i++) {
-            m_driverModes.append(QSharedPointer<DrmConnectorMode>::create(this, m_conn->modes[i]));
+            m_driverModes.append(std::make_shared<DrmConnectorMode>(this, m_conn->modes[i]));
         }
         if (m_driverModes.isEmpty()) {
             return false;
@@ -380,7 +352,7 @@ const Edid *DrmConnector::edid() const
 
 DrmPipeline *DrmConnector::pipeline() const
 {
-    return m_pipeline.data();
+    return m_pipeline.get();
 }
 
 void DrmConnector::disable()
@@ -417,9 +389,9 @@ static const QVector<QSize> s_commonModes = {
     QSize(1280, 720),
 };
 
-QList<QSharedPointer<DrmConnectorMode>> DrmConnector::generateCommonModes()
+QList<std::shared_ptr<DrmConnectorMode>> DrmConnector::generateCommonModes()
 {
-    QList<QSharedPointer<DrmConnectorMode>> ret;
+    QList<std::shared_ptr<DrmConnectorMode>> ret;
     uint32_t maxBandwidthEstimation = 0;
     QSize maxSize;
     for (const auto &mode : qAsConst(m_driverModes)) {
@@ -434,34 +406,36 @@ QList<QSharedPointer<DrmConnectorMode>> DrmConnector::generateCommonModes()
             return mode->size() == size;
         });
         if (it == m_driverModes.constEnd() && size.width() <= maxSize.width() && size.height() <= maxSize.height() && bandwidthEstimation < maxBandwidthEstimation) {
-            ret << generateMode(size, 60000);
+            ret << generateMode(size, 60);
         }
     }
     return ret;
 }
 
-QSharedPointer<DrmConnectorMode> DrmConnector::generateMode(const QSize &size, uint32_t refreshRate)
+std::shared_ptr<DrmConnectorMode> DrmConnector::generateMode(const QSize &size, float refreshRate)
 {
     auto modeInfo = libxcvt_gen_mode_info(size.width(), size.height(), refreshRate, false, false);
 
-    drmModeModeInfo mode;
-    mode.vdisplay = modeInfo->vdisplay;
-    mode.hdisplay = modeInfo->hdisplay;
-    mode.clock = modeInfo->dot_clock;
-    mode.hsync_start = modeInfo->hsync_start;
-    mode.hsync_end = modeInfo->hsync_end;
-    mode.htotal = modeInfo->htotal;
-    mode.vsync_start = modeInfo->vsync_start;
-    mode.vsync_end = modeInfo->vsync_end;
-    mode.vtotal = modeInfo->vtotal;
-    mode.vrefresh = modeInfo->vrefresh;
-    mode.flags = modeInfo->mode_flags;
+    drmModeModeInfo mode{
+        .clock = uint32_t(modeInfo->dot_clock),
+        .hdisplay = uint16_t(modeInfo->hdisplay),
+        .hsync_start = modeInfo->hsync_start,
+        .hsync_end = modeInfo->hsync_end,
+        .htotal = modeInfo->htotal,
+        .vdisplay = uint16_t(modeInfo->vdisplay),
+        .vsync_start = modeInfo->vsync_start,
+        .vsync_end = modeInfo->vsync_end,
+        .vtotal = modeInfo->vtotal,
+        .vscan = 1,
+        .vrefresh = uint32_t(modeInfo->vrefresh),
+        .flags = modeInfo->mode_flags,
+        .type = DRM_MODE_TYPE_USERDEF,
+    };
 
-    mode.type = DRM_MODE_TYPE_USERDEF;
     sprintf(mode.name, "%dx%d@%d", size.width(), size.height(), mode.vrefresh);
 
     free(modeInfo);
-    return QSharedPointer<DrmConnectorMode>::create(this, mode);
+    return std::make_shared<DrmConnectorMode>(this, mode);
 }
 
 QDebug &operator<<(QDebug &s, const KWin::DrmConnector *obj)

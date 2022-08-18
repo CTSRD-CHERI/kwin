@@ -7,6 +7,7 @@
     SPDX-License-Identifier: GPL-2.0-or-later
 */
 #include "xkb.h"
+#include "utils/c_ptr.h"
 #include "utils/common.h"
 #include "wayland/keyboard_interface.h"
 #include "wayland/seat_interface.h"
@@ -25,10 +26,15 @@
 #include <xkbcommon/xkbcommon-keysyms.h>
 // system
 #include <bitset>
+#include <linux/input-event-codes.h>
 #include <sys/mman.h>
 #include <unistd.h>
 
 Q_LOGGING_CATEGORY(KWIN_XKB, "kwin_xkbcommon", QtWarningMsg)
+
+/* The offset between KEY_* numbering, and keycodes in the XKB evdev
+ * dataset. */
+static const int EVDEV_OFFSET = 8;
 
 namespace KWin
 {
@@ -328,11 +334,11 @@ QByteArray Xkb::keymapContents() const
         return {};
     }
 
-    ScopedCPointer<char> keymapString(xkb_keymap_get_as_string(m_keymap, XKB_KEYMAP_FORMAT_TEXT_V1));
-    if (keymapString.isNull()) {
+    UniqueCPtr<char> keymapString(xkb_keymap_get_as_string(m_keymap, XKB_KEYMAP_FORMAT_TEXT_V1));
+    if (!keymapString) {
         return {};
     }
-    return keymapString.data();
+    return keymapString.get();
 }
 
 void Xkb::updateModifiers(uint32_t modsDepressed, uint32_t modsLatched, uint32_t modsLocked, uint32_t group)
@@ -353,7 +359,7 @@ void Xkb::updateKey(uint32_t key, InputRedirection::KeyboardKeyState state)
     if (!m_keymap || !m_state) {
         return;
     }
-    xkb_state_update_key(m_state, key + 8, static_cast<xkb_key_direction>(state));
+    xkb_state_update_key(m_state, key + EVDEV_OFFSET, static_cast<xkb_key_direction>(state));
     if (state == InputRedirection::KeyboardKeyPressed) {
         const auto sym = toKeysym(key);
         if (m_compose.state && xkb_compose_state_feed(m_compose.state, sym) == XKB_COMPOSE_FEED_ACCEPTED) {
@@ -459,16 +465,16 @@ QString Xkb::layoutShortName(int index) const
 void Xkb::updateConsumedModifiers(uint32_t key)
 {
     Qt::KeyboardModifiers mods = Qt::NoModifier;
-    if (xkb_state_mod_index_is_consumed2(m_state, key + 8, m_shiftModifier, XKB_CONSUMED_MODE_GTK) == 1) {
+    if (xkb_state_mod_index_is_consumed2(m_state, key + EVDEV_OFFSET, m_shiftModifier, XKB_CONSUMED_MODE_GTK) == 1) {
         mods |= Qt::ShiftModifier;
     }
-    if (xkb_state_mod_index_is_consumed2(m_state, key + 8, m_altModifier, XKB_CONSUMED_MODE_GTK) == 1) {
+    if (xkb_state_mod_index_is_consumed2(m_state, key + EVDEV_OFFSET, m_altModifier, XKB_CONSUMED_MODE_GTK) == 1) {
         mods |= Qt::AltModifier;
     }
-    if (xkb_state_mod_index_is_consumed2(m_state, key + 8, m_controlModifier, XKB_CONSUMED_MODE_GTK) == 1) {
+    if (xkb_state_mod_index_is_consumed2(m_state, key + EVDEV_OFFSET, m_controlModifier, XKB_CONSUMED_MODE_GTK) == 1) {
         mods |= Qt::ControlModifier;
     }
-    if (xkb_state_mod_index_is_consumed2(m_state, key + 8, m_metaModifier, XKB_CONSUMED_MODE_GTK) == 1) {
+    if (xkb_state_mod_index_is_consumed2(m_state, key + EVDEV_OFFSET, m_metaModifier, XKB_CONSUMED_MODE_GTK) == 1) {
         mods |= Qt::MetaModifier;
     }
     m_consumedModifiers = mods;
@@ -512,7 +518,14 @@ xkb_keysym_t Xkb::toKeysym(uint32_t key)
     if (!m_state) {
         return XKB_KEY_NoSymbol;
     }
-    return xkb_state_key_get_one_sym(m_state, key + 8);
+
+    // Workaround because there's some kind of overlap between KEY_ZENKAKUHANKAKU and TLDE
+    // This key is important because some hardware manufacturers use it to indicate touchpad toggling.
+    xkb_keysym_t ret = xkb_state_key_get_one_sym(m_state, key + EVDEV_OFFSET);
+    if (ret == 0 && key == KEY_ZENKAKUHANKAKU) {
+        ret = XKB_KEY_Zenkaku_Hankaku;
+    }
+    return ret;
 }
 
 QString Xkb::toString(xkb_keysym_t keysym)
@@ -534,7 +547,7 @@ Qt::Key Xkb::toQtKey(xkb_keysym_t keySym,
                      bool superAsMeta) const
 {
     // FIXME: passing superAsMeta doesn't have impact due to bug in the Qt function, so handle it below
-    Qt::Key qtKey = Qt::Key(QXkbCommon::keysymToQtKey(keySym, modifiers, m_state, scanCode + 8, superAsMeta));
+    Qt::Key qtKey = Qt::Key(QXkbCommon::keysymToQtKey(keySym, modifiers, m_state, scanCode + EVDEV_OFFSET, superAsMeta));
 
     // FIXME: workarounds for symbols currently wrong/not mappable via keysymToQtKey()
     if (superAsMeta && (qtKey == Qt::Key_Super_L || qtKey == Qt::Key_Super_R)) {
@@ -557,7 +570,7 @@ bool Xkb::shouldKeyRepeat(quint32 key) const
     if (!m_keymap) {
         return false;
     }
-    return xkb_keymap_key_repeats(m_keymap, key + 8) != 0;
+    return xkb_keymap_key_repeats(m_keymap, key + EVDEV_OFFSET) != 0;
 }
 
 void Xkb::switchToNextLayout()

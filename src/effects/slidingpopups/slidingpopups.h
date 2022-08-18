@@ -55,7 +55,7 @@ private Q_SLOTS:
     void slotWindowDeleted(EffectWindow *w);
     void slotPropertyNotify(EffectWindow *w, long atom);
     void slotWaylandSlideOnShowChanged(EffectWindow *w);
-    void slotWindowFrameGeometryChanged(EffectWindow *w, const QRect &);
+    void slotWindowFrameGeometryChanged(EffectWindow *w, const QRectF &);
 
     void slideIn(EffectWindow *w);
     void slideOut(EffectWindow *w);
@@ -86,7 +86,6 @@ private:
         EffectWindowVisibleRef visibleRef;
         AnimationKind kind;
         TimeLine timeLine;
-        std::chrono::milliseconds lastPresentTime = std::chrono::milliseconds::zero();
     };
     QHash<EffectWindow *, Animation> m_animations;
 

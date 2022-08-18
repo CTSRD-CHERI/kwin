@@ -214,7 +214,7 @@ void TestTextInputV3Interface::testEnableDisable()
     // create a surface
     QSignalSpy serverSurfaceCreatedSpy(m_serverCompositor, &CompositorInterface::surfaceCreated);
     QVERIFY(serverSurfaceCreatedSpy.isValid());
-    QScopedPointer<KWayland::Client::Surface> clientSurface(m_clientCompositor->createSurface(this));
+    std::unique_ptr<KWayland::Client::Surface> clientSurface(m_clientCompositor->createSurface(this));
     QVERIFY(serverSurfaceCreatedSpy.wait());
     SurfaceInterface *serverSurface = serverSurfaceCreatedSpy.first().first().value<SurfaceInterface *>();
     QVERIFY(serverSurface);
@@ -282,7 +282,7 @@ void TestTextInputV3Interface::testEvents()
     // create a surface
     QSignalSpy serverSurfaceCreatedSpy(m_serverCompositor, &CompositorInterface::surfaceCreated);
     QVERIFY(serverSurfaceCreatedSpy.isValid());
-    QScopedPointer<KWayland::Client::Surface> clientSurface(m_clientCompositor->createSurface(this));
+    std::unique_ptr<KWayland::Client::Surface> clientSurface(m_clientCompositor->createSurface(this));
     QVERIFY(serverSurfaceCreatedSpy.wait());
     SurfaceInterface *serverSurface = serverSurfaceCreatedSpy.first().first().value<SurfaceInterface *>();
     QVERIFY(serverSurface);
@@ -292,6 +292,7 @@ void TestTextInputV3Interface::testEvents()
 
     QSignalSpy focusedSurfaceChangedSpy(m_seat, &SeatInterface::focusedTextInputSurfaceChanged);
     QSignalSpy textInputEnabledSpy(m_serverTextInputV3, &TextInputV3Interface::enabledChanged);
+    QSignalSpy doneSpy(m_clientTextInputV3, &TextInputV3::done);
 
     // Enter the textinput
     QVERIFY(focusedSurfaceChangedSpy.isValid());
@@ -308,11 +309,12 @@ void TestTextInputV3Interface::testEvents()
     m_clientTextInputV3->commit();
     m_totalCommits++;
     QVERIFY(textInputEnabledSpy.wait());
+    QVERIFY(doneSpy.wait());
+    QCOMPARE(doneSpy.count(), 1);
 
     QSignalSpy preEditSpy(m_clientTextInputV3, &TextInputV3::preedit_string);
     QSignalSpy commitStringSpy(m_clientTextInputV3, &TextInputV3::commit_string);
     QSignalSpy deleteSurroundingSpy(m_clientTextInputV3, &TextInputV3::delete_surrounding_text);
-    QSignalSpy doneSpy(m_clientTextInputV3, &TextInputV3::done);
 
     m_serverTextInputV3->sendPreEditString("Hello KDE community!", 1, 2);
     m_serverTextInputV3->deleteSurroundingText(6, 10);
@@ -320,7 +322,7 @@ void TestTextInputV3Interface::testEvents()
     m_serverTextInputV3->done();
 
     QVERIFY(doneSpy.wait());
-    QCOMPARE(doneSpy.count(), 1);
+    QCOMPARE(doneSpy.count(), 2);
     QCOMPARE(preEditSpy.count(), 1);
     QCOMPARE(commitStringSpy.count(), 1);
     QCOMPARE(deleteSurroundingSpy.count(), 1);
@@ -367,7 +369,7 @@ void TestTextInputV3Interface::testContentPurpose()
     // create a surface
     QSignalSpy serverSurfaceCreatedSpy(m_serverCompositor, &CompositorInterface::surfaceCreated);
     QVERIFY(serverSurfaceCreatedSpy.isValid());
-    QScopedPointer<KWayland::Client::Surface> clientSurface(m_clientCompositor->createSurface(this));
+    std::unique_ptr<KWayland::Client::Surface> clientSurface(m_clientCompositor->createSurface(this));
     QVERIFY(serverSurfaceCreatedSpy.wait());
     SurfaceInterface *serverSurface = serverSurfaceCreatedSpy.first().first().value<SurfaceInterface *>();
     QVERIFY(serverSurface);
@@ -460,7 +462,7 @@ void TestTextInputV3Interface::testContentHints()
     // create a surface
     QSignalSpy serverSurfaceCreatedSpy(m_serverCompositor, &CompositorInterface::surfaceCreated);
     QVERIFY(serverSurfaceCreatedSpy.isValid());
-    QScopedPointer<KWayland::Client::Surface> clientSurface(m_clientCompositor->createSurface(this));
+    std::unique_ptr<KWayland::Client::Surface> clientSurface(m_clientCompositor->createSurface(this));
     QVERIFY(serverSurfaceCreatedSpy.wait());
     SurfaceInterface *serverSurface = serverSurfaceCreatedSpy.first().first().value<SurfaceInterface *>();
     QVERIFY(serverSurface);
@@ -541,7 +543,7 @@ void TestTextInputV3Interface::testMultipleTextinputs()
     // create a surface
     QSignalSpy serverSurfaceCreatedSpy(m_serverCompositor, &CompositorInterface::surfaceCreated);
     QVERIFY(serverSurfaceCreatedSpy.isValid());
-    QScopedPointer<KWayland::Client::Surface> clientSurface(m_clientCompositor->createSurface(this));
+    std::unique_ptr<KWayland::Client::Surface> clientSurface(m_clientCompositor->createSurface(this));
     QVERIFY(serverSurfaceCreatedSpy.wait());
     SurfaceInterface *serverSurface = serverSurfaceCreatedSpy.first().first().value<SurfaceInterface *>();
     QVERIFY(serverSurface);
@@ -555,6 +557,7 @@ void TestTextInputV3Interface::testMultipleTextinputs()
     QVERIFY(m_serverTextInputV3);
     QVERIFY(!m_serverTextInputV3->isEnabled());
 
+    QSignalSpy doneSpy1(ti1, &TextInputV3::done);
     QSignalSpy committedSpy(m_serverTextInputV3, &TextInputV3Interface::stateCommitted);
     // Enable ti1
     ti1->enable();
@@ -562,6 +565,7 @@ void TestTextInputV3Interface::testMultipleTextinputs()
     QVERIFY(committedSpy.wait());
     QCOMPARE(committedSpy.last().at(0).value<quint32>(), 1);
     QVERIFY(m_serverTextInputV3->isEnabled());
+    QVERIFY(doneSpy1.wait());
 
     // Send another three commits on ti1
     ti1->enable();
@@ -570,6 +574,7 @@ void TestTextInputV3Interface::testMultipleTextinputs()
     QVERIFY(committedSpy.wait());
     QCOMPARE(committedSpy.last().at(0).value<quint32>(), 2);
     QVERIFY(m_serverTextInputV3->isEnabled());
+    QVERIFY(doneSpy1.wait());
 
     ti1->enable();
     ti1->set_content_type(QtWayland::zwp_text_input_v3::content_hint_none, QtWayland::zwp_text_input_v3::content_purpose_normal);
@@ -577,9 +582,9 @@ void TestTextInputV3Interface::testMultipleTextinputs()
     QVERIFY(committedSpy.wait());
     QCOMPARE(committedSpy.last().at(0).value<quint32>(), 3);
     QVERIFY(m_serverTextInputV3->isEnabled());
+    QVERIFY(doneSpy1.wait());
 
     // at this point total commit count to ti1 is 3
-    QSignalSpy doneSpy1(ti1, &TextInputV3::done);
     QSignalSpy doneSpy2(ti2, &TextInputV3::done);
 
     m_serverTextInputV3->commitString("Hello");

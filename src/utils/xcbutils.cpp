@@ -12,6 +12,7 @@
 // Qt
 #include <QDebug>
 // xcb
+#include <cmath>
 #include <xcb/composite.h>
 #include <xcb/damage.h>
 #include <xcb/glx.h>
@@ -333,7 +334,7 @@ ExtensionData::ExtensionData()
 template<typename reply, typename T, typename F>
 void Extensions::initVersion(T cookie, F f, ExtensionData *dataToFill)
 {
-    ScopedCPointer<reply> version(f(connection(), cookie, nullptr));
+    UniqueCPtr<reply> version(f(connection(), cookie, nullptr));
     dataToFill->version = version->major_version * 0x10 + version->minor_version;
 }
 
@@ -489,9 +490,9 @@ bool Extensions::hasShape(xcb_window_t w) const
     if (!isShapeAvailable()) {
         return false;
     }
-    ScopedCPointer<xcb_shape_query_extents_reply_t> extents(xcb_shape_query_extents_reply(
+    UniqueCPtr<xcb_shape_query_extents_reply_t> extents(xcb_shape_query_extents_reply(
         connection(), xcb_shape_query_extents_unchecked(connection(), w), nullptr));
-    if (extents.isNull()) {
+    if (!extents) {
         return false;
     }
     return extents->bounding_shaped > 0;
@@ -578,9 +579,9 @@ bool Shm::init()
         qCDebug(KWIN_CORE) << "SHM extension not available";
         return false;
     }
-    ScopedCPointer<xcb_shm_query_version_reply_t> version(xcb_shm_query_version_reply(connection(),
-                                                                                      xcb_shm_query_version_unchecked(connection()), nullptr));
-    if (version.isNull()) {
+    UniqueCPtr<xcb_shm_query_version_reply_t> version(xcb_shm_query_version_reply(connection(),
+                                                                                  xcb_shm_query_version_unchecked(connection()), nullptr));
+    if (!version) {
         qCDebug(KWIN_CORE) << "Failed to get SHM extension version information";
         return false;
     }
@@ -601,14 +602,54 @@ bool Shm::init()
 
     m_segment = xcb_generate_id(connection());
     const xcb_void_cookie_t cookie = xcb_shm_attach_checked(connection(), m_segment, m_shmId, false);
-    ScopedCPointer<xcb_generic_error_t> error(xcb_request_check(connection(), cookie));
-    if (!error.isNull()) {
+    UniqueCPtr<xcb_generic_error_t> error(xcb_request_check(connection(), cookie));
+    if (error) {
         qCDebug(KWIN_CORE) << "xcb_shm_attach error: " << error->error_code;
         shmdt(m_buffer);
         return false;
     }
 
     return true;
+}
+
+uint32_t toXNative(qreal value)
+{
+    //debug helper, check for things getting mangled
+    if (!qFuzzyIsNull(std::fmod(kwinApp()->xwaylandScale() * value, 1))) {
+        qCritical(KWIN_CORE) << "precision lost! floating value sent to X" << kwinApp()->xwaylandScale() * value;
+    }
+    return std::round(kwinApp()->xwaylandScale() * value);
+}
+
+QRect toXNative(const QRectF &r)
+{
+    return QRect(toXNative(r.x()), toXNative(r.y()), toXNative(r.width()), toXNative(r.height()));
+}
+
+qreal fromXNative(int value)
+{
+    return value / kwinApp()->xwaylandScale();
+}
+
+QRectF fromXNative(const QRect &r)
+{
+    return QRectF(fromXNative(r.x()), fromXNative(r.y()), fromXNative(r.width()), fromXNative(r.height()));
+}
+
+QSizeF fromXNative(const QSize &s)
+{
+    return QSizeF(fromXNative(s.width()), fromXNative(s.height()));
+}
+
+qreal nativeFloor(qreal value)
+{
+    return std::floor(value / kwinApp()->xwaylandScale()) * kwinApp()->xwaylandScale();
+}
+
+QRectF nativeFloor(const QRectF &value)
+{
+    return QRectF(nativeFloor(value.left()), nativeFloor(value.top()),
+                  nativeFloor(value.width()), nativeFloor(value.height()));
 }
 
 } // namespace Xcb

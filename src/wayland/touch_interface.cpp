@@ -16,7 +16,7 @@ namespace KWaylandServer
 {
 TouchInterfacePrivate *TouchInterfacePrivate::get(TouchInterface *touch)
 {
-    return touch->d.data();
+    return touch->d.get();
 }
 
 TouchInterfacePrivate::TouchInterfacePrivate(TouchInterface *q, SeatInterface *seat)
@@ -35,6 +35,11 @@ QList<TouchInterfacePrivate::Resource *> TouchInterfacePrivate::touchesForClient
     return resourceMap().values(client->client());
 }
 
+bool TouchInterfacePrivate::hasTouchesForClient(ClientConnection *client) const
+{
+    return resourceMap().contains(client->client());
+}
+
 TouchInterface::TouchInterface(SeatInterface *seat)
     : d(new TouchInterfacePrivate(this, seat))
 {
@@ -47,11 +52,6 @@ TouchInterface::~TouchInterface()
 SurfaceInterface *TouchInterface::focusedSurface() const
 {
     return d->focusedSurface;
-}
-
-void TouchInterface::setFocusedSurface(SurfaceInterface *surface)
-{
-    d->focusedSurface = surface;
 }
 
 void TouchInterface::sendCancel()
@@ -84,9 +84,11 @@ void TouchInterface::sendMotion(qint32 id, const QPointF &localPos)
         return;
     }
 
+    QPointF pos = d->focusedSurface->toSurfaceLocal(localPos);
+
     const auto touchResources = d->touchesForClient(d->focusedSurface->client());
     for (TouchInterfacePrivate::Resource *resource : touchResources) {
-        d->send_motion(resource->handle, d->seat->timestamp(), id, wl_fixed_from_double(localPos.x()), wl_fixed_from_double(localPos.y()));
+        d->send_motion(resource->handle, d->seat->timestamp(), id, wl_fixed_from_double(pos.x()), wl_fixed_from_double(pos.y()));
     }
 }
 
@@ -102,11 +104,15 @@ void TouchInterface::sendUp(qint32 id, quint32 serial)
     }
 }
 
-void TouchInterface::sendDown(qint32 id, quint32 serial, const QPointF &localPos)
+void TouchInterface::sendDown(qint32 id, quint32 serial, const QPointF &localPos, SurfaceInterface *surface)
 {
-    if (!d->focusedSurface) {
+    if (!surface) {
         return;
     }
+
+    d->focusedSurface = surface;
+
+    QPointF pos = d->focusedSurface->toSurfaceLocal(localPos);
 
     const auto touchResources = d->touchesForClient(d->focusedSurface->client());
     for (TouchInterfacePrivate::Resource *resource : touchResources) {
@@ -115,8 +121,8 @@ void TouchInterface::sendDown(qint32 id, quint32 serial, const QPointF &localPos
                      d->seat->timestamp(),
                      d->focusedSurface->resource(),
                      id,
-                     wl_fixed_from_double(localPos.x()),
-                     wl_fixed_from_double(localPos.y()));
+                     wl_fixed_from_double(pos.x()),
+                     wl_fixed_from_double(pos.y()));
     }
 }
 

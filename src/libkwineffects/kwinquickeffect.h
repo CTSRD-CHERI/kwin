@@ -47,7 +47,7 @@ public Q_SLOTS:
 private:
     QuickSceneEffect *m_effect;
     EffectScreen *m_screen;
-    QScopedPointer<QQuickItem> m_rootItem;
+    std::unique_ptr<QQuickItem> m_rootItem;
     bool m_dirty = false;
 };
 
@@ -66,6 +66,7 @@ private:
 class KWINEFFECTS_EXPORT QuickSceneEffect : public Effect
 {
     Q_OBJECT
+    Q_PROPERTY(QuickSceneView *activeView READ activeView NOTIFY activeViewChanged)
 
 public:
     explicit QuickSceneEffect(QObject *parent = nullptr);
@@ -81,6 +82,8 @@ public:
      */
     void setRunning(bool running);
 
+    QuickSceneView *activeView() const;
+
     /**
      * Returns all scene views managed by this effect. If the effect is not running,
      * this function returns an empty QHash.
@@ -91,6 +94,17 @@ public:
      * Returns the view at the specified @a pos in the global screen coordinates.
      */
     QuickSceneView *viewAt(const QPoint &pos) const;
+
+    /**
+     * Get a view at the given direction from the active view
+     * Returns null if no other views exist in the given direction 
+     */
+    Q_INVOKABLE KWin::QuickSceneView *getView(Qt::Edge edge);
+
+    /**
+     * Sets the given @a view as active. It will get a focusin event and all the other views will be set as inactive
+     */
+    Q_INVOKABLE void activateView(QuickSceneView *view);
 
     /**
      * Returns the source URL.
@@ -110,8 +124,8 @@ public:
 
     bool eventFilter(QObject *watched, QEvent *event) override;
 
+    void prePaintScreen(ScreenPrePaintData &data, std::chrono::milliseconds presentTime) override;
     void paintScreen(int mask, const QRegion &region, ScreenPaintData &data) override;
-    void postPaintScreen() override;
     bool isActive() const override;
 
     void windowInputMouseEvent(QEvent *event) override;
@@ -122,6 +136,14 @@ public:
     bool touchUp(qint32 id, quint32 time) override;
 
     static bool supported();
+
+    Q_INVOKABLE void checkItemDraggedOutOfScreen(QQuickItem *item);
+    Q_INVOKABLE void checkItemDroppedOutOfScreen(const QPointF &globalPos, QQuickItem *item);
+
+Q_SIGNALS:
+    void itemDraggedOutOfScreen(QQuickItem *item, QList<EffectScreen *> screens);
+    void itemDroppedOutOfScreen(const QPointF &globalPos, QQuickItem *item, EffectScreen *screen);
+    void activeViewChanged(KWin::QuickSceneView *view);
 
 protected:
     /**
@@ -140,7 +162,7 @@ private:
     void startInternal();
     void stopInternal();
 
-    QScopedPointer<QuickSceneEffectPrivate> d;
+    std::unique_ptr<QuickSceneEffectPrivate> d;
     friend class QuickSceneEffectPrivate;
 };
 

@@ -28,7 +28,8 @@ class DrmOutput;
 class DrmObject
 {
 public:
-    virtual ~DrmObject();
+    virtual ~DrmObject() = default;
+    DrmObject(const DrmObject &) = delete;
 
     /**
      * Must be called to query necessary data directly after creation.
@@ -45,14 +46,12 @@ public:
     DrmGpu *gpu() const;
     uint32_t type() const;
     QString typeName() const;
-    QVector<DrmProperty *> properties();
 
     void commit();
     void commitPending();
     void rollbackPending();
     bool atomicPopulate(drmModeAtomicReq *req) const;
     bool needsCommit() const;
-    virtual bool needsModeset() const = 0;
     virtual bool updateProperties();
 
     template<typename T>
@@ -75,8 +74,14 @@ public:
     template<typename T>
     DrmProperty *getProp(T propIndex) const
     {
-        return m_props[static_cast<uint32_t>(propIndex)];
+        return m_props[static_cast<uint32_t>(propIndex)].get();
     }
+
+    enum class PrintMode {
+        OnlyChanged,
+        All
+    };
+    void printProps(PrintMode mode);
 
 protected:
     enum class Requirement {
@@ -101,14 +106,7 @@ protected:
 
     bool initProps();
 
-    template<typename T>
-    void deleteProp(T prop)
-    {
-        delete m_props[static_cast<uint32_t>(prop)];
-        m_props[static_cast<uint32_t>(prop)] = nullptr;
-    }
-
-    QVector<DrmProperty *> m_props;
+    std::vector<std::unique_ptr<DrmProperty>> m_props;
 
 private:
     DrmGpu *m_gpu;

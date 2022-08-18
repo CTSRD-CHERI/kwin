@@ -38,7 +38,7 @@ public:
         return m_event;
     }
 
-    static Event *create(libinput_event *event);
+    static std::unique_ptr<Event> create(libinput_event *event);
 
 protected:
     Event(libinput_event *event, libinput_event_type type);
@@ -307,11 +307,7 @@ public:
         return state == LIBINPUT_TABLET_TOOL_PROXIMITY_STATE_IN;
     }
 
-    QPointF transformedPosition(const QSize &size) const
-    {
-        return {libinput_event_tablet_tool_get_x_transformed(m_tabletToolEvent, size.width()),
-                libinput_event_tablet_tool_get_y_transformed(m_tabletToolEvent, size.height())};
-    }
+    QPointF transformedPosition(const QSize &size) const;
 
     struct libinput_tablet_tool *tool()
     {

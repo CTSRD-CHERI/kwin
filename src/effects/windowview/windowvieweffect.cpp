@@ -26,6 +26,7 @@ WindowViewEffect::WindowViewEffect()
     , m_exposeAction(new QAction(this))
     , m_exposeAllAction(new QAction(this))
     , m_exposeClassAction(new QAction(this))
+    , m_exposeClassCurrentDesktopAction(new QAction(this))
 {
     qmlRegisterUncreatableType<WindowViewEffect>("org.kde.KWin.Effect.WindowView", 1, 0, "WindowView", QStringLiteral("WindowView cannot be created in QML"));
     initConfig<WindowViewConfig>();
@@ -40,18 +41,6 @@ WindowViewEffect::WindowViewEffect()
 
     setSource(QUrl::fromLocalFile(QStandardPaths::locate(QStandardPaths::GenericDataLocation, QStringLiteral("kwin/effects/windowview/qml/main.qml"))));
 
-    m_realtimeToggleAction = new QAction(this);
-    connect(m_realtimeToggleAction, &QAction::triggered, this, [this]() {
-        if (isRunning() && m_partialActivationFactor > 0.5) {
-            activate();
-        } else {
-            deactivate(0);
-        }
-        m_partialActivationFactor = 0;
-        Q_EMIT gestureInProgressChanged();
-        Q_EMIT partialActivationFactorChanged();
-    });
-
     m_exposeAction->setObjectName(QStringLiteral("Expose"));
     m_exposeAction->setText(i18n("Toggle Present Windows (Current desktop)"));
     KGlobalAccel::self()->setDefaultShortcut(m_exposeAction, QList<QKeySequence>() << (Qt::CTRL | Qt::Key_F9));
@@ -59,12 +48,7 @@ WindowViewEffect::WindowViewEffect()
     m_shortcut = KGlobalAccel::self()->shortcut(m_exposeAction);
     effects->registerGlobalShortcut(Qt::CTRL | Qt::Key_F9, m_exposeAction);
     connect(m_exposeAction, &QAction::triggered, this, [this]() {
-        if (!isRunning()) {
-            setMode(ModeCurrentDesktop);
-            activate();
-        } else {
-            deactivate(animationDuration());
-        }
+        toggleMode(ModeCurrentDesktop);
     });
 
     m_exposeAllAction->setObjectName(QStringLiteral("ExposeAll"));
@@ -74,12 +58,7 @@ WindowViewEffect::WindowViewEffect()
     m_shortcutAll = KGlobalAccel::self()->shortcut(m_exposeAllAction);
     effects->registerGlobalShortcut(Qt::CTRL + Qt::Key_F10, m_exposeAllAction);
     connect(m_exposeAllAction, &QAction::triggered, this, [this]() {
-        if (!isRunning()) {
-            setMode(ModeAllDesktops);
-            activate();
-        } else {
-            deactivate(animationDuration());
-        }
+        toggleMode(ModeAllDesktops);
     });
 
     m_exposeClassAction->setObjectName(QStringLiteral("ExposeClass"));
@@ -88,13 +67,16 @@ WindowViewEffect::WindowViewEffect()
     KGlobalAccel::self()->setShortcut(m_exposeClassAction, QList<QKeySequence>() << (Qt::CTRL | Qt::Key_F7));
     effects->registerGlobalShortcut(Qt::CTRL | Qt::Key_F7, m_exposeClassAction);
     connect(m_exposeClassAction, &QAction::triggered, this, [this]() {
-        if (!isRunning()) {
-            setMode(ModeWindowClass);
-            activate();
-        } else {
-            deactivate(animationDuration());
-        }
+        toggleMode(ModeWindowClass);
     });
+
+    m_exposeClassCurrentDesktopAction->setObjectName(QStringLiteral("ExposeClassCurrentDesktop"));
+    m_exposeClassAction->setText(i18n("Toggle Present Windows (Window class on current desktop)"));
+    effects->registerGlobalShortcut(QKeySequence{}, m_exposeClassAction);
+    connect(m_exposeClassAction, &QAction::triggered, this, [this]() {
+        toggleMode(ModeWindowClassCurrentDesktop);
+    });
+
     connect(KGlobalAccel::self(), &KGlobalAccel::globalShortcutChanged, this, [this](QAction *action, const QKeySequence &seq) {
         if (action->objectName() == QStringLiteral("Expose")) {
             m_shortcut.clear();
@@ -105,21 +87,42 @@ WindowViewEffect::WindowViewEffect()
         } else if (action->objectName() == QStringLiteral("ExposeClass")) {
             m_shortcutClass.clear();
             m_shortcutClass.append(seq);
+        } else if (action->objectName() == QStringLiteral("ExposeClassCurrentDesktop")) {
+            m_shortcutClassCurrentDesktop.clear();
+            m_shortcutClassCurrentDesktop.append(seq);
+        }
+    });
+
+    m_realtimeToggleAction = new QAction(this);
+    connect(m_realtimeToggleAction, &QAction::triggered, this, [this]() {
+        if (m_status == Status::Deactivating) {
+            if (m_partialActivationFactor < 0.5) {
+                deactivate(animationDuration());
+            } else {
+                cancelPartialDeactivate();
+            }
+        } else if (m_status == Status::Activating) {
+            if (m_partialActivationFactor > 0.5) {
+                activate();
+            } else {
+                cancelPartialActivate();
+            }
         }
     });
 
     const auto gestureCallback = [this](qreal progress) {
-        if (m_status == Status::Active) {
-            return;
-        }
-        const bool wasInProgress = m_partialActivationFactor > 0;
-        m_partialActivationFactor = progress;
-        Q_EMIT partialActivationFactorChanged();
-        if (!wasInProgress) {
-            Q_EMIT gestureInProgressChanged();
-        }
-        if (!isRunning()) {
-            partialActivate();
+        if (!effects->hasActiveFullScreenEffect() || effects->activeFullScreenEffect() == this) {
+            switch (m_status) {
+            case Status::Inactive:
+            case Status::Activating:
+                setMode(ModeAllDesktops);
+                partialActivate(progress);
+                break;
+            case Status::Active:
+            case Status::Deactivating:
+                partialDeactivate(progress);
+                break;
+            }
         }
     };
     effects->registerRealtimeTouchpadSwipeShortcut(SwipeDirection::Down, 4, m_realtimeToggleAction, gestureCallback);
@@ -182,7 +185,7 @@ int WindowViewEffect::requestedEffectChainPosition() const
 void WindowViewEffect::reconfigure(ReconfigureFlags)
 {
     WindowViewConfig::self()->read();
-    setAnimationDuration(animationTime(200));
+    setAnimationDuration(animationTime(400));
     setLayout(WindowViewConfig::layoutMode());
 
     for (ElectricBorder border : qAsConst(m_borderActivate)) {
@@ -211,6 +214,11 @@ void WindowViewEffect::reconfigure(ReconfigureFlags)
         m_borderActivateClass.append(ElectricBorder(i));
         effects->reserveElectricBorder(ElectricBorder(i), this);
     }
+    const auto activateClassCurrentDesktop = WindowViewConfig::borderActivateClassCurrentDesktop();
+    for (int i : activateClassCurrentDesktop) {
+        m_borderActivateClassCurrentDesktop.append(ElectricBorder(i));
+        effects->reserveElectricBorder(ElectricBorder(i), this);
+    }
 
     auto touchCallback = [this](ElectricBorder border, const QSizeF &deltaProgress, const EffectScreen *screen) {
         Q_UNUSED(screen)
@@ -223,20 +231,14 @@ void WindowViewEffect::reconfigure(ReconfigureFlags)
             setMode(ModeAllDesktops);
         } else if (m_touchBorderActivateClass.contains(border)) {
             setMode(ModeWindowClass);
+        } else if (m_touchBorderActivateClassCurrentDesktop.contains(border)) {
+            setMode(ModeWindowClassCurrentDesktop);
         }
-        const bool wasInProgress = m_partialActivationFactor > 0;
         const int maxDelta = 500; // Arbitrary logical pixels value seems to behave better than scaledScreenSize
         if (border == ElectricTop || border == ElectricBottom) {
-            m_partialActivationFactor = std::min(1.0, qAbs(deltaProgress.height()) / maxDelta);
+            partialActivate(std::min(1.0, qAbs(deltaProgress.height()) / maxDelta));
         } else {
-            m_partialActivationFactor = std::min(1.0, qAbs(deltaProgress.width()) / maxDelta);
-        }
-        Q_EMIT partialActivationFactorChanged();
-        if (!wasInProgress) {
-            Q_EMIT gestureInProgressChanged();
-        }
-        if (!isRunning()) {
-            partialActivate();
+            partialActivate(std::min(1.0, qAbs(deltaProgress.width()) / maxDelta));
         }
     };
 
@@ -252,7 +254,12 @@ void WindowViewEffect::reconfigure(ReconfigureFlags)
     }
     touchActivateBorders = WindowViewConfig::touchBorderActivateClass();
     for (const int &border : touchActivateBorders) {
-        m_touchBorderActivateAll.append(ElectricBorder(border));
+        m_touchBorderActivateClass.append(ElectricBorder(border));
+        effects->registerRealtimeTouchBorder(ElectricBorder(border), m_realtimeToggleAction, touchCallback);
+    }
+    touchActivateBorders = WindowViewConfig::touchBorderActivateClassCurrentDesktop();
+    for (const int &border : touchActivateBorders) {
+        m_touchBorderActivateClassCurrentDesktop.append(ElectricBorder(border));
         effects->registerRealtimeTouchBorder(ElectricBorder(border), m_realtimeToggleAction, touchCallback);
     }
 }
@@ -263,28 +270,16 @@ void WindowViewEffect::grabbedKeyboardEvent(QKeyEvent *e)
         // check for global shortcuts
         // HACK: keyboard grab disables the global shortcuts so we have to check for global shortcut (bug 156155)
         if (m_mode == ModeCurrentDesktop && m_shortcut.contains(e->key() | e->modifiers())) {
-            if (!isRunning()) {
-                setMode(ModeCurrentDesktop);
-                activate();
-            } else {
-                deactivate(animationDuration());
-            }
+            toggleMode(ModeCurrentDesktop);
             return;
         } else if (m_mode == ModeAllDesktops && m_shortcutAll.contains(e->key() | e->modifiers())) {
-            if (!isRunning()) {
-                setMode(ModeAllDesktops);
-                activate();
-            } else {
-                deactivate(animationDuration());
-            }
+            toggleMode(ModeAllDesktops);
             return;
         } else if (m_mode == ModeWindowClass && m_shortcutClass.contains(e->key() | e->modifiers())) {
-            if (!isRunning()) {
-                setMode(ModeWindowClass);
-                activate();
-            } else {
-                deactivate(animationDuration());
-            }
+            toggleMode(ModeWindowClass);
+            return;
+        } else if (m_mode == ModeWindowClassCurrentDesktop && m_shortcutClassCurrentDesktop.contains(e->key() | e->modifiers())) {
+            toggleMode(ModeWindowClassCurrentDesktop);
             return;
         } else if (e->key() == Qt::Key_Escape) {
             deactivate(animationDuration());
@@ -298,9 +293,25 @@ qreal WindowViewEffect::partialActivationFactor() const
     return m_partialActivationFactor;
 }
 
+void WindowViewEffect::setPartialActivationFactor(qreal factor)
+{
+    if (m_partialActivationFactor != factor) {
+        m_partialActivationFactor = factor;
+        Q_EMIT partialActivationFactorChanged();
+    }
+}
+
 bool WindowViewEffect::gestureInProgress() const
 {
-    return m_partialActivationFactor > 0;
+    return m_gestureInProgress;
+}
+
+void WindowViewEffect::setGestureInProgress(bool gesture)
+{
+    if (m_gestureInProgress != gesture) {
+        m_gestureInProgress = gesture;
+        Q_EMIT gestureInProgressChanged();
+    }
 }
 
 void WindowViewEffect::activate(const QStringList &windowIds)
@@ -324,6 +335,7 @@ void WindowViewEffect::activate(const QStringList &windowIds)
     }
     if (!internalIds.isEmpty()) {
         m_windowIds = internalIds;
+        m_searchText = "";
         setRunning(true);
     }
 }
@@ -333,18 +345,37 @@ void WindowViewEffect::activate()
     if (effects->isScreenLocked()) {
         return;
     }
-    m_windowIds.clear();
+
     m_status = Status::Active;
+    m_windowIds.clear();
+
+    setGestureInProgress(false);
+    setPartialActivationFactor(0);
+
+    // This one should be the last.
+    m_searchText = "";
     setRunning(true);
 }
 
-void WindowViewEffect::partialActivate()
+void WindowViewEffect::partialActivate(qreal factor)
 {
     if (effects->isScreenLocked()) {
         return;
     }
+
     m_status = Status::Activating;
+
+    setPartialActivationFactor(factor);
+    setGestureInProgress(true);
+
+    // This one should be the last.
+    m_searchText = "";
     setRunning(true);
+}
+
+void WindowViewEffect::cancelPartialActivate()
+{
+    deactivate(animationDuration());
 }
 
 void WindowViewEffect::deactivate(int timeout)
@@ -354,7 +385,22 @@ void WindowViewEffect::deactivate(int timeout)
         QMetaObject::invokeMethod(view->rootItem(), "stop");
     }
     m_shutdownTimer->start(timeout);
-    m_status = Status::Inactive;
+
+    setGestureInProgress(false);
+    setPartialActivationFactor(0.0);
+}
+
+void WindowViewEffect::partialDeactivate(qreal factor)
+{
+    m_status = Status::Deactivating;
+
+    setPartialActivationFactor(1.0 - factor);
+    setGestureInProgress(true);
+}
+
+void WindowViewEffect::cancelPartialDeactivate()
+{
+    activate();
 }
 
 void WindowViewEffect::realDeactivate()
@@ -377,6 +423,20 @@ void WindowViewEffect::setMode(WindowViewEffect::PresentWindowsMode mode)
     Q_EMIT modeChanged();
 }
 
+void WindowViewEffect::toggleMode(PresentWindowsMode mode)
+{
+    if (!isRunning()) {
+        setMode(mode);
+        activate();
+    } else {
+        if (m_mode != mode) {
+            setMode(mode);
+        } else {
+            deactivate(animationDuration());
+        }
+    }
+}
+
 WindowViewEffect::PresentWindowsMode WindowViewEffect::mode() const
 {
     return m_mode;
@@ -389,16 +449,17 @@ bool WindowViewEffect::borderActivated(ElectricBorder border)
     }
 
     if (m_borderActivate.contains(border)) {
-        setMode(ModeCurrentDesktop);
+        toggleMode(ModeCurrentDesktop);
     } else if (m_borderActivateAll.contains(border)) {
-        setMode(ModeAllDesktops);
+        toggleMode(ModeAllDesktops);
     } else if (m_borderActivateClass.contains(border)) {
-        setMode(ModeWindowClass);
+        toggleMode(ModeWindowClass);
+    } else if (m_touchBorderActivateClassCurrentDesktop.contains(border)) {
+        toggleMode(ModeWindowClassCurrentDesktop);
     } else {
         return false;
     }
 
-    activate();
     return true;
 }
 

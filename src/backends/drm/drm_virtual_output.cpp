@@ -12,8 +12,8 @@
 #include "drm_backend.h"
 #include "drm_gpu.h"
 #include "drm_layer.h"
+#include "drm_logging.h"
 #include "drm_render_backend.h"
-#include "logging.h"
 #include "renderloop_p.h"
 #include "softwarevsyncmonitor.h"
 
@@ -22,11 +22,11 @@ namespace KWin
 
 DrmVirtualOutput::DrmVirtualOutput(const QString &name, DrmGpu *gpu, const QSize &size, Type type)
     : DrmAbstractOutput(gpu)
-    , m_vsyncMonitor(SoftwareVsyncMonitor::create(this))
+    , m_vsyncMonitor(SoftwareVsyncMonitor::create())
 {
-    connect(m_vsyncMonitor, &VsyncMonitor::vblankOccurred, this, &DrmVirtualOutput::vblank);
+    connect(m_vsyncMonitor.get(), &VsyncMonitor::vblankOccurred, this, &DrmVirtualOutput::vblank);
 
-    auto mode = QSharedPointer<OutputMode>::create(size, 60000, OutputMode::Flag::Preferred);
+    auto mode = std::make_shared<OutputMode>(size, 60000, OutputMode::Flag::Preferred);
     setModesInternal({mode}, mode);
     m_renderLoop->setRefreshRate(mode->refreshRate());
 
@@ -54,8 +54,7 @@ bool DrmVirtualOutput::present()
 void DrmVirtualOutput::vblank(std::chrono::nanoseconds timestamp)
 {
     if (m_pageFlipPending) {
-        RenderLoopPrivate *renderLoopPrivate = RenderLoopPrivate::get(m_renderLoop);
-        renderLoopPrivate->notifyFrameCompleted(timestamp);
+        DrmAbstractOutput::pageFlipped(timestamp);
     }
 }
 
@@ -71,7 +70,7 @@ void DrmVirtualOutput::updateEnablement(bool enable)
 
 DrmOutputLayer *DrmVirtualOutput::outputLayer() const
 {
-    return m_layer.data();
+    return m_layer.get();
 }
 
 void DrmVirtualOutput::recreateSurface()

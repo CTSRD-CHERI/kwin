@@ -59,17 +59,17 @@ QRegion SurfaceItem::damage() const
 SurfacePixmap *SurfaceItem::pixmap() const
 {
     if (m_pixmap && m_pixmap->isValid()) {
-        return m_pixmap.data();
+        return m_pixmap.get();
     }
     if (m_previousPixmap && m_previousPixmap->isValid()) {
-        return m_previousPixmap.data();
+        return m_previousPixmap.get();
     }
     return nullptr;
 }
 
 SurfacePixmap *SurfaceItem::previousPixmap() const
 {
-    return m_previousPixmap.data();
+    return m_previousPixmap.get();
 }
 
 void SurfaceItem::referencePreviousPixmap()
@@ -92,8 +92,8 @@ void SurfaceItem::unreferencePreviousPixmap()
 
 void SurfaceItem::updatePixmap()
 {
-    if (m_pixmap.isNull()) {
-        m_pixmap.reset(createPixmap());
+    if (!m_pixmap) {
+        m_pixmap = createPixmap();
     }
     if (m_pixmap->isValid()) {
         m_pixmap->update();
@@ -108,16 +108,16 @@ void SurfaceItem::updatePixmap()
 
 void SurfaceItem::discardPixmap()
 {
-    if (!m_pixmap.isNull()) {
+    if (m_pixmap) {
         if (m_pixmap->isValid()) {
-            m_previousPixmap.reset(m_pixmap.take());
+            m_previousPixmap = std::move(m_pixmap);
             m_previousPixmap->markAsDiscarded();
             referencePreviousPixmap();
         } else {
             m_pixmap.reset();
         }
     }
-    addDamage(rect());
+    addDamage(rect().toAlignedRect());
 }
 
 void SurfaceItem::preprocess()
@@ -128,6 +128,7 @@ void SurfaceItem::preprocess()
 WindowQuadList SurfaceItem::buildQuads() const
 {
     const QRegion region = shape();
+    const auto size = pixmap()->size();
 
     WindowQuadList quads;
     quads.reserve(region.rectCount());
@@ -140,10 +141,10 @@ WindowQuadList SurfaceItem::buildQuads() const
         const QPointF bufferBottomRight = m_surfaceToBufferMatrix.map(rect.bottomRight());
         const QPointF bufferBottomLeft = m_surfaceToBufferMatrix.map(rect.bottomLeft());
 
-        quad[0] = WindowVertex(rect.topLeft(), bufferTopLeft);
-        quad[1] = WindowVertex(rect.topRight(), bufferTopRight);
-        quad[2] = WindowVertex(rect.bottomRight(), bufferBottomRight);
-        quad[3] = WindowVertex(rect.bottomLeft(), bufferBottomLeft);
+        quad[0] = WindowVertex(rect.topLeft(), QPointF{bufferTopLeft.x() / size.width(), bufferTopLeft.y() / size.height()});
+        quad[1] = WindowVertex(rect.topRight(), QPointF{bufferTopRight.x() / size.width(), bufferTopRight.y() / size.height()});
+        quad[2] = WindowVertex(rect.bottomRight(), QPointF{bufferBottomRight.x() / size.width(), bufferBottomRight.y() / size.height()});
+        quad[3] = WindowVertex(rect.bottomLeft(), QPointF{bufferBottomLeft.x() / size.width(), bufferBottomLeft.y() / size.height()});
 
         quads << quad;
     }
@@ -155,9 +156,9 @@ SurfaceTexture::~SurfaceTexture()
 {
 }
 
-SurfacePixmap::SurfacePixmap(SurfaceTexture *texture, QObject *parent)
+SurfacePixmap::SurfacePixmap(std::unique_ptr<SurfaceTexture> &&texture, QObject *parent)
     : QObject(parent)
-    , m_texture(texture)
+    , m_texture(std::move(texture))
 {
 }
 
@@ -167,7 +168,7 @@ void SurfacePixmap::update()
 
 SurfaceTexture *SurfacePixmap::texture() const
 {
-    return m_texture.data();
+    return m_texture.get();
 }
 
 bool SurfacePixmap::hasAlphaChannel() const
@@ -180,7 +181,7 @@ QSize SurfacePixmap::size() const
     return m_size;
 }
 
-QRect SurfacePixmap::contentsRect() const
+QRectF SurfacePixmap::contentsRect() const
 {
     return m_contentsRect;
 }

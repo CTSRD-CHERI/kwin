@@ -42,6 +42,7 @@ protected:
     void closeWindow(xcb_window_t w) override;
     void moveResize(xcb_window_t w, int x_root, int y_root, unsigned long direction) override;
     void moveResizeWindow(xcb_window_t w, int flags, int x, int y, int width, int height) override;
+    void showWindowMenu(xcb_window_t w, int device_id, int x_root, int y_root) override;
     void gotPing(xcb_window_t w, xcb_timestamp_t timestamp) override;
     void restackWindow(xcb_window_t w, RequestSource source, xcb_window_t above, int detail, xcb_timestamp_t timestamp) override;
     void changeShowingDesktop(bool showing) override;
@@ -49,7 +50,7 @@ protected:
 private:
     RootInfo(xcb_window_t w, const char *name, NET::Properties properties, NET::WindowTypes types,
              NET::States states, NET::Properties2 properties2, NET::Actions actions, int scr = -1);
-    static RootInfo *s_self;
+    static std::unique_ptr<RootInfo> s_self;
     friend RootInfo *rootInfo();
 
     xcb_window_t m_activeWindow;
@@ -58,7 +59,7 @@ private:
 
 inline RootInfo *rootInfo()
 {
-    return RootInfo::s_self;
+    return RootInfo::s_self.get();
 }
 
 /**

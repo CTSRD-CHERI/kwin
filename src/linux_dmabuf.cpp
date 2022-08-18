@@ -13,11 +13,8 @@
 namespace KWin
 {
 
-LinuxDmaBufV1ClientBuffer::LinuxDmaBufV1ClientBuffer(const QVector<KWaylandServer::LinuxDmaBufV1Plane> &planes,
-                                                     quint32 format,
-                                                     const QSize &size,
-                                                     quint32 flags)
-    : KWaylandServer::LinuxDmaBufV1ClientBuffer(size, format, flags, planes)
+LinuxDmaBufV1ClientBuffer::LinuxDmaBufV1ClientBuffer(DmaBufAttributes &&attrs, quint32 flags)
+    : KWaylandServer::LinuxDmaBufV1ClientBuffer(std::move(attrs), flags)
 {
     waylandServer()->addLinuxDmabufBuffer(this);
 }
@@ -40,14 +37,9 @@ LinuxDmaBufV1RendererInterface::~LinuxDmaBufV1RendererInterface()
     waylandServer()->linuxDmabuf()->setRendererInterface(nullptr);
 }
 
-KWaylandServer::LinuxDmaBufV1ClientBuffer *LinuxDmaBufV1RendererInterface::importBuffer(const QVector<KWaylandServer::LinuxDmaBufV1Plane> &planes,
-                                                                                        quint32 format,
-                                                                                        const QSize &size,
-                                                                                        quint32 flags)
+KWaylandServer::LinuxDmaBufV1ClientBuffer *LinuxDmaBufV1RendererInterface::importBuffer(DmaBufAttributes &&attrs, quint32 flags)
 {
-    Q_UNUSED(planes)
-    Q_UNUSED(format)
-    Q_UNUSED(size)
+    Q_UNUSED(attrs)
     Q_UNUSED(flags)
 
     return nullptr;

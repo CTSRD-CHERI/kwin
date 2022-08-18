@@ -20,9 +20,8 @@
 
 namespace KWin
 {
-extern int screen_number;
 
-RootInfo *RootInfo::s_self = nullptr;
+std::unique_ptr<RootInfo> RootInfo::s_self;
 
 RootInfo *RootInfo::create()
 {
@@ -34,9 +33,9 @@ RootInfo *RootInfo::create()
                       XCB_COPY_FROM_PARENT, XCB_CW_OVERRIDE_REDIRECT, values);
     const uint32_t lowerValues[] = {XCB_STACK_MODE_BELOW}; // See usage in layers.cpp
     // we need to do the lower window with a roundtrip, otherwise NETRootInfo is not functioning
-    ScopedCPointer<xcb_generic_error_t> error(xcb_request_check(kwinApp()->x11Connection(),
-                                                                xcb_configure_window_checked(kwinApp()->x11Connection(), supportWindow, XCB_CONFIG_WINDOW_STACK_MODE, lowerValues)));
-    if (!error.isNull()) {
+    UniqueCPtr<xcb_generic_error_t> error(xcb_request_check(kwinApp()->x11Connection(),
+                                                            xcb_configure_window_checked(kwinApp()->x11Connection(), supportWindow, XCB_CONFIG_WINDOW_STACK_MODE, lowerValues)));
+    if (error) {
         qCDebug(KWIN_CORE) << "Error occurred while lowering support window: " << error->error_code;
     }
 
@@ -100,7 +99,8 @@ RootInfo *RootInfo::create()
         | NET::WM2FullscreenMonitors
         | NET::WM2KDEShadow
         | NET::WM2OpaqueRegion
-        | NET::WM2GTKFrameExtents;
+        | NET::WM2GTKFrameExtents
+        | NET::WM2GTKShowWindowMenu;
 #if KWIN_BUILD_ACTIVITIES
     properties2 |= NET::WM2Activities;
 #endif
@@ -115,8 +115,8 @@ RootInfo *RootInfo::create()
         | NET::ActionChangeDesktop
         | NET::ActionClose;
 
-    s_self = new RootInfo(supportWindow, "KWin", properties, types, states, properties2, actions, screen_number);
-    return s_self;
+    s_self.reset(new RootInfo(supportWindow, "KWin", properties, types, states, properties2, actions));
+    return s_self.get();
 }
 
 void RootInfo::destroy()
@@ -125,8 +125,7 @@ void RootInfo::destroy()
         return;
     }
     xcb_window_t supportWindow = s_self->supportWindow();
-    delete s_self;
-    s_self = nullptr;
+    s_self.reset();
     xcb_destroy_window(kwinApp()->x11Connection(), supportWindow);
 }
 
@@ -204,7 +203,7 @@ void RootInfo::moveResize(xcb_window_t w, int x_root, int y_root, unsigned long 
     X11Window *c = Workspace::self()->findClient(Predicate::WindowMatch, w);
     if (c) {
         updateXTime(); // otherwise grabbing may have old timestamp - this message should include timestamp
-        c->NETMoveResize(x_root, y_root, (Direction)direction);
+        c->NETMoveResize(Xcb::fromXNative(x_root), Xcb::fromXNative(y_root), (Direction)direction);
     }
 }
 
@@ -212,7 +211,15 @@ void RootInfo::moveResizeWindow(xcb_window_t w, int flags, int x, int y, int wid
 {
     X11Window *c = Workspace::self()->findClient(Predicate::WindowMatch, w);
     if (c) {
-        c->NETMoveResizeWindow(flags, x, y, width, height);
+        c->NETMoveResizeWindow(flags, Xcb::fromXNative(x), Xcb::fromXNative(y), Xcb::fromXNative(width), Xcb::fromXNative(height));
+    }
+}
+
+void RootInfo::showWindowMenu(xcb_window_t w, int device_id, int x_root, int y_root)
+{
+    Q_UNUSED(device_id);
+    if (X11Window *c = Workspace::self()->findClient(Predicate::WindowMatch, w)) {
+        c->GTKShowWindowMenu(Xcb::fromXNative(x_root), Xcb::fromXNative(y_root));
     }
 }
 

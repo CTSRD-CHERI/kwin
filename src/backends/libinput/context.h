@@ -10,10 +10,12 @@
 #define KWIN_LIBINPUT_CONTEXT_H
 
 #include <libinput.h>
+#include <memory>
 
 namespace KWin
 {
 
+class Session;
 class Udev;
 
 namespace LibInput
@@ -24,9 +26,9 @@ class Event;
 class Context
 {
 public:
-    Context(const Udev &udev);
+    Context(Session *session, std::unique_ptr<Udev> &&udev);
     ~Context();
-    bool assignSeat(const char *seat);
+    bool initialize();
     bool isValid() const
     {
         return m_libinput != nullptr;
@@ -36,6 +38,7 @@ public:
         return m_suspended;
     }
 
+    Session *session() const;
     int fileDescriptor();
     void dispatch();
     void suspend();
@@ -51,10 +54,9 @@ public:
     }
 
     /**
-     * Gets the next event, if there is no new event @c null is returned.
-     * The caller takes ownership of the returned pointer.
+     * Gets the next event, if there is no new event @c nullptr is returned
      */
-    Event *event();
+    std::unique_ptr<Event> event();
 
     static int openRestrictedCallback(const char *path, int flags, void *user_data);
     static void closeRestrictedCallBack(int fd, void *user_data);
@@ -63,8 +65,11 @@ public:
 private:
     int openRestricted(const char *path, int flags);
     void closeRestricted(int fd);
+
+    Session *m_session;
     struct libinput *m_libinput;
     bool m_suspended;
+    std::unique_ptr<Udev> m_udev;
 };
 
 }

@@ -47,11 +47,10 @@ void OutputChangesTest::initTestCase()
 
     kwinApp()->start();
     QVERIFY(applicationStartedSpy.wait());
-    const auto outputs = kwinApp()->platform()->enabledOutputs();
+    const auto outputs = workspace()->outputs();
     QCOMPARE(outputs.count(), 2);
     QCOMPARE(outputs[0]->geometry(), QRect(0, 0, 1280, 1024));
     QCOMPARE(outputs[1]->geometry(), QRect(1280, 0, 1280, 1024));
-    Test::initWaylandWorkspace();
 }
 
 void OutputChangesTest::init()
@@ -73,9 +72,9 @@ void OutputChangesTest::testWindowSticksToOutputAfterOutputIsDisabled()
     auto outputs = kwinApp()->platform()->outputs();
 
     // Create a window.
-    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
-    QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
-    auto window = Test::renderAndWaitForShown(surface.data(), QSize(100, 50), Qt::blue);
+    std::unique_ptr<KWayland::Client::Surface> surface(Test::createSurface());
+    std::unique_ptr<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.get()));
+    auto window = Test::renderAndWaitForShown(surface.get(), QSize(100, 50), Qt::blue);
     QVERIFY(window);
 
     // Move the window to some predefined position so the test is more robust.
@@ -99,9 +98,9 @@ void OutputChangesTest::testWindowSticksToOutputAfterAnotherOutputIsDisabled()
     auto outputs = kwinApp()->platform()->outputs();
 
     // Create a window.
-    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
-    QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
-    auto window = Test::renderAndWaitForShown(surface.data(), QSize(100, 50), Qt::blue);
+    std::unique_ptr<KWayland::Client::Surface> surface(Test::createSurface());
+    std::unique_ptr<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.get()));
+    auto window = Test::renderAndWaitForShown(surface.get(), QSize(100, 50), Qt::blue);
     QVERIFY(window);
 
     // Move the window to the second output.
@@ -129,9 +128,9 @@ void OutputChangesTest::testWindowSticksToOutputAfterOutputIsMoved()
     auto outputs = kwinApp()->platform()->outputs();
 
     // Create a window.
-    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
-    QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
-    auto window = Test::renderAndWaitForShown(surface.data(), QSize(100, 50), Qt::blue);
+    std::unique_ptr<KWayland::Client::Surface> surface(Test::createSurface());
+    std::unique_ptr<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.get()));
+    auto window = Test::renderAndWaitForShown(surface.get(), QSize(100, 50), Qt::blue);
     QVERIFY(window);
 
     // Move the window to some predefined position so the test is more robust.

@@ -94,8 +94,8 @@ private:
     bool m_dirty = false;
 
     mutable ThumbnailTextureProvider *m_provider = nullptr;
-    QSharedPointer<GLTexture> m_offscreenTexture;
-    QScopedPointer<GLFramebuffer> m_offscreenTarget;
+    std::shared_ptr<GLTexture> m_offscreenTexture;
+    std::unique_ptr<GLFramebuffer> m_offscreenTarget;
     GLsync m_acquireFence = 0;
     qreal m_devicePixelRatio = 1;
 

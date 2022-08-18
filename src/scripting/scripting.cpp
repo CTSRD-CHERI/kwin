@@ -13,6 +13,7 @@
 // own
 #include "dbuscall.h"
 #include "desktopbackgrounditem.h"
+#include "kwinquickeffect.h"
 #include "screenedgeitem.h"
 #include "scripting_logging.h"
 #include "scriptingutils.h"
@@ -371,7 +372,7 @@ bool KWin::Script::registerScreenEdge(int edge, const QJSValue &callback)
 
     QJSValueList &callbacks = m_screenEdgeCallbacks[edge];
     if (callbacks.isEmpty()) {
-        ScreenEdges::self()->reserve(static_cast<KWin::ElectricBorder>(edge), this, "slotBorderActivated");
+        workspace()->screenEdges()->reserve(static_cast<KWin::ElectricBorder>(edge), this, "slotBorderActivated");
     }
 
     callbacks << callback;
@@ -386,7 +387,7 @@ bool KWin::Script::unregisterScreenEdge(int edge)
         return false;
     }
 
-    ScreenEdges::self()->unreserve(static_cast<KWin::ElectricBorder>(edge), this);
+    workspace()->screenEdges()->unreserve(static_cast<KWin::ElectricBorder>(edge), this);
     m_screenEdgeCallbacks.erase(it);
 
     return true;
@@ -403,7 +404,7 @@ bool KWin::Script::registerTouchScreenEdge(int edge, const QJSValue &callback)
     }
 
     QAction *action = new QAction(this);
-    ScreenEdges::self()->reserveTouch(KWin::ElectricBorder(edge), action);
+    workspace()->screenEdges()->reserveTouch(KWin::ElectricBorder(edge), action);
     m_touchScreenEdgeCallbacks.insert(edge, action);
 
     connect(action, &QAction::triggered, this, [callback]() {
@@ -658,6 +659,7 @@ void KWin::Scripting::init()
     qmlRegisterType<ScriptingModels::V3::ClientModel>("org.kde.kwin", 3, 0, "ClientModel");
     qmlRegisterType<ScriptingModels::V3::ClientFilterModel>("org.kde.kwin", 3, 0, "ClientFilterModel");
     qmlRegisterType<ScriptingModels::V3::VirtualDesktopModel>("org.kde.kwin", 3, 0, "VirtualDesktopModel");
+    qmlRegisterUncreatableType<KWin::QuickSceneView>("org.kde.kwin", 3, 0, "SceneView", QStringLiteral("Can't instantiate an object of type SceneView"));
 
     qmlRegisterSingletonType<DeclarativeScriptWorkspaceWrapper>("org.kde.kwin", 3, 0, "Workspace", [](QQmlEngine *qmlEngine, QJSEngine *jsEngine) {
         Q_UNUSED(qmlEngine)
@@ -782,7 +784,7 @@ bool KWin::Scripting::isScriptLoaded(const QString &pluginName) const
 
 KWin::AbstractScript *KWin::Scripting::findScript(const QString &pluginName) const
 {
-    QMutexLocker locker(m_scriptsLock.data());
+    QMutexLocker locker(m_scriptsLock.get());
     for (AbstractScript *script : qAsConst(scripts)) {
         if (script->pluginName() == pluginName) {
             return script;
@@ -793,7 +795,7 @@ KWin::AbstractScript *KWin::Scripting::findScript(const QString &pluginName) con
 
 bool KWin::Scripting::unloadScript(const QString &pluginName)
 {
-    QMutexLocker locker(m_scriptsLock.data());
+    QMutexLocker locker(m_scriptsLock.get());
     for (AbstractScript *script : qAsConst(scripts)) {
         if (script->pluginName() == pluginName) {
             script->deleteLater();
@@ -805,7 +807,7 @@ bool KWin::Scripting::unloadScript(const QString &pluginName)
 
 void KWin::Scripting::runScripts()
 {
-    QMutexLocker locker(m_scriptsLock.data());
+    QMutexLocker locker(m_scriptsLock.get());
     for (int i = 0; i < scripts.size(); i++) {
         scripts.at(i)->run();
     }
@@ -813,13 +815,13 @@ void KWin::Scripting::runScripts()
 
 void KWin::Scripting::scriptDestroyed(QObject *object)
 {
-    QMutexLocker locker(m_scriptsLock.data());
+    QMutexLocker locker(m_scriptsLock.get());
     scripts.removeAll(static_cast<KWin::Script *>(object));
 }
 
 int KWin::Scripting::loadScript(const QString &filePath, const QString &pluginName)
 {
-    QMutexLocker locker(m_scriptsLock.data());
+    QMutexLocker locker(m_scriptsLock.get());
     if (isScriptLoaded(pluginName)) {
         return -1;
     }
@@ -832,7 +834,7 @@ int KWin::Scripting::loadScript(const QString &filePath, const QString &pluginNa
 
 int KWin::Scripting::loadDeclarativeScript(const QString &filePath, const QString &pluginName)
 {
-    QMutexLocker locker(m_scriptsLock.data());
+    QMutexLocker locker(m_scriptsLock.get());
     if (isScriptLoaded(pluginName)) {
         return -1;
     }

@@ -6,8 +6,7 @@
 
     SPDX-License-Identifier: GPL-2.0-or-later
 */
-#ifndef KWIN_WAYLAND_OUTPUT_H
-#define KWIN_WAYLAND_OUTPUT_H
+#pragma once
 
 #include "output.h"
 
@@ -40,12 +39,12 @@ class WaylandOutput : public Output
 {
     Q_OBJECT
 public:
-    WaylandOutput(KWayland::Client::Surface *surface, WaylandBackend *backend);
+    WaylandOutput(const QString &name, KWayland::Client::Surface *surface, WaylandBackend *backend);
     ~WaylandOutput() override;
 
     RenderLoop *renderLoop() const override;
 
-    void init(const QPoint &logicalPosition, const QSize &pixelSize);
+    void init(const QSize &pixelSize);
 
     virtual void lockPointer(KWayland::Client::Pointer *pointer, bool lock)
     {
@@ -58,25 +57,11 @@ public:
         return false;
     }
 
-    /**
-     * @brief defines the geometry of the output
-     * @param logicalPosition top left position of the output in compositor space
-     * @param pixelSize output size as seen from the outside
-     */
-    void setGeometry(const QPoint &logicalPosition, const QSize &pixelSize);
+    void resize(const QSize &pixelSize);
 
     KWayland::Client::Surface *surface() const
     {
         return m_surface;
-    }
-
-    bool rendered() const
-    {
-        return m_rendered;
-    }
-    void resetRendered()
-    {
-        m_rendered = false;
     }
 
     void updateEnablement(bool enable) override;
@@ -93,18 +78,17 @@ protected:
     }
 
 private:
-    RenderLoop *m_renderLoop;
+    std::unique_ptr<RenderLoop> m_renderLoop;
     KWayland::Client::Surface *m_surface;
     WaylandBackend *m_backend;
     QTimer m_turnOffTimer;
-
-    bool m_rendered = false;
 };
 
 class XdgShellOutput : public WaylandOutput
 {
 public:
-    XdgShellOutput(KWayland::Client::Surface *surface,
+    XdgShellOutput(const QString &name,
+                   KWayland::Client::Surface *surface,
                    KWayland::Client::XdgShell *xdgShell,
                    WaylandBackend *backend, int number);
     ~XdgShellOutput() override;
@@ -122,7 +106,5 @@ private:
     bool m_hasBeenConfigured = false;
 };
 
-}
-}
-
-#endif
+} // namespace Wayland
+} // namespace KWin

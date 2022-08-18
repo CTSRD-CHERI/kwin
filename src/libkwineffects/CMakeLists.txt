@@ -5,41 +5,15 @@ ecm_setup_version(${PROJECT_VERSION}
                   VARIABLE_PREFIX KWINEFFECTS
                   VERSION_HEADER "${CMAKE_CURRENT_BINARY_DIR}/kwineffects_version.h"
                   PACKAGE_VERSION_FILE "${CMAKE_CURRENT_BINARY_DIR}/KWinEffectsConfigVersion.cmake"
-                  SOVERSION 13
+                  SOVERSION 14
 )
-
-### xrenderutils lib ###
-set(kwin_XRENDERUTILS_SRCS
-    kwinxrenderutils.cpp
-    logging.cpp
-)
-
-add_library(kwinxrenderutils SHARED ${kwin_XRENDERUTILS_SRCS})
-generate_export_header(kwinxrenderutils EXPORT_FILE_NAME kwinxrenderutils_export.h)
-target_link_libraries(kwinxrenderutils
-    PUBLIC
-        Qt::Core
-        Qt::Gui
-
-        XCB::RENDER
-        XCB::XCB
-        XCB::XFIXES
-)
-
-set_target_properties(kwinxrenderutils PROPERTIES
-    VERSION ${KWINEFFECTS_VERSION}
-    SOVERSION ${KWINEFFECTS_SOVERSION}
-)
-set_target_properties(kwinxrenderutils PROPERTIES OUTPUT_NAME ${KWIN_NAME}xrenderutils)
-
-install(TARGETS kwinxrenderutils EXPORT KWinEffectsTargets ${KDE_INSTALL_TARGETS_DEFAULT_ARGS})
 
 ###  effects lib  ###
 set(kwin_EFFECTSLIB_SRCS
     anidata.cpp
     kwinanimationeffect.cpp
-    kwindeformeffect.cpp
     kwineffects.cpp
+    kwinoffscreeneffect.cpp
     kwinoffscreenquickview.cpp
     kwinquickeffect.cpp
     logging.cpp
@@ -95,18 +69,16 @@ install(FILES
     ${CMAKE_CURRENT_BINARY_DIR}/kwinconfig.h
     ${CMAKE_CURRENT_BINARY_DIR}/kwineffects_export.h
     ${CMAKE_CURRENT_BINARY_DIR}/kwinglutils_export.h
-    ${CMAKE_CURRENT_BINARY_DIR}/kwinxrenderutils_export.h
     kwinanimationeffect.h
-    kwindeformeffect.h
     kwineffects.h
     kwinglobals.h
     kwinglplatform.h
     kwingltexture.h
     kwinglutils.h
     kwinglutils_funcs.h
+    kwinoffscreeneffect.h
     kwinoffscreenquickview.h
     kwinquickeffect.h
-    kwinxrenderutils.h
     DESTINATION ${KDE_INSTALL_INCLUDEDIR} COMPONENT Devel)
 
 set(CMAKECONFIG_INSTALL_DIR "${KDE_INSTALL_CMAKEPACKAGEDIR}/KWinEffects")

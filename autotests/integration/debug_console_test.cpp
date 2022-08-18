@@ -57,12 +57,11 @@ void DebugConsoleTest::initTestCase()
 
     kwinApp()->start();
     QVERIFY(applicationStartedSpy.wait());
-    const auto outputs = kwinApp()->platform()->enabledOutputs();
+    const auto outputs = workspace()->outputs();
     QCOMPARE(outputs.count(), 2);
     QCOMPARE(outputs[0]->geometry(), QRect(0, 0, 1280, 1024));
     QCOMPARE(outputs[1]->geometry(), QRect(1280, 0, 1280, 1024));
     setenv("QT_QPA_PLATFORM", "wayland", true);
-    Test::initWaylandWorkspace();
 }
 
 void DebugConsoleTest::cleanup()
@@ -310,11 +309,11 @@ void DebugConsoleTest::testWaylandClient()
 
     // create the Surface and ShellSurface
     using namespace KWayland::Client;
-    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
+    std::unique_ptr<KWayland::Client::Surface> surface(Test::createSurface());
     QVERIFY(surface->isValid());
-    QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
-    QVERIFY(!shellSurface.isNull());
-    Test::render(surface.data(), QSize(10, 10), Qt::red);
+    std::unique_ptr<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.get()));
+    QVERIFY(shellSurface != nullptr);
+    Test::render(surface.get(), QSize(10, 10), Qt::red);
 
     // now we have the window, it should be added to our model
     QVERIFY(rowsInsertedSpy.wait());
@@ -424,7 +423,7 @@ void DebugConsoleTest::testInternalWindow()
     QSignalSpy rowsInsertedSpy(&model, &QAbstractItemModel::rowsInserted);
     QVERIFY(rowsInsertedSpy.isValid());
 
-    QScopedPointer<HelperWindow> w(new HelperWindow);
+    std::unique_ptr<HelperWindow> w(new HelperWindow);
     w->setGeometry(0, 0, 100, 100);
     w->show();
 

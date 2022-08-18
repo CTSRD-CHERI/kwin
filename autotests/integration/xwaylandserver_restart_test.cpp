@@ -10,7 +10,6 @@
 #include "main.h"
 #include "platform.h"
 #include "scene.h"
-#include "screens.h"
 #include "wayland_server.h"
 #include "workspace.h"
 #include "x11window.h"
@@ -24,7 +23,7 @@ namespace KWin
 
 struct XcbConnectionDeleter
 {
-    static inline void cleanup(xcb_connection_t *pointer)
+    void operator()(xcb_connection_t *pointer)
     {
         xcb_disconnect(pointer);
     }
@@ -57,10 +56,6 @@ void XwaylandServerRestartTest::initTestCase()
 
     kwinApp()->start();
     QVERIFY(applicationStartedSpy.wait());
-    QCOMPARE(screens()->count(), 2);
-    QCOMPARE(screens()->geometry(0), QRect(0, 0, 1280, 1024));
-    QCOMPARE(screens()->geometry(1), QRect(1280, 0, 1280, 1024));
-    Test::initWaylandWorkspace();
 }
 
 static void kwin_safe_kill(QProcess *process)
@@ -73,7 +68,7 @@ void XwaylandServerRestartTest::testRestart()
 {
     // This test verifies that the Xwayland server will be restarted after a crash.
 
-    Xwl::Xwayland *xwayland = static_cast<Xwl::Xwayland *>(XwaylandInterface::self());
+    Xwl::Xwayland *xwayland = static_cast<Xwl::Xwayland *>(kwinApp()->xwayland());
 
     // Pretend that the Xwayland process has crashed by sending a SIGKILL to it.
     QSignalSpy startedSpy(xwayland, &Xwl::Xwayland::started);
@@ -83,11 +78,11 @@ void XwaylandServerRestartTest::testRestart()
     QCOMPARE(startedSpy.count(), 1);
 
     // Check that the compositor still accepts new X11 clients.
-    QScopedPointer<xcb_connection_t, XcbConnectionDeleter> c(xcb_connect(nullptr, nullptr));
-    QVERIFY(!xcb_connection_has_error(c.data()));
+    std::unique_ptr<xcb_connection_t, XcbConnectionDeleter> c(xcb_connect(nullptr, nullptr));
+    QVERIFY(!xcb_connection_has_error(c.get()));
     const QRect rect(0, 0, 100, 200);
-    xcb_window_t windowId = xcb_generate_id(c.data());
-    xcb_create_window(c.data(), XCB_COPY_FROM_PARENT, windowId, rootWindow(),
+    xcb_window_t windowId = xcb_generate_id(c.get());
+    xcb_create_window(c.get(), XCB_COPY_FROM_PARENT, windowId, rootWindow(),
                       rect.x(), rect.y(), rect.width(), rect.height(), 0,
                       XCB_WINDOW_CLASS_INPUT_OUTPUT, XCB_COPY_FROM_PARENT, 0, nullptr);
     xcb_size_hints_t hints;
@@ -95,9 +90,9 @@ void XwaylandServerRestartTest::testRestart()
     xcb_icccm_size_hints_set_position(&hints, 1, rect.x(), rect.y());
     xcb_icccm_size_hints_set_size(&hints, 1, rect.width(), rect.height());
     xcb_icccm_size_hints_set_min_size(&hints, rect.width(), rect.height());
-    xcb_icccm_set_wm_normal_hints(c.data(), windowId, &hints);
-    xcb_map_window(c.data(), windowId);
-    xcb_flush(c.data());
+    xcb_icccm_set_wm_normal_hints(c.get(), windowId, &hints);
+    xcb_map_window(c.get(), windowId);
+    xcb_flush(c.get());
 
     QSignalSpy windowCreatedSpy(workspace(), &Workspace::windowAdded);
     QVERIFY(windowCreatedSpy.isValid());
@@ -113,8 +108,8 @@ void XwaylandServerRestartTest::testRestart()
     QVERIFY(frameRenderedSpy.wait());
 
     // Destroy the test window.
-    xcb_destroy_window(c.data(), windowId);
-    xcb_flush(c.data());
+    xcb_destroy_window(c.get(), windowId);
+    xcb_flush(c.get());
     QVERIFY(Test::waitForWindowDestroyed(window));
 }
 

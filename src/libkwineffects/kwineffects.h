@@ -29,7 +29,6 @@
 #include <QHash>
 #include <QList>
 #include <QLoggingCategory>
-#include <QScopedPointer>
 #include <QStack>
 #include <QVector>
 
@@ -110,58 +109,37 @@ typedef QList<KWin::EffectWindow *> EffectWindowList;
  * This library provides a specialized KPluginFactory subclass and macros to
  * create a sub class. This subclass of KPluginFactory has to be used, otherwise
  * KWin won't load the plugin. Use the @ref KWIN_EFFECT_FACTORY macro to create the
- * plugin factory.
+ * plugin factory. This macro will take the embedded json metadata filename as the second argument.
  *
  * @subsection creating-buildsystem Buildsystem
- * To build the effect, you can use the KWIN_ADD_EFFECT() cmake macro which
- *  can be found in effects/CMakeLists.txt file in KWin's source. First
- *  argument of the macro is the name of the library that will contain
- *  your effect. Although not strictly required, it is usually a good idea to
- *  use the same name as your effect's internal name there. Following arguments
- *  to the macro are the files containing your effect's source. If our effect's
- *  source is in cooleffect.cpp, we'd use following:
+ * To build the effect, you can use the kcoreaddons_add_plugin cmake macro which
+ *  takes care of creating the library and installing it.
+ *  The first parameter is the name of the library, this is the same as the id of the plugin.
+ *  If our effect's source is in cooleffect.cpp, we'd use following:
  * @code
- *  KWIN_ADD_EFFECT(cooleffect cooleffect.cpp)
+ *     kcoreaddons_add_plugin(cooleffect SOURCES cooleffect.cpp INSTALL_NAMESPACE "kwin/effects/plugins")
  * @endcode
  *
- * This macro takes care of compiling your effect. You'll also need to install
- *  your effect's .desktop file, so the example CMakeLists.txt file would be
- *  as follows:
+ * @subsection creating-json-metadata Effect's .json file for embedded metadata
+ * The format follows the one of the @see KPluginMetaData class.
+ *
+ * Example cooleffect.json file:
  * @code
- *  KWIN_ADD_EFFECT(cooleffect cooleffect.cpp)
- *  install( FILES cooleffect.desktop DESTINATION ${SERVICES_INSTALL_DIR}/kwin )
+{
+    "KPlugin": {
+        "Authors": [
+            {
+                "Email": "my@email.here",
+                "Name": "My Name"
+            }
+        ],
+        "Category": "Misc",
+        "Description": "The coolest effect you've ever seen",
+        "Icon": "preferences-system-windows-effect-cooleffect",
+        "Name": "Cool Effect"
+    }
+}
  * @endcode
- *
- * @subsection creating-desktop Effect's .desktop file
- * You will also need to create .desktop file to set name, description, icon
- *  and other properties of your effect. Important fields of the .desktop file
- *  are:
- *  @li Name User-visible name of your effect
- *  @li Icon Name of the icon of the effect
- *  @li Comment Short description of the effect
- *  @li Type must be "Service"
- *  @li X-KDE-ServiceTypes must be "KWin/Effect" for scripted effects
- *  @li X-KDE-PluginInfo-Name effect's internal name as passed to the KWIN_EFFECT macro plus "kwin4_effect_" prefix
- *  @li X-KDE-PluginInfo-Category effect's category. Should be one of Appearance, Accessibility, Window Management, Demos, Tests, Misc
- *  @li X-KDE-PluginInfo-EnabledByDefault whether the effect should be enabled by default (use sparingly). Default is false
- *  @li X-KDE-Library name of the library containing the effect. This is the first argument passed to the KWIN_ADD_EFFECT macro in cmake file plus "kwin4_effect_" prefix.
- *
- * Example cooleffect.desktop file follows:
- * @code
-[Desktop Entry]
-Name=Cool Effect
-Comment=The coolest effect you've ever seen
-Icon=preferences-system-windows-effect-cooleffect
-
-Type=Service
-X-KDE-ServiceTypes=KWin/Effect
-X-KDE-PluginInfo-Author=My Name
-X-KDE-PluginInfo-Email=my@email.here
-X-KDE-PluginInfo-Name=kwin4_effect_cooleffect
-X-KDE-PluginInfo-Category=Misc
-X-KDE-Library=kwin4_effect_cooleffect
- * @endcode
- *
  *
  * @section accessing Accessing windows and workspace
  * Effects can gain access to the properties of windows and workspace via
@@ -180,7 +158,7 @@ X-KDE-Library=kwin4_effect_cooleffect
 
 #define KWIN_EFFECT_API_MAKE_VERSION(major, minor) ((major) << 8 | (minor))
 #define KWIN_EFFECT_API_VERSION_MAJOR 0
-#define KWIN_EFFECT_API_VERSION_MINOR 234
+#define KWIN_EFFECT_API_VERSION_MINOR 235
 #define KWIN_EFFECT_API_VERSION KWIN_EFFECT_API_MAKE_VERSION( \
     KWIN_EFFECT_API_VERSION_MAJOR, KWIN_EFFECT_API_VERSION_MINOR)
 
@@ -210,15 +188,6 @@ enum EffectFrameStyle {
     EffectFrameUnstyled, ///< Displays a basic box around the contents.
     EffectFrameStyled ///< Displays a Plasma-styled frame around the contents.
 };
-
-/**
- * Infinite region (i.e. a special region type saying that everything needs to be painted).
- */
-KWINEFFECTS_EXPORT inline QRect infiniteRegion()
-{
-    // INT_MIN / 2 because width/height is used (INT_MIN+INT_MAX==-1)
-    return QRect(INT_MIN / 2, INT_MIN / 2, INT_MAX, INT_MAX);
-}
 
 /**
  * @short Base class for all KWin effects
@@ -380,9 +349,6 @@ public:
      * @li change the region of the screen that will be painted
      * @li do various housekeeping tasks such as initing your effect's variables
             for the upcoming paint pass or updating animation's progress
-     *
-     * In OpenGL based compositing, the frameworks ensures that the context is current
-     * when this method is invoked.
      *
      * @a presentTime specifies the expected monotonic time when the rendered frame
      * will be displayed on the screen.
@@ -1099,9 +1065,9 @@ public:
     virtual bool optionRollOverDesktops() const = 0;
 
     virtual EffectScreen *activeScreen() const = 0; // Xinerama
-    virtual QRect clientArea(clientAreaOption, const EffectScreen *screen, int desktop) const = 0;
-    virtual QRect clientArea(clientAreaOption, const EffectWindow *c) const = 0;
-    virtual QRect clientArea(clientAreaOption, const QPoint &p, int desktop) const = 0;
+    virtual QRectF clientArea(clientAreaOption, const EffectScreen *screen, int desktop) const = 0;
+    virtual QRectF clientArea(clientAreaOption, const EffectWindow *c) const = 0;
+    virtual QRectF clientArea(clientAreaOption, const QPoint &p, int desktop) const = 0;
 
     /**
      * The bounding size of all screens combined. Overlapping areas
@@ -1172,6 +1138,7 @@ public:
      *  affect the current painting.
      */
     Q_SCRIPTABLE virtual void addRepaintFull() = 0;
+    Q_SCRIPTABLE virtual void addRepaint(const QRectF &r) = 0;
     Q_SCRIPTABLE virtual void addRepaint(const QRect &r) = 0;
     Q_SCRIPTABLE virtual void addRepaint(const QRegion &r) = 0;
     Q_SCRIPTABLE virtual void addRepaint(int x, int y, int w, int h) = 0;
@@ -1246,8 +1213,9 @@ public:
      * EffectFrame.
      * @since 4.6
      */
-    virtual EffectFrame *effectFrame(EffectFrameStyle style, bool staticSize = true,
-                                     const QPoint &position = QPoint(-1, -1), Qt::Alignment alignment = Qt::AlignCenter) const = 0;
+    virtual std::unique_ptr<EffectFrame> effectFrame(EffectFrameStyle style, bool staticSize = true,
+                                                     const QPoint &position = QPoint(-1, -1),
+                                                     Qt::Alignment alignment = Qt::AlignCenter) const = 0;
 
     /**
      * Allows an effect to trigger a reload of itself.
@@ -1604,7 +1572,7 @@ Q_SIGNALS:
      * @see EffectWindow::isUserResize
      * @since 4.7
      */
-    void windowStepUserMovedResized(KWin::EffectWindow *w, const QRect &geometry);
+    void windowStepUserMovedResized(KWin::EffectWindow *w, const QRectF &geometry);
     /**
      * Signal emitted when the user finishes move/resize of window @p w.
      * @param w The window which has been moved/resized
@@ -1636,14 +1604,14 @@ Q_SIGNALS:
      * @see windowUserMovedResized
      * @since 4.7
      */
-    void windowGeometryShapeChanged(KWin::EffectWindow *w, const QRect &old);
+    void windowGeometryShapeChanged(KWin::EffectWindow *w, const QRectF &old);
     /**
      * This signal is emitted when the frame geometry of a window changed.
      * @param window The window whose geometry changed
      * @param oldGeometry The previous geometry
      * @since 5.19
      */
-    void windowFrameGeometryChanged(KWin::EffectWindow *window, const QRect &oldGeometry);
+    void windowFrameGeometryChanged(KWin::EffectWindow *window, const QRectF &oldGeometry);
     /**
      * Signal emitted when the windows opacity is changed.
      * @param w The window whose opacity level is changed.
@@ -1960,6 +1928,9 @@ class KWINEFFECTS_EXPORT EffectScreen : public QObject
     Q_PROPERTY(QRect geometry READ geometry NOTIFY geometryChanged)
     Q_PROPERTY(qreal devicePixelRatio READ devicePixelRatio NOTIFY devicePixelRatioChanged)
     Q_PROPERTY(QString name READ name CONSTANT)
+    Q_PROPERTY(QString manufacturer READ manufacturer CONSTANT)
+    Q_PROPERTY(QString model READ model CONSTANT)
+    Q_PROPERTY(QString serialNumber READ serialNumber CONSTANT)
     Q_PROPERTY(qreal refreshRate READ refreshRate CONSTANT)
 
 public:
@@ -1980,6 +1951,9 @@ public:
      */
     virtual QRect geometry() const = 0;
 
+    Q_INVOKABLE QPointF mapToGlobal(const QPointF &pos) const;
+    Q_INVOKABLE QPointF mapFromGlobal(const QPointF &pos) const;
+
     /**
      * Returns the screen's refresh rate in milli-hertz.
      */
@@ -1997,6 +1971,10 @@ public:
     };
     Q_ENUM(Transform)
     virtual Transform transform() const = 0;
+
+    virtual QString manufacturer() const = 0;
+    virtual QString model() const = 0;
+    virtual QString serialNumber() const = 0;
 
 Q_SIGNALS:
     /**
@@ -2035,6 +2013,7 @@ Q_SIGNALS:
     void changed();
 };
 
+class EffectWindowVisibleRef;
 /**
  * @short Representation of a window used by/for Effect classes.
  *
@@ -2045,20 +2024,20 @@ class KWINEFFECTS_EXPORT EffectWindow : public QObject
 {
     Q_OBJECT
     Q_PROPERTY(bool alpha READ hasAlpha CONSTANT)
-    Q_PROPERTY(QRect geometry READ geometry)
-    Q_PROPERTY(QRect expandedGeometry READ expandedGeometry)
-    Q_PROPERTY(int height READ height)
+    Q_PROPERTY(QRectF geometry READ geometry)
+    Q_PROPERTY(QRectF expandedGeometry READ expandedGeometry)
+    Q_PROPERTY(qreal height READ height)
     Q_PROPERTY(qreal opacity READ opacity)
-    Q_PROPERTY(QPoint pos READ pos)
+    Q_PROPERTY(QPointF pos READ pos)
     Q_PROPERTY(KWin::EffectScreen *screen READ screen)
-    Q_PROPERTY(QSize size READ size)
-    Q_PROPERTY(int width READ width)
-    Q_PROPERTY(int x READ x)
-    Q_PROPERTY(int y READ y)
+    Q_PROPERTY(QSizeF size READ size)
+    Q_PROPERTY(qreal width READ width)
+    Q_PROPERTY(qreal x READ x)
+    Q_PROPERTY(qreal y READ y)
     Q_PROPERTY(int desktop READ desktop)
     Q_PROPERTY(bool onAllDesktops READ isOnAllDesktops)
     Q_PROPERTY(bool onCurrentDesktop READ isOnCurrentDesktop)
-    Q_PROPERTY(QRect rect READ rect)
+    Q_PROPERTY(QRectF rect READ rect)
     Q_PROPERTY(QString windowClass READ windowClass)
     Q_PROPERTY(QString windowRole READ windowRole)
     /**
@@ -2193,7 +2172,7 @@ class KWINEFFECTS_EXPORT EffectWindow : public QObject
      * By how much the window wishes to grow/shrink at least. Usually QSize(1,1).
      * MAY BE DISOBEYED BY THE WM! It's only for information, do NOT rely on it at all.
      */
-    Q_PROPERTY(QSize basicUnit READ basicUnit)
+    Q_PROPERTY(QSizeF basicUnit READ basicUnit)
     /**
      * Whether the window is currently being moved by the user.
      */
@@ -2206,7 +2185,7 @@ class KWINEFFECTS_EXPORT EffectWindow : public QObject
      * The optional geometry representing the minimized Client in e.g a taskbar.
      * See _NET_WM_ICON_GEOMETRY at https://standards.freedesktop.org/wm-spec/wm-spec-latest.html .
      */
-    Q_PROPERTY(QRect iconGeometry READ iconGeometry)
+    Q_PROPERTY(QRectF iconGeometry READ iconGeometry)
     /**
      * Returns whether the window is any of special windows types (desktop, dock, splash, ...),
      * i.e. window types that usually don't have a window frame and the user does not use window
@@ -2221,12 +2200,12 @@ class KWINEFFECTS_EXPORT EffectWindow : public QObject
     /**
      * Geometry of the actual window contents inside the whole (including decorations) window.
      */
-    Q_PROPERTY(QRect contentsRect READ contentsRect)
+    Q_PROPERTY(QRectF contentsRect READ contentsRect)
     /**
      * Geometry of the transparent rect in the decoration.
      * May be different from contentsRect if the decoration is extended into the client area.
      */
-    Q_PROPERTY(QRect decorationInnerRect READ decorationInnerRect)
+    Q_PROPERTY(QRectF decorationInnerRect READ decorationInnerRect)
     Q_PROPERTY(bool hasDecoration READ hasDecoration)
     Q_PROPERTY(QStringList activities READ activities)
     Q_PROPERTY(bool onCurrentActivity READ isOnCurrentActivity)
@@ -2253,12 +2232,6 @@ class KWINEFFECTS_EXPORT EffectWindow : public QObject
      * @since 5.0
      */
     Q_PROPERTY(bool skipsCloseAnimation READ skipsCloseAnimation)
-
-    /**
-     * Interface to the corresponding wayland surface.
-     * relevant only in Wayland, on X11 it will be nullptr
-     */
-    Q_PROPERTY(KWaylandServer::SurfaceInterface *surface READ surface)
 
     /**
      * Whether the window is fullscreen.
@@ -2358,9 +2331,6 @@ public:
     virtual void refWindow() = 0;
     virtual void unrefWindow() = 0;
 
-    virtual void refVisible(int reason) = 0;
-    virtual void unrefVisible(int reason) = 0;
-
     virtual bool isDeleted() const = 0;
 
     virtual bool isMinimized() const = 0;
@@ -2393,26 +2363,26 @@ public:
      */
     virtual QVector<uint> desktops() const = 0;
 
-    virtual int x() const = 0;
-    virtual int y() const = 0;
-    virtual int width() const = 0;
-    virtual int height() const = 0;
+    virtual qreal x() const = 0;
+    virtual qreal y() const = 0;
+    virtual qreal width() const = 0;
+    virtual qreal height() const = 0;
     /**
      * By how much the window wishes to grow/shrink at least. Usually QSize(1,1).
      * MAY BE DISOBEYED BY THE WM! It's only for information, do NOT rely on it at all.
      */
-    virtual QSize basicUnit() const = 0;
+    virtual QSizeF basicUnit() const = 0;
     /**
      * @deprecated Use frameGeometry() instead.
      */
-    virtual QRect KWIN_DEPRECATED geometry() const = 0;
+    virtual QRectF KWIN_DEPRECATED geometry() const = 0;
     /**
      * Returns the geometry of the window excluding server-side and client-side
      * drop-shadows.
      *
      * @since 5.18
      */
-    virtual QRect frameGeometry() const = 0;
+    virtual QRectF frameGeometry() const = 0;
     /**
      * Returns the geometry of the pixmap or buffer attached to this window.
      *
@@ -2423,34 +2393,34 @@ public:
      *
      * @since 5.18
      */
-    virtual QRect bufferGeometry() const = 0;
-    virtual QRect clientGeometry() const = 0;
+    virtual QRectF bufferGeometry() const = 0;
+    virtual QRectF clientGeometry() const = 0;
     /**
      * Geometry of the window including decoration and potentially shadows.
      * May be different from geometry() if the window has a shadow.
      * @since 4.9
      */
-    virtual QRect expandedGeometry() const = 0;
+    virtual QRectF expandedGeometry() const = 0;
     virtual EffectScreen *screen() const = 0;
-    virtual QPoint pos() const = 0;
-    virtual QSize size() const = 0;
-    virtual QRect rect() const = 0;
+    virtual QPointF pos() const = 0;
+    virtual QSizeF size() const = 0;
+    virtual QRectF rect() const = 0;
     virtual bool isMovable() const = 0;
     virtual bool isMovableAcrossScreens() const = 0;
     virtual bool isUserMove() const = 0;
     virtual bool isUserResize() const = 0;
-    virtual QRect iconGeometry() const = 0;
+    virtual QRectF iconGeometry() const = 0;
 
     /**
      * Geometry of the actual window contents inside the whole (including decorations) window.
      */
-    virtual QRect contentsRect() const = 0;
+    virtual QRectF contentsRect() const = 0;
     /**
      * Geometry of the transparent rect in the decoration.
      * May be different from contentsRect() if the decoration is extended into the client area.
      * @since 4.5
      */
-    virtual QRect decorationInnerRect() const = 0;
+    virtual QRectF decorationInnerRect() const = 0;
     bool hasDecoration() const;
     virtual bool decorationHasAlpha() const = 0;
     /**
@@ -2541,6 +2511,10 @@ public:
      * using the non-standard _KDE_NET_WM_WINDOW_TYPE_CRITICAL_NOTIFICATION
      */
     virtual bool isCriticalNotification() const = 0;
+    /**
+     * Returns whether the window is a window used for applet popups.
+     */
+    virtual bool isAppletPopup() const = 0;
     /**
      * Returns whether the window is an on screen display window
      * using the non-standard _KDE_NET_WM_WINDOW_TYPE_ON_SCREEN_DISPLAY
@@ -2710,9 +2684,14 @@ public:
      */
     virtual void unreferencePreviousWindowPixmap() = 0;
 
+protected:
+    friend EffectWindowVisibleRef;
+    virtual void refVisible(const EffectWindowVisibleRef *holder) = 0;
+    virtual void unrefVisible(const EffectWindowVisibleRef *holder) = 0;
+
 private:
     class Private;
-    QScopedPointer<Private> d;
+    std::unique_ptr<Private> d;
 };
 
 /**
@@ -2785,7 +2764,7 @@ public:
         : m_window(window)
         , m_reason(reason)
     {
-        m_window->refVisible(reason);
+        m_window->refVisible(this);
     }
 
     EffectWindowVisibleRef(const EffectWindowVisibleRef &other)
@@ -2793,24 +2772,29 @@ public:
         , m_reason(other.m_reason)
     {
         if (m_window) {
-            m_window->refVisible(m_reason);
+            m_window->refVisible(this);
         }
     }
 
     ~EffectWindowVisibleRef()
     {
         if (m_window) {
-            m_window->unrefVisible(m_reason);
+            m_window->unrefVisible(this);
         }
+    }
+
+    int reason() const
+    {
+        return m_reason;
     }
 
     EffectWindowVisibleRef &operator=(const EffectWindowVisibleRef &other)
     {
         if (other.m_window) {
-            other.m_window->refVisible(other.m_reason);
+            other.m_window->refVisible(&other);
         }
         if (m_window) {
-            m_window->unrefVisible(m_reason);
+            m_window->unrefVisible(this);
         }
         m_window = other.m_window;
         m_reason = other.m_reason;
@@ -3098,6 +3082,11 @@ public:
      */
     QVector3D rotationAxis() const;
 
+    /**
+     * Returns the corresponding transform matrix.
+     */
+    QMatrix4x4 toMatrix() const;
+
 protected:
     PaintData();
     PaintData(const PaintData &other);
@@ -3268,26 +3257,6 @@ public:
     QMatrix4x4 &rprojectionMatrix();
 
     /**
-     * Sets the model-view matrix that will be used when painting the window.
-     *
-     * The default model-view matrix can be overridden by setting this matrix
-     * to a non-identity matrix.
-     */
-    void setModelViewMatrix(const QMatrix4x4 &matrix);
-
-    /**
-     * Returns the current model-view matrix.
-     *
-     * The default value for this matrix is the identity matrix.
-     */
-    QMatrix4x4 modelViewMatrix() const;
-
-    /**
-     * Returns a reference to the model-view matrix.
-     */
-    QMatrix4x4 &rmodelViewMatrix();
-
-    /**
      * Returns The projection matrix as used by the current screen painting pass
      * including screen transformations.
      *
@@ -3304,54 +3273,14 @@ private:
     WindowPaintDataPrivate *const d;
 };
 
-class KWINEFFECTS_EXPORT ScreenPaintData : public PaintData
+class KWINEFFECTS_EXPORT ScreenPaintData
 {
 public:
     ScreenPaintData();
     ScreenPaintData(const QMatrix4x4 &projectionMatrix, EffectScreen *screen = nullptr);
     ScreenPaintData(const ScreenPaintData &other);
-    ~ScreenPaintData() override;
-    /**
-     * Scales the screen by @p scale factor.
-     * Multiplies all three components by the given factor.
-     * @since 4.10
-     */
-    ScreenPaintData &operator*=(qreal scale);
-    /**
-     * Scales the screen by @p scale factor.
-     * Performs a component wise multiplication on x and y components.
-     * @since 4.10
-     */
-    ScreenPaintData &operator*=(const QVector2D &scale);
-    /**
-     * Scales the screen by @p scale factor.
-     * Performs a component wise multiplication.
-     * @since 4.10
-     */
-    ScreenPaintData &operator*=(const QVector3D &scale);
-    /**
-     * Translates the screen by the given @p translation and returns a reference to the ScreenPaintData.
-     * @since 4.10
-     */
-    ScreenPaintData &operator+=(const QPointF &translation);
-    /**
-     * Translates the screen by the given @p translation and returns a reference to the ScreenPaintData.
-     * Overloaded method for convenience.
-     * @since 4.10
-     */
-    ScreenPaintData &operator+=(const QPoint &translation);
-    /**
-     * Translates the screen by the given @p translation and returns a reference to the ScreenPaintData.
-     * Overloaded method for convenience.
-     * @since 4.10
-     */
-    ScreenPaintData &operator+=(const QVector2D &translation);
-    /**
-     * Translates the screen by the given @p translation and returns a reference to the ScreenPaintData.
-     * Overloaded method for convenience.
-     * @since 4.10
-     */
-    ScreenPaintData &operator+=(const QVector3D &translation);
+    ~ScreenPaintData();
+
     ScreenPaintData &operator=(const ScreenPaintData &rhs);
 
     /**
@@ -3368,7 +3297,7 @@ public:
 
 private:
     class Private;
-    QScopedPointer<Private> d;
+    std::unique_ptr<Private> d;
 };
 
 class KWINEFFECTS_EXPORT ScreenPrePaintData
@@ -3807,15 +3736,9 @@ public:
     qreal value() const;
 
     /**
-     * Updates the progress of the timeline.
-     *
-     * @note The delta value should be a non-negative number, i.e. it
-     * should be greater or equal to 0.
-     *
-     * @param delta The number milliseconds passed since last frame
-     * @since 5.14
+     * Advances the timeline to the specified @a timestamp.
      */
-    void update(std::chrono::milliseconds delta);
+    void advance(std::chrono::milliseconds timestamp);
 
     /**
      * Returns the number of elapsed milliseconds.

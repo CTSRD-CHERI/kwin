@@ -17,6 +17,8 @@
 #include "wayland_server.h"
 #include "window.h"
 #include "workspace.h"
+#include <KApplicationTrader>
+#include <KDesktopFile>
 
 using namespace KWaylandServer;
 
@@ -25,8 +27,28 @@ namespace KWin
 
 static bool isPrivilegedInWindowManagement(const ClientConnection *client)
 {
+    Q_ASSERT(client);
     auto requestedInterfaces = client->property("requestedInterfaces").toStringList();
     return requestedInterfaces.contains(QLatin1String("org_kde_plasma_window_management"));
+}
+
+static const QString windowDesktopFileName(Window *window)
+{
+    QString ret = window->desktopFileName();
+    if (!ret.isEmpty()) {
+        return ret;
+    }
+
+    // Fallback to StartupWMClass for legacy apps
+    const auto resourceName = window->resourceName();
+    const auto service = KApplicationTrader::query([&resourceName](const KService::Ptr &service) {
+        return service->property("StartupWMClass").toString().compare(resourceName, Qt::CaseInsensitive) == 0;
+    });
+
+    if (!service.isEmpty()) {
+        ret = service.constFirst()->desktopEntryName();
+    }
+    return ret;
 }
 
 XdgActivationV1Integration::XdgActivationV1Integration(XdgActivationV1Interface *activation, QObject *parent)
@@ -39,7 +61,7 @@ XdgActivationV1Integration::XdgActivationV1Integration(XdgActivationV1Interface 
         }
 
         // We check that it's not the app that we are trying to activate
-        if (window->desktopFileName() != m_currentActivationToken->applicationId) {
+        if (windowDesktopFileName(window) != m_currentActivationToken->applicationId) {
             // But also that the new one has been requested after the token was requested
             if (window->lastUsageSerial() < m_currentActivationToken->serial) {
                 return;
@@ -50,28 +72,43 @@ XdgActivationV1Integration::XdgActivationV1Integration(XdgActivationV1Interface 
     });
     activation->setActivationTokenCreator([this](ClientConnection *client, SurfaceInterface *surface, uint serial, SeatInterface *seat, const QString &appId) -> QString {
         Workspace *ws = Workspace::self();
-        if (ws->activeWindow() && ws->activeWindow()->surface() != surface && !isPrivilegedInWindowManagement(client)) {
+        Q_ASSERT(client); // Should always be available as it's coming straight from the wayland implementation
+        const bool isPrivileged = isPrivilegedInWindowManagement(client);
+        if (!isPrivileged && ws->activeWindow() && ws->activeWindow()->surface() != surface) {
             qCWarning(KWIN_CORE) << "Cannot grant a token to" << client;
             return QStringLiteral("not-granted-666");
         }
 
-        static int i = 0;
-        const auto newToken = QStringLiteral("kwin-%1").arg(++i);
-
-        if (m_currentActivationToken) {
-            clear();
-        }
-        QSharedPointer<PlasmaWindowActivationInterface> pwActivation(waylandServer()->plasmaActivationFeedback()->createActivation(appId));
-        m_currentActivationToken.reset(new ActivationToken{newToken, client, surface, serial, seat, appId, pwActivation});
-        if (!appId.isEmpty()) {
-            const auto icon = QIcon::fromTheme(Window::iconFromDesktopFile(appId), QIcon::fromTheme(QStringLiteral("system-run")));
-            Q_EMIT effects->startupAdded(m_currentActivationToken->token, icon);
-        }
-
-        return newToken;
+        return requestToken(isPrivileged, surface, serial, seat, appId);
     });
 
     connect(activation, &XdgActivationV1Interface::activateRequested, this, &XdgActivationV1Integration::activateSurface);
+}
+
+QString XdgActivationV1Integration::requestToken(bool isPrivileged, SurfaceInterface *surface, uint serial, SeatInterface *seat, const QString &appId)
+{
+    static int i = 0;
+    const auto newToken = QStringLiteral("kwin-%1").arg(++i);
+
+    if (m_currentActivationToken) {
+        clear();
+    }
+    bool showNotify = false;
+    QIcon icon = QIcon::fromTheme(QStringLiteral("system-run"));
+    if (const QString desktopFilePath = Window::findDesktopFile(appId); !desktopFilePath.isEmpty()) {
+        KDesktopFile df(desktopFilePath);
+        Window *window = Workspace::self()->activeWindow();
+        if (!window || appId != window->desktopFileName()) {
+            const auto desktop = df.desktopGroup();
+            showNotify = desktop.readEntry("X-KDE-StartupNotify", desktop.readEntry("StartupNotify", true));
+        }
+        icon = QIcon::fromTheme(df.readIcon(), icon);
+    }
+    m_currentActivationToken.reset(new ActivationToken{newToken, isPrivileged, surface, serial, seat, appId, showNotify, waylandServer()->plasmaActivationFeedback()->createActivation(appId)});
+    if (showNotify) {
+        Q_EMIT effects->startupAdded(m_currentActivationToken->token, icon);
+    }
+    return newToken;
 }
 
 void XdgActivationV1Integration::activateSurface(SurfaceInterface *surface, const QString &token)
@@ -91,7 +128,7 @@ void XdgActivationV1Integration::activateSurface(SurfaceInterface *surface, cons
 
     auto ownerWindow = waylandServer()->findWindow(m_currentActivationToken->surface);
     qCDebug(KWIN_CORE) << "activating" << window << surface << "on behalf of" << m_currentActivationToken->surface << "into" << ownerWindow;
-    if (ws->activeWindow() == ownerWindow || ws->activeWindow()->lastUsageSerial() < m_currentActivationToken->serial || isPrivilegedInWindowManagement(m_currentActivationToken->client)) {
+    if (ws->activeWindow() == ownerWindow || ws->activeWindow()->lastUsageSerial() < m_currentActivationToken->serial || m_currentActivationToken->isPrivileged) {
         ws->activateWindow(window);
     } else {
         qCWarning(KWIN_CORE) << "Activation requested while owner isn't active" << (ownerWindow ? ownerWindow->desktopFileName() : "null")
@@ -104,12 +141,10 @@ void XdgActivationV1Integration::activateSurface(SurfaceInterface *surface, cons
 void XdgActivationV1Integration::clear()
 {
     Q_ASSERT(m_currentActivationToken);
-    if (!m_currentActivationToken->applicationId.isEmpty()) {
+    if (m_currentActivationToken->showNotify) {
         Q_EMIT effects->startupRemoved(m_currentActivationToken->token);
     }
     m_currentActivationToken.reset();
 }
-
-XdgActivationV1Integration::ActivationToken::~ActivationToken() = default;
 
 }

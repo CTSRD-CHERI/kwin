@@ -55,7 +55,6 @@ void TabBoxTest::initTestCase()
 
     kwinApp()->start();
     QVERIFY(applicationStartedSpy.wait());
-    Test::initWaylandWorkspace();
 }
 
 void TabBoxTest::init()
@@ -76,26 +75,26 @@ void TabBoxTest::testCapsLock()
     // bug 368590
 
     // first create three windows
-    QScopedPointer<KWayland::Client::Surface> surface1(Test::createSurface());
-    QScopedPointer<Test::XdgToplevel> shellSurface1(Test::createXdgToplevelSurface(surface1.data()));
-    auto c1 = Test::renderAndWaitForShown(surface1.data(), QSize(100, 50), Qt::blue);
+    std::unique_ptr<KWayland::Client::Surface> surface1(Test::createSurface());
+    std::unique_ptr<Test::XdgToplevel> shellSurface1(Test::createXdgToplevelSurface(surface1.get()));
+    auto c1 = Test::renderAndWaitForShown(surface1.get(), QSize(100, 50), Qt::blue);
     QVERIFY(c1);
     QVERIFY(c1->isActive());
-    QScopedPointer<KWayland::Client::Surface> surface2(Test::createSurface());
-    QScopedPointer<Test::XdgToplevel> shellSurface2(Test::createXdgToplevelSurface(surface2.data()));
-    auto c2 = Test::renderAndWaitForShown(surface2.data(), QSize(100, 50), Qt::red);
+    std::unique_ptr<KWayland::Client::Surface> surface2(Test::createSurface());
+    std::unique_ptr<Test::XdgToplevel> shellSurface2(Test::createXdgToplevelSurface(surface2.get()));
+    auto c2 = Test::renderAndWaitForShown(surface2.get(), QSize(100, 50), Qt::red);
     QVERIFY(c2);
     QVERIFY(c2->isActive());
-    QScopedPointer<KWayland::Client::Surface> surface3(Test::createSurface());
-    QScopedPointer<Test::XdgToplevel> shellSurface3(Test::createXdgToplevelSurface(surface3.data()));
-    auto c3 = Test::renderAndWaitForShown(surface3.data(), QSize(100, 50), Qt::red);
+    std::unique_ptr<KWayland::Client::Surface> surface3(Test::createSurface());
+    std::unique_ptr<Test::XdgToplevel> shellSurface3(Test::createXdgToplevelSurface(surface3.get()));
+    auto c3 = Test::renderAndWaitForShown(surface3.get(), QSize(100, 50), Qt::red);
     QVERIFY(c3);
     QVERIFY(c3->isActive());
 
     // Setup tabbox signal spies
-    QSignalSpy tabboxAddedSpy(TabBox::TabBox::self(), &TabBox::TabBox::tabBoxAdded);
+    QSignalSpy tabboxAddedSpy(workspace()->tabbox(), &TabBox::TabBox::tabBoxAdded);
     QVERIFY(tabboxAddedSpy.isValid());
-    QSignalSpy tabboxClosedSpy(TabBox::TabBox::self(), &TabBox::TabBox::tabBoxClosed);
+    QSignalSpy tabboxClosedSpy(workspace()->tabbox(), &TabBox::TabBox::tabBoxClosed);
     QVERIFY(tabboxClosedSpy.isValid());
 
     // enable capslock
@@ -111,19 +110,19 @@ void TabBoxTest::testCapsLock()
     Test::keyboardKeyReleased(KEY_TAB, timestamp++);
 
     QVERIFY(tabboxAddedSpy.wait());
-    QVERIFY(TabBox::TabBox::self()->isGrabbed());
+    QVERIFY(workspace()->tabbox()->isGrabbed());
 
     // release alt
     Test::keyboardKeyReleased(KEY_LEFTALT, timestamp++);
     QCOMPARE(tabboxClosedSpy.count(), 1);
-    QCOMPARE(TabBox::TabBox::self()->isGrabbed(), false);
+    QCOMPARE(workspace()->tabbox()->isGrabbed(), false);
 
     // release caps lock
     Test::keyboardKeyPressed(KEY_CAPSLOCK, timestamp++);
     Test::keyboardKeyReleased(KEY_CAPSLOCK, timestamp++);
     QCOMPARE(input()->keyboardModifiers(), Qt::NoModifier);
     QCOMPARE(tabboxClosedSpy.count(), 1);
-    QCOMPARE(TabBox::TabBox::self()->isGrabbed(), false);
+    QCOMPARE(workspace()->tabbox()->isGrabbed(), false);
     QCOMPARE(workspace()->activeWindow(), c2);
 
     surface3.reset();
@@ -139,26 +138,26 @@ void TabBoxTest::testMoveForward()
     // this test verifies that Alt+tab works correctly moving forward
 
     // first create three windows
-    QScopedPointer<KWayland::Client::Surface> surface1(Test::createSurface());
-    QScopedPointer<Test::XdgToplevel> shellSurface1(Test::createXdgToplevelSurface(surface1.data()));
-    auto c1 = Test::renderAndWaitForShown(surface1.data(), QSize(100, 50), Qt::blue);
+    std::unique_ptr<KWayland::Client::Surface> surface1(Test::createSurface());
+    std::unique_ptr<Test::XdgToplevel> shellSurface1(Test::createXdgToplevelSurface(surface1.get()));
+    auto c1 = Test::renderAndWaitForShown(surface1.get(), QSize(100, 50), Qt::blue);
     QVERIFY(c1);
     QVERIFY(c1->isActive());
-    QScopedPointer<KWayland::Client::Surface> surface2(Test::createSurface());
-    QScopedPointer<Test::XdgToplevel> shellSurface2(Test::createXdgToplevelSurface(surface2.data()));
-    auto c2 = Test::renderAndWaitForShown(surface2.data(), QSize(100, 50), Qt::red);
+    std::unique_ptr<KWayland::Client::Surface> surface2(Test::createSurface());
+    std::unique_ptr<Test::XdgToplevel> shellSurface2(Test::createXdgToplevelSurface(surface2.get()));
+    auto c2 = Test::renderAndWaitForShown(surface2.get(), QSize(100, 50), Qt::red);
     QVERIFY(c2);
     QVERIFY(c2->isActive());
-    QScopedPointer<KWayland::Client::Surface> surface3(Test::createSurface());
-    QScopedPointer<Test::XdgToplevel> shellSurface3(Test::createXdgToplevelSurface(surface3.data()));
-    auto c3 = Test::renderAndWaitForShown(surface3.data(), QSize(100, 50), Qt::red);
+    std::unique_ptr<KWayland::Client::Surface> surface3(Test::createSurface());
+    std::unique_ptr<Test::XdgToplevel> shellSurface3(Test::createXdgToplevelSurface(surface3.get()));
+    auto c3 = Test::renderAndWaitForShown(surface3.get(), QSize(100, 50), Qt::red);
     QVERIFY(c3);
     QVERIFY(c3->isActive());
 
     // Setup tabbox signal spies
-    QSignalSpy tabboxAddedSpy(TabBox::TabBox::self(), &TabBox::TabBox::tabBoxAdded);
+    QSignalSpy tabboxAddedSpy(workspace()->tabbox(), &TabBox::TabBox::tabBoxAdded);
     QVERIFY(tabboxAddedSpy.isValid());
-    QSignalSpy tabboxClosedSpy(TabBox::TabBox::self(), &TabBox::TabBox::tabBoxClosed);
+    QSignalSpy tabboxClosedSpy(workspace()->tabbox(), &TabBox::TabBox::tabBoxClosed);
     QVERIFY(tabboxClosedSpy.isValid());
 
     // press alt+tab
@@ -169,12 +168,12 @@ void TabBoxTest::testMoveForward()
     Test::keyboardKeyReleased(KEY_TAB, timestamp++);
 
     QVERIFY(tabboxAddedSpy.wait());
-    QVERIFY(TabBox::TabBox::self()->isGrabbed());
+    QVERIFY(workspace()->tabbox()->isGrabbed());
 
     // release alt
     Test::keyboardKeyReleased(KEY_LEFTALT, timestamp++);
     QCOMPARE(tabboxClosedSpy.count(), 1);
-    QCOMPARE(TabBox::TabBox::self()->isGrabbed(), false);
+    QCOMPARE(workspace()->tabbox()->isGrabbed(), false);
     QCOMPARE(workspace()->activeWindow(), c2);
 
     surface3.reset();
@@ -190,26 +189,26 @@ void TabBoxTest::testMoveBackward()
     // this test verifies that Alt+Shift+tab works correctly moving backward
 
     // first create three windows
-    QScopedPointer<KWayland::Client::Surface> surface1(Test::createSurface());
-    QScopedPointer<Test::XdgToplevel> shellSurface1(Test::createXdgToplevelSurface(surface1.data()));
-    auto c1 = Test::renderAndWaitForShown(surface1.data(), QSize(100, 50), Qt::blue);
+    std::unique_ptr<KWayland::Client::Surface> surface1(Test::createSurface());
+    std::unique_ptr<Test::XdgToplevel> shellSurface1(Test::createXdgToplevelSurface(surface1.get()));
+    auto c1 = Test::renderAndWaitForShown(surface1.get(), QSize(100, 50), Qt::blue);
     QVERIFY(c1);
     QVERIFY(c1->isActive());
-    QScopedPointer<KWayland::Client::Surface> surface2(Test::createSurface());
-    QScopedPointer<Test::XdgToplevel> shellSurface2(Test::createXdgToplevelSurface(surface2.data()));
-    auto c2 = Test::renderAndWaitForShown(surface2.data(), QSize(100, 50), Qt::red);
+    std::unique_ptr<KWayland::Client::Surface> surface2(Test::createSurface());
+    std::unique_ptr<Test::XdgToplevel> shellSurface2(Test::createXdgToplevelSurface(surface2.get()));
+    auto c2 = Test::renderAndWaitForShown(surface2.get(), QSize(100, 50), Qt::red);
     QVERIFY(c2);
     QVERIFY(c2->isActive());
-    QScopedPointer<KWayland::Client::Surface> surface3(Test::createSurface());
-    QScopedPointer<Test::XdgToplevel> shellSurface3(Test::createXdgToplevelSurface(surface3.data()));
-    auto c3 = Test::renderAndWaitForShown(surface3.data(), QSize(100, 50), Qt::red);
+    std::unique_ptr<KWayland::Client::Surface> surface3(Test::createSurface());
+    std::unique_ptr<Test::XdgToplevel> shellSurface3(Test::createXdgToplevelSurface(surface3.get()));
+    auto c3 = Test::renderAndWaitForShown(surface3.get(), QSize(100, 50), Qt::red);
     QVERIFY(c3);
     QVERIFY(c3->isActive());
 
     // Setup tabbox signal spies
-    QSignalSpy tabboxAddedSpy(TabBox::TabBox::self(), &TabBox::TabBox::tabBoxAdded);
+    QSignalSpy tabboxAddedSpy(workspace()->tabbox(), &TabBox::TabBox::tabBoxAdded);
     QVERIFY(tabboxAddedSpy.isValid());
-    QSignalSpy tabboxClosedSpy(TabBox::TabBox::self(), &TabBox::TabBox::tabBoxClosed);
+    QSignalSpy tabboxClosedSpy(workspace()->tabbox(), &TabBox::TabBox::tabBoxClosed);
     QVERIFY(tabboxClosedSpy.isValid());
 
     // press alt+shift+tab
@@ -222,14 +221,14 @@ void TabBoxTest::testMoveBackward()
     Test::keyboardKeyReleased(KEY_TAB, timestamp++);
 
     QVERIFY(tabboxAddedSpy.wait());
-    QVERIFY(TabBox::TabBox::self()->isGrabbed());
+    QVERIFY(workspace()->tabbox()->isGrabbed());
 
     // release alt
     Test::keyboardKeyReleased(KEY_LEFTSHIFT, timestamp++);
     QCOMPARE(tabboxClosedSpy.count(), 0);
     Test::keyboardKeyReleased(KEY_LEFTALT, timestamp++);
     QCOMPARE(tabboxClosedSpy.count(), 1);
-    QCOMPARE(TabBox::TabBox::self()->isGrabbed(), false);
+    QCOMPARE(workspace()->tabbox()->isGrabbed(), false);
     QCOMPARE(workspace()->activeWindow(), c1);
 
     surface3.reset();

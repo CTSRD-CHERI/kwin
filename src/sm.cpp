@@ -140,7 +140,7 @@ void SessionManager::storeClient(KConfigGroup &cg, int num, X11Window *c)
     cg.writeEntry(QLatin1String("wmCommand") + n, c->wmCommand().constData());
     cg.writeEntry(QLatin1String("resourceName") + n, c->resourceName().constData());
     cg.writeEntry(QLatin1String("resourceClass") + n, c->resourceClass().constData());
-    cg.writeEntry(QLatin1String("geometry") + n, QRect(c->calculateGravitation(true), c->clientSize())); // FRAME
+    cg.writeEntry(QLatin1String("geometry") + n, QRectF(c->calculateGravitation(true), c->clientSize()).toRect()); // FRAME
     cg.writeEntry(QLatin1String("restore") + n, c->geometryRestore());
     cg.writeEntry(QLatin1String("fsrestore") + n, c->fullscreenGeometryRestore());
     cg.writeEntry(QLatin1String("maximize") + n, (int)c->maximizeMode());
@@ -370,11 +370,11 @@ void SessionManager::setState(SessionState state)
     }
     // If we're starting to save a session
     if (state == SessionState::Saving) {
-        RuleBook::self()->setUpdatesDisabled(true);
+        workspace()->rulebook()->setUpdatesDisabled(true);
     }
     // If we're ending a save session due to either completion or cancellation
     if (m_sessionState == SessionState::Saving) {
-        RuleBook::self()->setUpdatesDisabled(false);
+        workspace()->rulebook()->setUpdatesDisabled(false);
         Workspace::self()->forEachClient([](X11Window *client) {
             client->setSessionActivityOverride(false);
         });

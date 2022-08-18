@@ -7,6 +7,7 @@
 #pragma once
 
 #include "kwinglobals.h"
+#include "options.h"
 
 #include <QObject>
 
@@ -29,7 +30,7 @@ class KWIN_EXPORT RenderLoop : public QObject
     Q_OBJECT
 
 public:
-    explicit RenderLoop(QObject *parent = nullptr);
+    explicit RenderLoop();
     ~RenderLoop() override;
 
     /**
@@ -97,7 +98,7 @@ public:
         Always = 1,
         Automatic = 2,
     };
-    Q_ENUM(VrrPolicy);
+    Q_ENUM(VrrPolicy)
 
     /**
      * the current policy regarding the use of variable refresh rate
@@ -108,6 +109,22 @@ public:
      * Set the policy regarding the use of variable refresh rate with RenderLoop
      */
     void setVrrPolicy(VrrPolicy vrrPolicy);
+
+    /**
+     * Returns the latency policy for this render loop.
+     */
+    LatencyPolicy latencyPolicy() const;
+
+    /**
+     * Sets the latecy policy of this render loop to @a policy. By default,
+     * the latency policy of this render loop matches options->latencyPolicy().
+     */
+    void setLatencyPolicy(LatencyPolicy policy);
+
+    /**
+     * Resets the latency policy to the default value.
+     */
+    void resetLatencyPolicy();
 
 Q_SIGNALS:
     /**
@@ -128,7 +145,7 @@ Q_SIGNALS:
     void frameRequested(RenderLoop *loop);
 
 private:
-    QScopedPointer<RenderLoopPrivate> d;
+    std::unique_ptr<RenderLoopPrivate> d;
     friend class RenderLoopPrivate;
 };
 

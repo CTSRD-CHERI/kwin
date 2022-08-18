@@ -7,6 +7,7 @@
                 "Name": "Demitrius Belai",
                 "Name[ar]": "Demitrius Belai",
                 "Name[az]": "Demitrius Belai",
+                "Name[bg]": "Demitrius Belai",
                 "Name[ca@valencia]": "Demitrius Belai",
                 "Name[ca]": "Demitrius Belai",
                 "Name[cs]": "Demitrius Belai",
@@ -37,12 +38,14 @@
                 "Name[uk]": "Demitrius Belai",
                 "Name[vi]": "Demitrius Belai",
                 "Name[x-test]": "xxDemitrius Belaixx",
-                "Name[zh_CN]": "Demitrius Belai"
+                "Name[zh_CN]": "Demitrius Belai",
+                "Name[zh_TW]": "Demitrius Belai"
             }
         ],
         "Name": "KWin Decoration",
         "Name[ar]": "زخارف نوافذ كوين",
         "Name[az]": "KWin Dekorasiyası",
+        "Name[bg]": "Декорация на KWin",
         "Name[ca@valencia]": "Decoració de KWin",
         "Name[ca]": "Decoració del KWin",
         "Name[cs]": "Dekorace KWin",
@@ -54,6 +57,7 @@
         "Name[fr]": "Décorations pour KWin",
         "Name[hu]": "KWin dekoráció",
         "Name[ia]": "Decorationes de KWin",
+        "Name[id]": "Dekorasi KWin",
         "Name[it]": "Decorazione di KWin",
         "Name[ko]": "KWin 장식",
         "Name[lt]": "KWin dekoracijos",
@@ -73,6 +77,7 @@
         "Name[vi]": "Trang trí KWin",
         "Name[x-test]": "xxKWin Decorationxx",
         "Name[zh_CN]": "KWin 装饰元素",
+        "Name[zh_TW]": "KWin 裝飾",
         "Version": "1"
     }
 }

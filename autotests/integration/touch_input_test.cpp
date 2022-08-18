@@ -41,9 +41,10 @@ private Q_SLOTS:
     void testTouchMouseAction();
     void testTouchPointCount();
     void testUpdateFocusOnDecorationDestroy();
+    void testGestureDetection();
 
 private:
-    Window *showWindow(bool decorated = false);
+    std::pair<Window *, std::unique_ptr<KWayland::Client::Surface>> showWindow(bool decorated = false);
     KWayland::Client::Touch *m_touch = nullptr;
 };
 
@@ -58,11 +59,10 @@ void TouchInputTest::initTestCase()
 
     kwinApp()->start();
     QVERIFY(applicationStartedSpy.wait());
-    const auto outputs = kwinApp()->platform()->enabledOutputs();
+    const auto outputs = workspace()->outputs();
     QCOMPARE(outputs.count(), 2);
     QCOMPARE(outputs[0]->geometry(), QRect(0, 0, 1280, 1024));
     QCOMPARE(outputs[1]->geometry(), QRect(1280, 0, 1280, 1024));
-    Test::initWaylandWorkspace();
 }
 
 void TouchInputTest::init()
@@ -85,19 +85,19 @@ void TouchInputTest::cleanup()
     Test::destroyWaylandConnection();
 }
 
-Window *TouchInputTest::showWindow(bool decorated)
+std::pair<Window *, std::unique_ptr<KWayland::Client::Surface>> TouchInputTest::showWindow(bool decorated)
 {
     using namespace KWayland::Client;
 #define VERIFY(statement)                                                 \
     if (!QTest::qVerify((statement), #statement, "", __FILE__, __LINE__)) \
-        return nullptr;
+        return {nullptr, nullptr};
 #define COMPARE(actual, expected)                                                   \
     if (!QTest::qCompare(actual, expected, #actual, #expected, __FILE__, __LINE__)) \
-        return nullptr;
+        return {nullptr, nullptr};
 
-    KWayland::Client::Surface *surface = Test::createSurface(Test::waylandCompositor());
-    VERIFY(surface);
-    Test::XdgToplevel *shellSurface = Test::createXdgToplevelSurface(surface, Test::CreationSetup::CreateOnly, surface);
+    std::unique_ptr<KWayland::Client::Surface> surface = Test::createSurface();
+    VERIFY(surface.get());
+    Test::XdgToplevel *shellSurface = Test::createXdgToplevelSurface(surface.get(), Test::CreationSetup::CreateOnly, surface.get());
     VERIFY(shellSurface);
     if (decorated) {
         auto decoration = Test::createXdgToplevelDecorationV1(shellSurface, shellSurface);
@@ -108,7 +108,7 @@ Window *TouchInputTest::showWindow(bool decorated)
     VERIFY(surfaceConfigureRequestedSpy.wait());
     // let's render
     shellSurface->xdgSurface()->ack_configure(surfaceConfigureRequestedSpy.last().at(0).value<quint32>());
-    auto window = Test::renderAndWaitForShown(surface, QSize(100, 50), Qt::blue);
+    auto window = Test::renderAndWaitForShown(surface.get(), QSize(100, 50), Qt::blue);
 
     VERIFY(window);
     COMPARE(workspace()->activeWindow(), window);
@@ -116,7 +116,7 @@ Window *TouchInputTest::showWindow(bool decorated)
 #undef VERIFY
 #undef COMPARE
 
-    return window;
+    return {window, std::move(surface)};
 }
 
 void TouchInputTest::testTouchHidesCursor()
@@ -155,7 +155,7 @@ void TouchInputTest::testMultipleTouchPoints()
 {
     using namespace KWayland::Client;
     QFETCH(bool, decorated);
-    Window *window = showWindow(decorated);
+    auto [window, surface] = showWindow(decorated);
     QCOMPARE(window->isDecorated(), decorated);
     window->move(QPoint(100, 100));
     QVERIFY(window);
@@ -216,7 +216,7 @@ void TouchInputTest::testMultipleTouchPoints()
 void TouchInputTest::testCancel()
 {
     using namespace KWayland::Client;
-    Window *window = showWindow();
+    auto [window, surface] = showWindow();
     window->move(QPoint(100, 100));
     QVERIFY(window);
     QSignalSpy sequenceStartedSpy(m_touch, &Touch::sequenceStarted);
@@ -242,9 +242,9 @@ void TouchInputTest::testTouchMouseAction()
     // this test verifies that a touch down on an inactive window will activate it
     using namespace KWayland::Client;
     // create two windows
-    Window *c1 = showWindow();
+    auto [c1, surface] = showWindow();
     QVERIFY(c1);
-    Window *c2 = showWindow();
+    auto [c2, surface2] = showWindow();
     QVERIFY(c2);
 
     QVERIFY(!c1->isActive());
@@ -297,13 +297,13 @@ void TouchInputTest::testUpdateFocusOnDecorationDestroy()
     QCOMPARE(options->borderlessMaximizedWindows(), true);
 
     // Create the test window.
-    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
-    QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data(), Test::CreationSetup::CreateOnly));
-    QScopedPointer<Test::XdgToplevelDecorationV1> decoration(Test::createXdgToplevelDecorationV1(shellSurface.data()));
+    std::unique_ptr<KWayland::Client::Surface> surface(Test::createSurface());
+    std::unique_ptr<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.get(), Test::CreationSetup::CreateOnly));
+    std::unique_ptr<Test::XdgToplevelDecorationV1> decoration(Test::createXdgToplevelDecorationV1(shellSurface.get()));
 
-    QSignalSpy toplevelConfigureRequestedSpy(shellSurface.data(), &Test::XdgToplevel::configureRequested);
+    QSignalSpy toplevelConfigureRequestedSpy(shellSurface.get(), &Test::XdgToplevel::configureRequested);
     QSignalSpy surfaceConfigureRequestedSpy(shellSurface->xdgSurface(), &Test::XdgSurface::configureRequested);
-    QSignalSpy decorationConfigureRequestedSpy(decoration.data(), &Test::XdgToplevelDecorationV1::configureRequested);
+    QSignalSpy decorationConfigureRequestedSpy(decoration.get(), &Test::XdgToplevelDecorationV1::configureRequested);
     decoration->set_mode(Test::XdgToplevelDecorationV1::mode_server_side);
     surface->commit(KWayland::Client::Surface::CommitFlag::None);
 
@@ -318,7 +318,7 @@ void TouchInputTest::testUpdateFocusOnDecorationDestroy()
 
     // Map the window.
     shellSurface->xdgSurface()->ack_configure(surfaceConfigureRequestedSpy.last().at(0).value<quint32>());
-    Window *window = Test::renderAndWaitForShown(surface.data(), QSize(100, 50), Qt::blue);
+    Window *window = Test::renderAndWaitForShown(surface.get(), QSize(100, 50), Qt::blue);
     QVERIFY(window);
     QVERIFY(window->isActive());
     QCOMPARE(window->maximizeMode(), MaximizeMode::MaximizeRestore);
@@ -349,7 +349,7 @@ void TouchInputTest::testUpdateFocusOnDecorationDestroy()
     QSignalSpy frameGeometryChangedSpy(window, &Window::frameGeometryChanged);
     QVERIFY(frameGeometryChangedSpy.isValid());
     shellSurface->xdgSurface()->ack_configure(surfaceConfigureRequestedSpy.last().at(0).value<quint32>());
-    Test::render(surface.data(), QSize(1280, 1024), Qt::blue);
+    Test::render(surface.get(), QSize(1280, 1024), Qt::blue);
     QVERIFY(frameGeometryChangedSpy.wait());
     QCOMPARE(window->frameGeometry(), QRect(0, 0, 1280, 1024));
     QCOMPARE(window->maximizeMode(), MaximizeFull);
@@ -369,6 +369,73 @@ void TouchInputTest::testUpdateFocusOnDecorationDestroy()
     QVERIFY(Test::waitForWindowDestroyed(window));
 }
 
+void TouchInputTest::testGestureDetection()
+{
+    bool callbackTriggered = false;
+    const auto callback = [&callbackTriggered](float progress) {
+        Q_UNUSED(progress);
+        callbackTriggered = true;
+        qWarning() << "progress callback!" << progress;
+    };
+    QAction action;
+    input()->forceRegisterTouchscreenSwipeShortcut(SwipeDirection::Right, 3, &action, callback);
+
+    // verify that gestures are detected
+
+    quint32 timestamp = 1;
+    Test::touchDown(0, QPointF(500, 125), timestamp++);
+    Test::touchDown(1, QPointF(500, 125), timestamp++);
+    Test::touchDown(2, QPointF(500, 125), timestamp++);
+
+    Test::touchMotion(0, QPointF(100, 125), timestamp++);
+    QVERIFY(callbackTriggered);
+
+    // verify that gestures are canceled properly
+    QSignalSpy gestureCancelled(&action, &QAction::triggered);
+    QVERIFY(gestureCancelled.isValid());
+    Test::touchUp(0, timestamp++);
+    QVERIFY(gestureCancelled.wait());
+
+    Test::touchUp(1, timestamp++);
+    Test::touchUp(2, timestamp++);
+
+    callbackTriggered = false;
+
+    // verify that touch points too far apart don't trigger a gesture
+    Test::touchDown(0, QPointF(125, 125), timestamp++);
+    Test::touchDown(1, QPointF(10000, 125), timestamp++);
+    Test::touchDown(2, QPointF(125, 125), timestamp++);
+    QVERIFY(!callbackTriggered);
+
+    Test::touchUp(0, timestamp++);
+    Test::touchUp(1, timestamp++);
+    Test::touchUp(2, timestamp++);
+
+    // verify that touch points triggered too slow don't trigger a gesture
+    Test::touchDown(0, QPointF(125, 125), timestamp++);
+    timestamp += 1000;
+    Test::touchDown(1, QPointF(125, 125), timestamp++);
+    Test::touchDown(2, QPointF(125, 125), timestamp++);
+    QVERIFY(!callbackTriggered);
+
+    Test::touchUp(0, timestamp++);
+    Test::touchUp(1, timestamp++);
+    Test::touchUp(2, timestamp++);
+
+    // verify that after a gesture has been canceled but never initiated, gestures still work
+    Test::touchDown(0, QPointF(500, 125), timestamp++);
+    Test::touchDown(1, QPointF(500, 125), timestamp++);
+    Test::touchDown(2, QPointF(500, 125), timestamp++);
+
+    Test::touchMotion(0, QPointF(100, 125), timestamp++);
+    Test::touchMotion(1, QPointF(100, 125), timestamp++);
+    Test::touchMotion(2, QPointF(100, 125), timestamp++);
+    QVERIFY(callbackTriggered);
+
+    Test::touchUp(0, timestamp++);
+    Test::touchUp(1, timestamp++);
+    Test::touchUp(2, timestamp++);
+}
 }
 
 WAYLANDTEST_MAIN(KWin::TouchInputTest)

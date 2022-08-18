@@ -13,8 +13,15 @@
 #include <QSize>
 #include <QUuid>
 #include <QVector>
+#include <memory>
 
 struct wl_resource;
+
+namespace KWin
+{
+class Output;
+class OutputMode;
+}
 
 namespace KWaylandServer
 {
@@ -75,11 +82,12 @@ public:
     };
     Q_ENUM(RgbRange)
 
-    explicit OutputDeviceV2Interface(Display *display, QObject *parent = nullptr);
+    explicit OutputDeviceV2Interface(Display *display, KWin::Output *handle, QObject *parent = nullptr);
     ~OutputDeviceV2Interface() override;
 
     void remove();
 
+    KWin::Output *handle() const;
     QSize physicalSize() const;
     QPoint globalPosition() const;
     QString manufacturer() const;
@@ -89,7 +97,7 @@ public:
     QString name() const;
     QSize pixelSize() const;
     int refreshRate() const;
-
+    QList<KWaylandServer::OutputDeviceModeV2Interface *> modes() const;
     qreal scale() const;
     SubPixel subPixel() const;
     Transform transform() const;
@@ -115,15 +123,8 @@ public:
     void setSubPixel(SubPixel subPixel);
     void setTransform(Transform transform);
 
-    void setModes(const QList<KWaylandServer::OutputDeviceModeV2Interface *> &modes);
+    void setModes(const QList<KWaylandServer::OutputDeviceModeV2Interface *> &modes, KWaylandServer::OutputDeviceModeV2Interface *currentMode);
     void setCurrentMode(KWaylandServer::OutputDeviceModeV2Interface *mode);
-
-    /**
-     * Makes the mode with the specified @a size and @a refreshRate current.
-     * Returns @c false if no mode with the given attributes exists; otherwise returns @c true.
-     */
-    bool setCurrentMode(const QSize &size, int refreshRate);
-
     void setEdid(const QByteArray &edid);
     void setEnabled(bool enabled);
     void setUuid(const QUuid &uuid);
@@ -137,7 +138,7 @@ public:
     static OutputDeviceV2Interface *get(wl_resource *native);
 
 private:
-    QScopedPointer<OutputDeviceV2InterfacePrivate> d;
+    std::unique_ptr<OutputDeviceV2InterfacePrivate> d;
 };
 
 /**
@@ -152,26 +153,24 @@ class KWIN_EXPORT OutputDeviceModeV2Interface : public QObject
     Q_OBJECT
 public:
     enum class ModeFlag {
-        Current = 0x1,
-        Preferred = 0x2,
+        Preferred = 0x1,
     };
     Q_ENUM(ModeFlag)
     Q_DECLARE_FLAGS(ModeFlags, ModeFlag)
 
-    OutputDeviceModeV2Interface(const QSize &size, int refreshRate, ModeFlags flags, QObject *parent = nullptr);
+    OutputDeviceModeV2Interface(std::weak_ptr<KWin::OutputMode> handle, const QSize &size, int refreshRate, ModeFlags flags, QObject *parent = nullptr);
     ~OutputDeviceModeV2Interface() override;
 
+    std::weak_ptr<KWin::OutputMode> handle() const;
     QSize size() const;
     int refreshRate() const;
     OutputDeviceModeV2Interface::ModeFlags flags() const;
-
-    void setFlags(OutputDeviceModeV2Interface::ModeFlags newFlags);
 
     static OutputDeviceModeV2Interface *get(wl_resource *native);
 
 private:
     friend class OutputDeviceModeV2InterfacePrivate;
-    QScopedPointer<OutputDeviceModeV2InterfacePrivate> d;
+    std::unique_ptr<OutputDeviceModeV2InterfacePrivate> d;
 };
 
 }

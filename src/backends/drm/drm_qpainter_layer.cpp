@@ -11,12 +11,13 @@
 #include "drm_backend.h"
 #include "drm_buffer.h"
 #include "drm_dumb_buffer.h"
+#include "drm_dumb_swapchain.h"
 #include "drm_gpu.h"
+#include "drm_logging.h"
 #include "drm_output.h"
 #include "drm_pipeline.h"
+#include "drm_qpainter_backend.h"
 #include "drm_virtual_output.h"
-#include "dumb_swapchain.h"
-#include "scene_qpainter_drm_backend.h"
 
 #include <drm_fourcc.h>
 
@@ -28,14 +29,14 @@ DrmQPainterLayer::DrmQPainterLayer(DrmPipeline *pipeline)
 {
 }
 
-OutputLayerBeginFrameInfo DrmQPainterLayer::beginFrame()
+std::optional<OutputLayerBeginFrameInfo> DrmQPainterLayer::beginFrame()
 {
     if (!doesSwapchainFit()) {
         m_swapchain = std::make_shared<DumbSwapchain>(m_pipeline->gpu(), m_pipeline->bufferSize(), DRM_FORMAT_XRGB8888);
     }
     QRegion needsRepaint;
     if (!m_swapchain->acquireBuffer(&needsRepaint)) {
-        return {};
+        return std::nullopt;
     }
     return OutputLayerBeginFrameInfo{
         .renderTarget = RenderTarget(m_swapchain->currentBuffer()->image()),
@@ -43,12 +44,16 @@ OutputLayerBeginFrameInfo DrmQPainterLayer::beginFrame()
     };
 }
 
-void DrmQPainterLayer::endFrame(const QRegion &renderedRegion, const QRegion &damagedRegion)
+bool DrmQPainterLayer::endFrame(const QRegion &renderedRegion, const QRegion &damagedRegion)
 {
     Q_UNUSED(renderedRegion)
     m_currentDamage = damagedRegion;
     m_swapchain->releaseBuffer(m_swapchain->currentBuffer(), damagedRegion);
     m_currentFramebuffer = DrmFramebuffer::createFramebuffer(m_swapchain->currentBuffer());
+    if (!m_currentFramebuffer) {
+        qCWarning(KWIN_DRM, "Failed to create dumb framebuffer: %s", strerror(errno));
+    }
+    return m_currentFramebuffer != nullptr;
 }
 
 bool DrmQPainterLayer::checkTestBuffer()
@@ -57,6 +62,9 @@ bool DrmQPainterLayer::checkTestBuffer()
         m_swapchain = std::make_shared<DumbSwapchain>(m_pipeline->gpu(), m_pipeline->bufferSize(), DRM_FORMAT_XRGB8888);
         if (!m_swapchain->isEmpty()) {
             m_currentFramebuffer = DrmFramebuffer::createFramebuffer(m_swapchain->currentBuffer());
+            if (!m_currentFramebuffer) {
+                qCWarning(KWIN_DRM, "Failed to create dumb framebuffer: %s", strerror(errno));
+            }
         } else {
             m_currentFramebuffer.reset();
         }
@@ -89,14 +97,14 @@ DrmCursorQPainterLayer::DrmCursorQPainterLayer(DrmPipeline *pipeline)
 {
 }
 
-OutputLayerBeginFrameInfo DrmCursorQPainterLayer::beginFrame()
+std::optional<OutputLayerBeginFrameInfo> DrmCursorQPainterLayer::beginFrame()
 {
     if (!m_swapchain) {
         m_swapchain = std::make_shared<DumbSwapchain>(m_pipeline->gpu(), m_pipeline->gpu()->cursorSize(), DRM_FORMAT_ARGB8888);
     }
     QRegion needsRepaint;
     if (!m_swapchain->acquireBuffer(&needsRepaint)) {
-        return {};
+        return std::nullopt;
     }
     return OutputLayerBeginFrameInfo{
         .renderTarget = RenderTarget(m_swapchain->currentBuffer()->image()),
@@ -104,11 +112,15 @@ OutputLayerBeginFrameInfo DrmCursorQPainterLayer::beginFrame()
     };
 }
 
-void DrmCursorQPainterLayer::endFrame(const QRegion &damagedRegion, const QRegion &renderedRegion)
+bool DrmCursorQPainterLayer::endFrame(const QRegion &damagedRegion, const QRegion &renderedRegion)
 {
     Q_UNUSED(renderedRegion)
     m_swapchain->releaseBuffer(m_swapchain->currentBuffer(), damagedRegion);
     m_currentFramebuffer = DrmFramebuffer::createFramebuffer(m_swapchain->currentBuffer());
+    if (!m_currentFramebuffer) {
+        qCWarning(KWIN_DRM, "Failed to create dumb framebuffer for the cursor: %s", strerror(errno));
+    }
+    return m_currentFramebuffer != nullptr;
 }
 
 bool DrmCursorQPainterLayer::checkTestBuffer()
@@ -136,7 +148,7 @@ DrmVirtualQPainterLayer::DrmVirtualQPainterLayer(DrmVirtualOutput *output)
 {
 }
 
-OutputLayerBeginFrameInfo DrmVirtualQPainterLayer::beginFrame()
+std::optional<OutputLayerBeginFrameInfo> DrmVirtualQPainterLayer::beginFrame()
 {
     if (m_image.isNull() || m_image.size() != m_output->pixelSize()) {
         m_image = QImage(m_output->pixelSize(), QImage::Format_RGB32);
@@ -147,10 +159,11 @@ OutputLayerBeginFrameInfo DrmVirtualQPainterLayer::beginFrame()
     };
 }
 
-void DrmVirtualQPainterLayer::endFrame(const QRegion &renderedRegion, const QRegion &damagedRegion)
+bool DrmVirtualQPainterLayer::endFrame(const QRegion &renderedRegion, const QRegion &damagedRegion)
 {
     Q_UNUSED(renderedRegion)
     m_currentDamage = damagedRegion;
+    return true;
 }
 
 QRegion DrmVirtualQPainterLayer::currentDamage() const
@@ -160,45 +173,5 @@ QRegion DrmVirtualQPainterLayer::currentDamage() const
 
 void DrmVirtualQPainterLayer::releaseBuffers()
 {
-}
-
-DrmLeaseQPainterLayer::DrmLeaseQPainterLayer(DrmPipeline *pipeline)
-    : DrmPipelineLayer(pipeline)
-{
-}
-
-bool DrmLeaseQPainterLayer::checkTestBuffer()
-{
-    const auto size = m_pipeline->bufferSize();
-    if (!m_framebuffer || m_buffer->size() != size) {
-        m_buffer = DrmDumbBuffer::createDumbBuffer(m_pipeline->gpu(), size, DRM_FORMAT_XRGB8888);
-        if (m_buffer) {
-            m_framebuffer = DrmFramebuffer::createFramebuffer(m_buffer);
-        } else {
-            m_framebuffer.reset();
-        }
-    }
-    return m_framebuffer != nullptr;
-}
-
-std::shared_ptr<DrmFramebuffer> DrmLeaseQPainterLayer::currentBuffer() const
-{
-    return m_framebuffer;
-}
-
-OutputLayerBeginFrameInfo DrmLeaseQPainterLayer::beginFrame()
-{
-    return {};
-}
-
-void DrmLeaseQPainterLayer::endFrame(const QRegion &damagedRegion, const QRegion &renderedRegion)
-{
-    Q_UNUSED(damagedRegion)
-    Q_UNUSED(renderedRegion)
-}
-
-void DrmLeaseQPainterLayer::releaseBuffers()
-{
-    m_buffer.reset();
 }
 }

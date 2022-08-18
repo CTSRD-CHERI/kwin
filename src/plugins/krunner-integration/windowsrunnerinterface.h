@@ -34,7 +34,7 @@ class WindowsRunner : public Plugin, protected QDBusContext
     Q_OBJECT
     Q_CLASSINFO("D-Bus Interface", "org.kde.KWin.WindowsRunner")
 public:
-    explicit WindowsRunner(QObject *parent = nullptr);
+    explicit WindowsRunner();
     ~WindowsRunner() override;
 
     RemoteActions Actions();
@@ -56,7 +56,6 @@ private:
         ActivateDesktopAction
     };
 
-    void initialize();
     RemoteMatch desktopMatch(const VirtualDesktop *desktop, const WindowsRunnerAction action = ActivateDesktopAction, qreal relevance = 1.0) const;
     RemoteMatch windowsMatch(const Window *window, const WindowsRunnerAction action = ActivateAction, qreal relevance = 1.0, Plasma::QueryMatch::Type type = Plasma::QueryMatch::ExactMatch) const;
     bool actionSupported(const Window *window, const WindowsRunnerAction action) const;

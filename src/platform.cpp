@@ -13,18 +13,18 @@
 
 #include "composite.h"
 #include "cursor.h"
+#include "dmabuftexture.h"
 #include "effects.h"
+#include "inputbackend.h"
+#include "openglbackend.h"
 #include "outline.h"
 #include "output.h"
 #include "outputconfiguration.h"
 #include "overlaywindow.h"
 #include "pointer_input.h"
+#include "qpainterbackend.h"
 #include "scene.h"
 #include "screenedge.h"
-#include "screens.h"
-#include "wayland/outputchangeset_v2.h"
-#include "wayland/outputconfiguration_v2_interface.h"
-#include "wayland_server.h"
 
 #include <KCoreAddons>
 
@@ -45,7 +45,15 @@ Platform::Platform(QObject *parent)
 {
     connect(this, &Platform::outputDisabled, this, [this](Output *output) {
         if (m_primaryOutput == output) {
-            setPrimaryOutput(enabledOutputs().value(0, nullptr));
+            Output *primary = nullptr;
+            const auto candidates = outputs();
+            for (Output *output : candidates) {
+                if (output->isEnabled()) {
+                    primary = output;
+                    break;
+                }
+            }
+            setPrimaryOutput(primary);
         }
     });
     connect(this, &Platform::outputEnabled, this, [this](Output *output) {
@@ -65,25 +73,40 @@ PlatformCursorImage Platform::cursorImage() const
     return PlatformCursorImage(cursor->image(), cursor->hotspot());
 }
 
-InputBackend *Platform::createInputBackend()
+std::unique_ptr<InputBackend> Platform::createInputBackend()
 {
     return nullptr;
 }
 
-OpenGLBackend *Platform::createOpenGLBackend()
+std::unique_ptr<OpenGLBackend> Platform::createOpenGLBackend()
 {
     return nullptr;
 }
 
-QPainterBackend *Platform::createQPainterBackend()
+std::unique_ptr<QPainterBackend> Platform::createQPainterBackend()
 {
     return nullptr;
 }
 
-QSharedPointer<DmaBufTexture> Platform::createDmaBufTexture(const QSize &size)
+std::optional<DmaBufParams> Platform::testCreateDmaBuf(const QSize &size, quint32 format, const QVector<uint64_t> &modifiers)
 {
     Q_UNUSED(size)
+    Q_UNUSED(format)
+    Q_UNUSED(modifiers)
     return {};
+}
+
+std::shared_ptr<DmaBufTexture> Platform::createDmaBufTexture(const QSize &size, quint32 format, uint64_t modifier)
+{
+    Q_UNUSED(size)
+    Q_UNUSED(format)
+    Q_UNUSED(modifier)
+    return {};
+}
+
+std::shared_ptr<DmaBufTexture> Platform::createDmaBufTexture(const DmaBufParams &attribs)
+{
+    return createDmaBufTexture({attribs.width, attribs.height}, attribs.format, attribs.modifier);
 }
 
 Edge *Platform::createScreenEdge(ScreenEdges *edges)
@@ -94,64 +117,6 @@ Edge *Platform::createScreenEdge(ScreenEdges *edges)
 void Platform::createPlatformCursor(QObject *parent)
 {
     new InputRedirectionCursor(parent);
-}
-
-void Platform::requestOutputsChange(KWaylandServer::OutputConfigurationV2Interface *config)
-{
-    if (!m_supportsOutputChanges) {
-        qCWarning(KWIN_CORE) << "This backend does not support configuration changes.";
-        config->setFailed();
-        return;
-    }
-
-    OutputConfiguration cfg;
-    const auto changes = config->changes();
-    for (auto it = changes.begin(); it != changes.end(); it++) {
-        const KWaylandServer::OutputChangeSetV2 *changeset = it.value();
-        auto output = findOutput(it.key()->uuid());
-        if (!output) {
-            qCWarning(KWIN_CORE) << "Could NOT find output matching " << it.key()->uuid();
-            continue;
-        }
-        auto props = cfg.changeSet(output);
-        props->enabled = changeset->enabled();
-        props->pos = changeset->position();
-        props->scale = changeset->scale();
-        props->modeSize = changeset->size();
-        props->refreshRate = changeset->refreshRate();
-        props->transform = static_cast<Output::Transform>(changeset->transform());
-        props->overscan = changeset->overscan();
-        props->rgbRange = static_cast<Output::RgbRange>(changeset->rgbRange());
-        props->vrrPolicy = static_cast<RenderLoop::VrrPolicy>(changeset->vrrPolicy());
-    }
-
-    const auto allOutputs = outputs();
-    bool allDisabled = !std::any_of(allOutputs.begin(), allOutputs.end(), [&cfg](const auto &output) {
-        return cfg.changeSet(output)->enabled;
-    });
-    if (allDisabled) {
-        qCWarning(KWIN_CORE) << "Disabling all outputs through configuration changes is not allowed";
-        config->setFailed();
-        return;
-    }
-
-    if (applyOutputChanges(cfg)) {
-        if (config->primaryChanged() || !primaryOutput()->isEnabled()) {
-            auto requestedPrimaryOutput = findOutput(config->primary()->uuid());
-            if (requestedPrimaryOutput && requestedPrimaryOutput->isEnabled()) {
-                setPrimaryOutput(requestedPrimaryOutput);
-            } else {
-                auto defaultPrimaryOutput = enabledOutputs().constFirst();
-                qCWarning(KWIN_CORE) << "Requested invalid primary screen, using" << defaultPrimaryOutput;
-                setPrimaryOutput(defaultPrimaryOutput);
-            }
-        }
-        Q_EMIT screens()->changed();
-        config->setApplied();
-    } else {
-        qCDebug(KWIN_CORE) << "Applying config failed";
-        config->setFailed();
-    }
 }
 
 bool Platform::applyOutputChanges(const OutputConfiguration &config)
@@ -173,11 +138,6 @@ bool Platform::applyOutputChanges(const OutputConfiguration &config)
         output->applyChanges(config);
     }
     return true;
-}
-
-Output *Platform::findOutput(int screenId) const
-{
-    return enabledOutputs().value(screenId);
 }
 
 Output *Platform::findOutput(const QUuid &uuid) const
@@ -202,35 +162,6 @@ Output *Platform::findOutput(const QString &name) const
         }
     }
     return nullptr;
-}
-
-Output *Platform::outputAt(const QPoint &pos) const
-{
-    Output *bestOutput = nullptr;
-    int minDistance = INT_MAX;
-    const auto candidates = enabledOutputs();
-    for (Output *output : candidates) {
-        const QRect &geo = output->geometry();
-        if (geo.contains(pos)) {
-            return output;
-        }
-        int distance = QPoint(geo.topLeft() - pos).manhattanLength();
-        distance = std::min(distance, QPoint(geo.topRight() - pos).manhattanLength());
-        distance = std::min(distance, QPoint(geo.bottomRight() - pos).manhattanLength());
-        distance = std::min(distance, QPoint(geo.bottomLeft() - pos).manhattanLength());
-        if (distance < minDistance) {
-            minDistance = distance;
-            bestOutput = output;
-        }
-    }
-    return bestOutput;
-}
-
-void Platform::repaint(const QRect &rect)
-{
-    if (Compositor::compositing()) {
-        Compositor::self()->scene()->addRepaint(rect);
-    }
 }
 
 void Platform::setReady(bool ready)
@@ -326,7 +257,7 @@ void Platform::setupActionForGlobalAccel(QAction *action)
     Q_UNUSED(action)
 }
 
-OverlayWindow *Platform::createOverlayWindow()
+std::unique_ptr<OverlayWindow> Platform::createOverlayWindow()
 {
     return nullptr;
 }

@@ -21,28 +21,12 @@
 namespace KWin
 {
 
-Screens *Screens::s_self = nullptr;
-Screens *Screens::create(QObject *parent)
-{
-    Q_ASSERT(!s_self);
-    s_self = new Screens(parent);
-    Q_ASSERT(s_self);
-    s_self->init();
-    return s_self;
-}
-
-Screens::Screens(QObject *parent)
-    : QObject(parent)
-    , m_count(0)
+Screens::Screens()
+    : m_count(0)
     , m_maxScale(1.0)
 {
     connect(kwinApp()->platform(), &Platform::screensQueried, this, &Screens::updateCount);
     connect(kwinApp()->platform(), &Platform::screensQueried, this, &Screens::changed);
-}
-
-Screens::~Screens()
-{
-    s_self = nullptr;
 }
 
 void Screens::init()
@@ -96,7 +80,7 @@ void Screens::updateSize()
 
 void Screens::updateCount()
 {
-    setCount(kwinApp()->platform()->enabledOutputs().size());
+    setCount(workspace()->outputs().size());
 }
 
 void Screens::setCount(int count)
@@ -111,7 +95,22 @@ void Screens::setCount(int count)
 
 Output *Screens::findOutput(int screen) const
 {
-    return kwinApp()->platform()->findOutput(screen);
+    return workspace()->outputs().value(screen);
+}
+
+int Screens::count() const
+{
+    return m_count;
+}
+
+QSize Screens::size() const
+{
+    return m_boundingSize;
+}
+
+QRect Screens::geometry() const
+{
+    return QRect(QPoint(0, 0), size());
 }
 
 } // namespace

@@ -98,7 +98,7 @@ void TouchInputRedirection::focusUpdate(Window *focusOld, Window *focusNow)
     m_focusGeometryConnection = QMetaObject::Connection();
 
     if (focusNow && focusNow->isClient()) {
-        focusNow->pointerEnterEvent(m_lastPosition.toPoint());
+        focusNow->pointerEnterEvent(m_lastPosition);
     }
 
     auto seat = waylandServer()->seat();
@@ -196,7 +196,7 @@ void TouchInputRedirection::cancel()
     // the compositor will not receive any TOUCH_MOTION or TOUCH_UP events for that slot.
     if (!m_activeTouchPoints.isEmpty()) {
         m_activeTouchPoints.clear();
-        waylandServer()->seat()->notifyTouchCancel();
+        input()->processFilters(std::bind(&InputEventFilter::touchCancel, std::placeholders::_1));
     }
 }
 

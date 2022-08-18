@@ -44,7 +44,7 @@ public:
 protected:
     explicit SurfaceItem(Window *window, Item *parent = nullptr);
 
-    virtual SurfacePixmap *createPixmap() = 0;
+    virtual std::unique_ptr<SurfacePixmap> createPixmap() = 0;
     void preprocess() override;
     WindowQuadList buildQuads() const override;
 
@@ -52,8 +52,8 @@ protected:
 
     Window *m_window;
     QRegion m_damage;
-    QScopedPointer<SurfacePixmap> m_pixmap;
-    QScopedPointer<SurfacePixmap> m_previousPixmap;
+    std::unique_ptr<SurfacePixmap> m_pixmap;
+    std::unique_ptr<SurfacePixmap> m_previousPixmap;
     QMatrix4x4 m_surfaceToBufferMatrix;
     int m_referencePixmapCounter = 0;
 };
@@ -71,13 +71,13 @@ class KWIN_EXPORT SurfacePixmap : public QObject
     Q_OBJECT
 
 public:
-    explicit SurfacePixmap(SurfaceTexture *texture, QObject *parent = nullptr);
+    explicit SurfacePixmap(std::unique_ptr<SurfaceTexture> &&texture, QObject *parent = nullptr);
 
     SurfaceTexture *texture() const;
 
     bool hasAlphaChannel() const;
     QSize size() const;
-    QRect contentsRect() const;
+    QRectF contentsRect() const;
 
     bool isDiscarded() const;
     void markAsDiscarded();
@@ -89,11 +89,11 @@ public:
 
 protected:
     QSize m_size;
-    QRect m_contentsRect;
+    QRectF m_contentsRect;
     bool m_hasAlphaChannel = false;
 
 private:
-    QScopedPointer<SurfaceTexture> m_texture;
+    std::unique_ptr<SurfaceTexture> m_texture;
     bool m_isDiscarded = false;
 };
 

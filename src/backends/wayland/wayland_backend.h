@@ -7,13 +7,14 @@
 
     SPDX-License-Identifier: GPL-2.0-or-later
 */
-#ifndef KWIN_WAYLAND_BACKEND_H
-#define KWIN_WAYLAND_BACKEND_H
+#pragma once
+
 #include <config-kwin.h>
 // KWin
 #include "inputbackend.h"
 #include "inputdevice.h"
 #include "platform.h"
+#include "utils/filedescriptor.h"
 #include <kwinglobals.h>
 // Qt
 #include <QHash>
@@ -28,6 +29,7 @@ struct wl_display;
 struct wl_event_queue;
 struct wl_seat;
 struct gbm_device;
+struct gbm_bo;
 
 namespace KWayland
 {
@@ -67,6 +69,7 @@ namespace Wayland
 class WaylandBackend;
 class WaylandSeat;
 class WaylandOutput;
+class WaylandEglBackend;
 
 class WaylandCursor : public QObject
 {
@@ -158,12 +161,12 @@ public:
 private:
     WaylandSeat *m_seat;
 
-    QScopedPointer<KWayland::Client::Keyboard> m_keyboard;
-    QScopedPointer<KWayland::Client::Touch> m_touch;
-    QScopedPointer<KWayland::Client::RelativePointer> m_relativePointer;
-    QScopedPointer<KWayland::Client::Pointer> m_pointer;
-    QScopedPointer<KWayland::Client::PointerPinchGesture> m_pinchGesture;
-    QScopedPointer<KWayland::Client::PointerSwipeGesture> m_swipeGesture;
+    std::unique_ptr<KWayland::Client::Keyboard> m_keyboard;
+    std::unique_ptr<KWayland::Client::Touch> m_touch;
+    std::unique_ptr<KWayland::Client::RelativePointer> m_relativePointer;
+    std::unique_ptr<KWayland::Client::Pointer> m_pointer;
+    std::unique_ptr<KWayland::Client::PointerPinchGesture> m_pinchGesture;
+    std::unique_ptr<KWayland::Client::PointerSwipeGesture> m_swipeGesture;
 
     uint32_t m_enteredSerial = 0;
 };
@@ -245,21 +248,19 @@ private:
 class KWIN_EXPORT WaylandBackend : public Platform
 {
     Q_OBJECT
-    Q_INTERFACES(KWin::Platform)
-    Q_PLUGIN_METADATA(IID "org.kde.kwin.Platform" FILE "wayland.json")
+
 public:
     explicit WaylandBackend(QObject *parent = nullptr);
     ~WaylandBackend() override;
     bool initialize() override;
-    Session *session() const override;
     wl_display *display();
     KWayland::Client::Compositor *compositor();
     KWayland::Client::SubCompositor *subCompositor();
     KWayland::Client::ShmPool *shmPool();
 
-    InputBackend *createInputBackend() override;
-    OpenGLBackend *createOpenGLBackend() override;
-    QPainterBackend *createQPainterBackend() override;
+    std::unique_ptr<InputBackend> createInputBackend() override;
+    std::unique_ptr<OpenGLBackend> createOpenGLBackend() override;
+    std::unique_ptr<QPainterBackend> createQPainterBackend() override;
 
     void flush();
 
@@ -289,7 +290,6 @@ public:
     WaylandOutput *getOutputAt(const QPointF &globalPosition);
     WaylandOutput *findOutput(KWayland::Client::Surface *nativeSurface) const;
     Outputs outputs() const override;
-    Outputs enabledOutputs() const override;
     QVector<WaylandOutput *> waylandOutputs() const
     {
         return m_outputs;
@@ -300,6 +300,19 @@ public:
 
     Output *createVirtualOutput(const QString &name, const QSize &size, double scale) override;
     void removeVirtualOutput(Output *output) override;
+
+    std::optional<DmaBufParams> testCreateDmaBuf(const QSize &size, quint32 format, const QVector<uint64_t> &modifiers) override;
+    std::shared_ptr<DmaBufTexture> createDmaBufTexture(const QSize &size, quint32 format, uint64_t modifier) override;
+
+    gbm_device *gbmDevice() const
+    {
+        return m_gbmDevice;
+    }
+
+    void setEglBackend(WaylandEglBackend *eglBackend)
+    {
+        m_eglBackend = eglBackend;
+    }
 
 Q_SIGNALS:
     void systemCompositorDied();
@@ -314,10 +327,8 @@ private:
     void createOutputs();
     void destroyOutputs();
 
-    void updateScreenSize(WaylandOutput *output);
-    WaylandOutput *createOutput(const QPoint &position, const QSize &size);
+    WaylandOutput *createOutput(const QString &name, const QSize &size);
 
-    Session *m_session;
     wl_display *m_display;
     KWayland::Client::EventQueue *m_eventQueue;
     KWayland::Client::Registry *m_registry;
@@ -331,6 +342,7 @@ private:
     KWayland::Client::RelativePointerManager *m_relativePointerManager = nullptr;
     KWayland::Client::PointerConstraints *m_pointerConstraints = nullptr;
     KWayland::Client::PointerGestures *m_pointerGestures = nullptr;
+    WaylandEglBackend *m_eglBackend = nullptr;
 
     QThread *m_connectionThread;
     QVector<WaylandOutput *> m_outputs;
@@ -338,14 +350,14 @@ private:
 
     WaylandCursor *m_waylandCursor = nullptr;
 
-    QScopedPointer<DpmsInputEventFilter> m_dpmsFilter;
+    std::unique_ptr<DpmsInputEventFilter> m_dpmsFilter;
 
     bool m_pointerLockRequested = false;
     KWayland::Client::ServerSideDecorationManager *m_ssdManager = nullptr;
     KWayland::Client::ServerSideDecorationManager *ssdManager();
     int m_nextId = 0;
 #if HAVE_WAYLAND_EGL
-    int m_drmFileDescriptor = 0;
+    FileDescriptor m_drmFileDescriptor;
     gbm_device *m_gbmDevice;
 #endif
 };
@@ -372,5 +384,3 @@ inline KWayland::Client::ShmPool *WaylandBackend::shmPool()
 
 } // namespace Wayland
 } // namespace KWin
-
-#endif //  KWIN_WAYLAND_BACKEND_H

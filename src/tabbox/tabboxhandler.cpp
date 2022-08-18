@@ -62,11 +62,13 @@ public:
     ClientModel *clientModel() const;
     DesktopModel *desktopModel() const;
 
+    bool isHighlightWindows() const;
+
     TabBoxHandler *q; // public pointer
     // members
     TabBoxConfig config;
-    QScopedPointer<QQmlContext> m_qmlContext;
-    QScopedPointer<QQmlComponent> m_qmlComponent;
+    std::unique_ptr<QQmlContext> m_qmlContext;
+    std::unique_ptr<QQmlComponent> m_qmlComponent;
     QObject *m_mainItem;
     QMap<QString, QObject *> m_clientTabBoxes;
     QMap<QString, QObject *> m_desktopTabBoxes;
@@ -86,7 +88,7 @@ private:
 
 TabBoxHandlerPrivate::TabBoxHandlerPrivate(TabBoxHandler *q)
     : m_qmlContext()
-    , m_qmlComponent()
+    , m_qmlComponent(nullptr)
     , m_mainItem(nullptr)
 {
     this->q = q;
@@ -144,6 +146,15 @@ DesktopModel *TabBoxHandlerPrivate::desktopModel() const
     return m_desktopModel;
 }
 
+bool TabBoxHandlerPrivate::isHighlightWindows() const
+{
+    const QQuickWindow *w = window();
+    if (w && w->visibility() == QWindow::FullScreen) {
+        return false;
+    }
+    return config.isHighlightWindows();
+}
+
 void TabBoxHandlerPrivate::updateHighlightWindows()
 {
     if (!isShown || config.tabBoxMode() != TabBoxConfig::ClientTabBox) {
@@ -198,7 +209,7 @@ void TabBoxHandlerPrivate::updateHighlightWindows()
 void TabBoxHandlerPrivate::endHighlightWindows(bool abort)
 {
     TabBoxClient *currentClient = q->client(index);
-    if (config.isHighlightWindows() && q->isKWinCompositing()) {
+    if (isHighlightWindows() && q->isKWinCompositing()) {
         const auto stackingOrder = q->stackingOrder();
         for (const QWeakPointer<TabBoxClient> &clientPointer : stackingOrder) {
             if (QSharedPointer<TabBoxClient> client = clientPointer.toStrongRef()) {
@@ -278,8 +289,9 @@ QObject *TabBoxHandlerPrivate::createSwitcherItem(bool desktopMode)
                                                          "Contact your distribution about this.")
              << QStringLiteral("20");
         KProcess::startDetached(QStringLiteral("kdialog"), args);
+        m_qmlComponent.reset(nullptr);
     } else {
-        QObject *object = m_qmlComponent->create(m_qmlContext.data());
+        QObject *object = m_qmlComponent->create(m_qmlContext.get());
         if (desktopMode) {
             m_desktopTabBoxes.insert(config.layoutName(), object);
         } else {
@@ -294,12 +306,12 @@ QObject *TabBoxHandlerPrivate::createSwitcherItem(bool desktopMode)
 void TabBoxHandlerPrivate::show()
 {
 #ifndef KWIN_UNIT_TEST
-    if (m_qmlContext.isNull()) {
+    if (!m_qmlContext) {
         qmlRegisterType<SwitcherItem>("org.kde.kwin", 2, 0, "Switcher");
         qmlRegisterType<SwitcherItem>("org.kde.kwin", 3, 0, "TabBoxSwitcher");
         m_qmlContext.reset(new QQmlContext(Scripting::self()->qmlEngine()));
     }
-    if (m_qmlComponent.isNull()) {
+    if (!m_qmlComponent) {
         m_qmlComponent.reset(new QQmlComponent(Scripting::self()->qmlEngine()));
     }
     const bool desktopMode = (config.tabBoxMode() == TabBoxConfig::DesktopTabBox);
@@ -381,7 +393,7 @@ void TabBoxHandler::show()
     if (d->config.isShowTabBox()) {
         d->show();
     }
-    if (d->config.isHighlightWindows()) {
+    if (d->isHighlightWindows()) {
         if (kwinApp()->x11Connection()) {
             Xcb::sync();
         }
@@ -409,7 +421,7 @@ void TabBoxHandler::initHighlightWindows()
 void TabBoxHandler::hide(bool abort)
 {
     d->isShown = false;
-    if (d->config.isHighlightWindows()) {
+    if (d->isHighlightWindows()) {
         d->endHighlightWindows(abort);
     }
 #ifndef KWIN_UNIT_TEST
@@ -519,7 +531,7 @@ void TabBoxHandler::setCurrentIndex(const QModelIndex &index)
     }
     d->index = index;
     if (d->config.tabBoxMode() == TabBoxConfig::ClientTabBox) {
-        if (d->config.isHighlightWindows()) {
+        if (d->isHighlightWindows()) {
             d->updateHighlightWindows();
         }
     }

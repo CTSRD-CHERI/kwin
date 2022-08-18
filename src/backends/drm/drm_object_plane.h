@@ -63,10 +63,9 @@ public:
         ReflectY = 1 << 5
     };
     Q_ENUM(Transformation)
-    Q_DECLARE_FLAGS(Transformations, Transformation);
+    Q_DECLARE_FLAGS(Transformations, Transformation)
 
     bool init() override;
-    bool needsModeset() const override;
     void disable() override;
     TypeIndex type() const;
 

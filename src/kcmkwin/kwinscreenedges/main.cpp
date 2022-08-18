@@ -27,7 +27,7 @@
 #include "kwinscreenedgescriptsettings.h"
 #include "kwinscreenedgesettings.h"
 
-K_PLUGIN_FACTORY_WITH_JSON(KWinScreenEdgesConfigFactory, "metadata.json", registerPlugin<KWin::KWinScreenEdgesConfig>(); registerPlugin<KWin::KWinScreenEdgeData>();)
+K_PLUGIN_FACTORY_WITH_JSON(KWinScreenEdgesConfigFactory, "kcm_kwinscreenedges.json", registerPlugin<KWin::KWinScreenEdgesConfig>(); registerPlugin<KWin::KWinScreenEdgeData>();)
 
 namespace KWin
 {
@@ -128,7 +128,7 @@ void KWinScreenEdgesConfig::showEvent(QShowEvent *e)
 void KWinScreenEdgesConfig::monitorInit()
 {
     m_form->monitorAddItem(i18n("No Action"));
-    m_form->monitorAddItem(i18n("Show Desktop"));
+    m_form->monitorAddItem(i18n("Peek at Desktop"));
     m_form->monitorAddItem(i18n("Lock Screen"));
     m_form->monitorAddItem(i18n("Show KRunner"));
     m_form->monitorAddItem(i18n("Activity Manager"));

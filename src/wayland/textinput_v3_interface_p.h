@@ -48,7 +48,7 @@ public:
 
     static TextInputV3InterfacePrivate *get(TextInputV3Interface *inputInterface)
     {
-        return inputInterface->d.data();
+        return inputInterface->d.get();
     }
 
     QRect cursorRectangle;
@@ -63,6 +63,10 @@ public:
     qint32 surroundingTextSelectionAnchor = 0;
     TextInputChangeCause surroundingTextChangeCause = TextInputChangeCause::InputMethod;
 
+    QString preeditText;
+    quint32 preeditCursorBegin = 0;
+    quint32 preeditCursorEnd = 0;
+
     struct
     {
         QRect cursorRectangle;
@@ -73,12 +77,16 @@ public:
         QString surroundingText;
         qint32 surroundingTextCursorPosition = 0;
         qint32 surroundingTextSelectionAnchor = 0;
+        QString preeditText;
+        quint32 preeditCursorBegin = 0;
+        quint32 preeditCursorEnd = 0;
     } pending;
 
     QHash<Resource *, quint32> serialHash;
     QHash<Resource *, bool> enabled;
 
     void defaultPending();
+    void defaultPendingPreedit();
 
     TextInputV3Interface *q;
 

@@ -197,17 +197,17 @@ QByteArray Output::edid() const
     return m_information.edid;
 }
 
-QList<QSharedPointer<OutputMode>> Output::modes() const
+QList<std::shared_ptr<OutputMode>> Output::modes() const
 {
     return m_modes;
 }
 
-QSharedPointer<OutputMode> Output::currentMode() const
+std::shared_ptr<OutputMode> Output::currentMode() const
 {
     return m_currentMode;
 }
 
-void Output::setModesInternal(const QList<QSharedPointer<OutputMode>> &modes, const QSharedPointer<OutputMode> &currentMode)
+void Output::setModesInternal(const QList<std::shared_ptr<OutputMode>> &modes, const std::shared_ptr<OutputMode> &currentMode)
 {
     const auto oldModes = m_modes;
     const auto oldCurrentMode = m_currentMode;
@@ -220,6 +220,7 @@ void Output::setModesInternal(const QList<QSharedPointer<OutputMode>> &modes, co
     }
     if (m_currentMode != oldCurrentMode) {
         Q_EMIT currentModeChanged();
+        Q_EMIT geometryChanged();
     }
 }
 
@@ -262,7 +263,7 @@ QString Output::description() const
     return manufacturer() + ' ' + model();
 }
 
-void Output::setCurrentModeInternal(const QSharedPointer<OutputMode> &currentMode)
+void Output::setCurrentModeInternal(const std::shared_ptr<OutputMode> &currentMode)
 {
     if (m_currentMode != currentMode) {
         m_currentMode = currentMode;
@@ -398,6 +399,11 @@ bool Output::isPlaceholder() const
     return m_information.placeholder;
 }
 
+bool Output::isNonDesktop() const
+{
+    return m_information.nonDesktop;
+}
+
 Output::RgbRange Output::rgbRange() const
 {
     return m_rgbRange;
@@ -411,7 +417,7 @@ void Output::setRgbRangeInternal(RgbRange range)
     }
 }
 
-void Output::setColorTransformation(const QSharedPointer<ColorTransformation> &transformation)
+void Output::setColorTransformation(const std::shared_ptr<ColorTransformation> &transformation)
 {
     Q_UNUSED(transformation);
 }

@@ -26,13 +26,13 @@
 #include "osd.h"
 #include "pointer_input.h"
 #include "renderbackend.h"
+#include "renderlayer.h"
 #include "unmanaged.h"
 #include "x11window.h"
 #if KWIN_BUILD_TABBOX
 #include "tabbox.h"
 #endif
 #include "screenedge.h"
-#include "screens.h"
 #include "scripting/scriptedeffect.h"
 #if KWIN_BUILD_SCREENLOCKER
 #include "screenlockerwatcher.h"
@@ -102,10 +102,10 @@ static xcb_atom_t registerSupportProperty(const QByteArray &propertyName)
         return XCB_ATOM_NONE;
     }
     // get the atom for the propertyName
-    ScopedCPointer<xcb_intern_atom_reply_t> atomReply(xcb_intern_atom_reply(c,
-                                                                            xcb_intern_atom_unchecked(c, false, propertyName.size(), propertyName.constData()),
-                                                                            nullptr));
-    if (atomReply.isNull()) {
+    UniqueCPtr<xcb_intern_atom_reply_t> atomReply(xcb_intern_atom_reply(c,
+                                                                        xcb_intern_atom_unchecked(c, false, propertyName.size(), propertyName.constData()),
+                                                                        nullptr));
+    if (!atomReply) {
         return XCB_ATOM_NONE;
     }
     // announce property on root window
@@ -127,6 +127,7 @@ EffectsHandlerImpl::EffectsHandlerImpl(Compositor *compositor, Scene *scene)
     , m_trackingCursorChanges(0)
 {
     qRegisterMetaType<QVector<KWin::EffectWindow *>>();
+    qRegisterMetaType<KWin::SessionState>();
     connect(m_effectLoader, &AbstractEffectLoader::effectLoaded, this, [this](Effect *effect, const QString &name) {
         effect_order.insert(effect->requestedEffectChainPosition(), EffectPair(name, effect));
         loaded_effects << EffectPair(name, effect);
@@ -194,10 +195,10 @@ EffectsHandlerImpl::EffectsHandlerImpl(Compositor *compositor, Scene *scene)
         Q_EMIT desktopGridHeightChanged(height);
     });
     connect(Cursors::self()->mouse(), &Cursor::mouseChanged, this, &EffectsHandler::mouseChanged);
-    connect(Screens::self(), &Screens::sizeChanged, this, &EffectsHandler::virtualScreenSizeChanged);
-    connect(Screens::self(), &Screens::geometryChanged, this, &EffectsHandler::virtualScreenGeometryChanged);
+    connect(ws, &Workspace::geometryChanged, this, &EffectsHandler::virtualScreenSizeChanged);
+    connect(ws, &Workspace::geometryChanged, this, &EffectsHandler::virtualScreenGeometryChanged);
 #if KWIN_BUILD_ACTIVITIES
-    if (Activities *activities = Activities::self()) {
+    if (Activities *activities = Workspace::self()->activities()) {
         connect(activities, &Activities::added, this, &EffectsHandler::activityAdded);
         connect(activities, &Activities::removed, this, &EffectsHandler::activityRemoved);
         connect(activities, &Activities::currentChanged, this, &EffectsHandler::currentActivityChanged);
@@ -205,16 +206,16 @@ EffectsHandlerImpl::EffectsHandlerImpl(Compositor *compositor, Scene *scene)
 #endif
     connect(ws, &Workspace::stackingOrderChanged, this, &EffectsHandler::stackingOrderChanged);
 #if KWIN_BUILD_TABBOX
-    TabBox::TabBox *tabBox = TabBox::TabBox::self();
+    TabBox::TabBox *tabBox = workspace()->tabbox();
     connect(tabBox, &TabBox::TabBox::tabBoxAdded, this, &EffectsHandler::tabBoxAdded);
     connect(tabBox, &TabBox::TabBox::tabBoxUpdated, this, &EffectsHandler::tabBoxUpdated);
     connect(tabBox, &TabBox::TabBox::tabBoxClosed, this, &EffectsHandler::tabBoxClosed);
     connect(tabBox, &TabBox::TabBox::tabBoxKeyEvent, this, &EffectsHandler::tabBoxKeyEvent);
 #endif
-    connect(ScreenEdges::self(), &ScreenEdges::approaching, this, &EffectsHandler::screenEdgeApproaching);
+    connect(workspace()->screenEdges(), &ScreenEdges::approaching, this, &EffectsHandler::screenEdgeApproaching);
 #if KWIN_BUILD_SCREENLOCKER
-    connect(ScreenLockerWatcher::self(), &ScreenLockerWatcher::locked, this, &EffectsHandler::screenLockingChanged);
-    connect(ScreenLockerWatcher::self(), &ScreenLockerWatcher::aboutToLock, this, &EffectsHandler::screenAboutToLock);
+    connect(kwinApp()->screenLockerWatcher(), &ScreenLockerWatcher::locked, this, &EffectsHandler::screenLockingChanged);
+    connect(kwinApp()->screenLockerWatcher(), &ScreenLockerWatcher::aboutToLock, this, &EffectsHandler::screenAboutToLock);
 #endif
 
     connect(kwinApp(), &Application::x11ConnectionChanged, this, [this]() {
@@ -255,15 +256,17 @@ EffectsHandlerImpl::EffectsHandlerImpl(Compositor *compositor, Scene *scene)
         setupWindowConnections(window);
     }
 
-    connect(kwinApp()->platform(), &Platform::outputEnabled, this, &EffectsHandlerImpl::slotOutputEnabled);
-    connect(kwinApp()->platform(), &Platform::outputDisabled, this, &EffectsHandlerImpl::slotOutputDisabled);
+    connect(ws, &Workspace::outputAdded, this, &EffectsHandlerImpl::slotOutputAdded);
+    connect(ws, &Workspace::outputRemoved, this, &EffectsHandlerImpl::slotOutputRemoved);
 
-    const QVector<Output *> outputs = kwinApp()->platform()->enabledOutputs();
+    const QList<Output *> outputs = ws->outputs();
     for (Output *output : outputs) {
-        slotOutputEnabled(output);
+        slotOutputAdded(output);
     }
 
-    connect(InputMethod::self(), &InputMethod::panelChanged, this, &EffectsHandlerImpl::inputPanelChanged);
+    if (auto inputMethod = kwinApp()->inputMethod()) {
+        connect(inputMethod, &InputMethod::panelChanged, this, &EffectsHandlerImpl::inputPanelChanged);
+    }
 
     reconfigure();
 }
@@ -293,7 +296,7 @@ void EffectsHandlerImpl::setupWindowConnections(Window *window)
     connect(window, &Window::clientStartUserMovedResized, this, [this](Window *window) {
         Q_EMIT windowStartUserMovedResized(window->effectWindow());
     });
-    connect(window, &Window::clientStepUserMovedResized, this, [this](Window *window, const QRect &geometry) {
+    connect(window, &Window::clientStepUserMovedResized, this, [this](Window *window, const QRectF &geometry) {
         Q_EMIT windowStepUserMovedResized(window->effectWindow(), geometry);
     });
     connect(window, &Window::clientFinishUserMovedResized, this, [this](Window *window) {
@@ -549,7 +552,7 @@ void EffectsHandlerImpl::slotWindowDamaged(Window *window, const QRegion &r)
     Q_EMIT windowDamaged(window->effectWindow(), r);
 }
 
-void EffectsHandlerImpl::slotGeometryShapeChanged(Window *window, const QRect &old)
+void EffectsHandlerImpl::slotGeometryShapeChanged(Window *window, const QRectF &old)
 {
     // during late cleanup effectWindow() may be already NULL
     // in some functions that may still call this
@@ -559,7 +562,7 @@ void EffectsHandlerImpl::slotGeometryShapeChanged(Window *window, const QRect &o
     Q_EMIT windowGeometryShapeChanged(window->effectWindow(), old);
 }
 
-void EffectsHandlerImpl::slotFrameGeometryChanged(Window *window, const QRect &oldGeometry)
+void EffectsHandlerImpl::slotFrameGeometryChanged(Window *window, const QRectF &oldGeometry)
 {
     // effectWindow() might be nullptr during tear down of the client.
     if (window->effectWindow()) {
@@ -576,7 +579,17 @@ void EffectsHandlerImpl::setActiveFullScreenEffect(Effect *e)
     fullscreen_effect = e;
     Q_EMIT activeFullScreenEffectChanged();
     if (activeChanged) {
+        const auto delegates = m_scene->delegates();
+        for (SceneDelegate *delegate : delegates) {
+            RenderLoop *loop = delegate->layer()->loop();
+            if (fullscreen_effect) {
+                loop->setLatencyPolicy(LatencyPolicy::LatencyExtremelyHigh);
+            } else {
+                loop->resetLatencyPolicy();
+            }
+        }
         Q_EMIT hasActiveFullScreenEffectChanged();
+        workspace()->screenEdges()->checkBlocking();
     }
 }
 
@@ -969,10 +982,10 @@ void EffectsHandlerImpl::setShowingDesktop(bool showing)
 QString EffectsHandlerImpl::currentActivity() const
 {
 #if KWIN_BUILD_ACTIVITIES
-    if (!Activities::self()) {
+    if (!Workspace::self()->activities()) {
         return QString();
     }
-    return Activities::self()->current();
+    return Workspace::self()->activities()->current();
 #else
     return QString();
 #endif
@@ -1015,12 +1028,12 @@ int EffectsHandlerImpl::desktopGridHeight() const
 
 int EffectsHandlerImpl::workspaceWidth() const
 {
-    return desktopGridWidth() * Screens::self()->size().width();
+    return desktopGridWidth() * Workspace::self()->geometry().width();
 }
 
 int EffectsHandlerImpl::workspaceHeight() const
 {
-    return desktopGridHeight() * Screens::self()->size().height();
+    return desktopGridHeight() * Workspace::self()->geometry().height();
 }
 
 int EffectsHandlerImpl::desktopAtCoords(QPoint coords) const
@@ -1042,7 +1055,7 @@ QPoint EffectsHandlerImpl::desktopCoords(int id) const
     if (coords.x() == -1) {
         return QPoint(-1, -1);
     }
-    const QSize displaySize = Screens::self()->size();
+    const QSize displaySize = Workspace::self()->geometry().size();
     return QPoint(coords.x() * displaySize.width(), coords.y() * displaySize.height());
 }
 
@@ -1144,7 +1157,7 @@ void EffectsHandlerImpl::setTabBoxWindow(EffectWindow *w)
 #if KWIN_BUILD_TABBOX
     auto window = static_cast<EffectWindowImpl *>(w)->window();
     if (window->isClient()) {
-        TabBox::TabBox::self()->setCurrentClient(window);
+        workspace()->tabbox()->setCurrentClient(window);
     }
 #else
     Q_UNUSED(w)
@@ -1154,7 +1167,7 @@ void EffectsHandlerImpl::setTabBoxWindow(EffectWindow *w)
 void EffectsHandlerImpl::setTabBoxDesktop(int desktop)
 {
 #if KWIN_BUILD_TABBOX
-    TabBox::TabBox::self()->setCurrentDesktop(desktop);
+    workspace()->tabbox()->setCurrentDesktop(desktop);
 #else
     Q_UNUSED(desktop)
 #endif
@@ -1163,7 +1176,7 @@ void EffectsHandlerImpl::setTabBoxDesktop(int desktop)
 EffectWindowList EffectsHandlerImpl::currentTabBoxWindowList() const
 {
 #if KWIN_BUILD_TABBOX
-    const auto clients = TabBox::TabBox::self()->currentClientList();
+    const auto clients = workspace()->tabbox()->currentClientList();
     EffectWindowList ret;
     ret.reserve(clients.size());
     std::transform(std::cbegin(clients), std::cend(clients),
@@ -1180,28 +1193,28 @@ EffectWindowList EffectsHandlerImpl::currentTabBoxWindowList() const
 void EffectsHandlerImpl::refTabBox()
 {
 #if KWIN_BUILD_TABBOX
-    TabBox::TabBox::self()->reference();
+    workspace()->tabbox()->reference();
 #endif
 }
 
 void EffectsHandlerImpl::unrefTabBox()
 {
 #if KWIN_BUILD_TABBOX
-    TabBox::TabBox::self()->unreference();
+    workspace()->tabbox()->unreference();
 #endif
 }
 
 void EffectsHandlerImpl::closeTabBox()
 {
 #if KWIN_BUILD_TABBOX
-    TabBox::TabBox::self()->close();
+    workspace()->tabbox()->close();
 #endif
 }
 
 QList<int> EffectsHandlerImpl::currentTabBoxDesktopList() const
 {
 #if KWIN_BUILD_TABBOX
-    return TabBox::TabBox::self()->currentDesktopList();
+    return workspace()->tabbox()->currentDesktopList();
 #else
     return QList<int>();
 #endif
@@ -1210,7 +1223,7 @@ QList<int> EffectsHandlerImpl::currentTabBoxDesktopList() const
 int EffectsHandlerImpl::currentTabBoxDesktop() const
 {
 #if KWIN_BUILD_TABBOX
-    return TabBox::TabBox::self()->currentDesktop();
+    return workspace()->tabbox()->currentDesktop();
 #else
     return -1;
 #endif
@@ -1219,7 +1232,7 @@ int EffectsHandlerImpl::currentTabBoxDesktop() const
 EffectWindow *EffectsHandlerImpl::currentTabBoxWindow() const
 {
 #if KWIN_BUILD_TABBOX
-    if (auto c = TabBox::TabBox::self()->currentClient()) {
+    if (auto c = workspace()->tabbox()->currentClient()) {
         return c->effectWindow();
     }
 #endif
@@ -1234,6 +1247,11 @@ void EffectsHandlerImpl::addRepaintFull()
 void EffectsHandlerImpl::addRepaint(const QRect &r)
 {
     m_compositor->scene()->addRepaint(r);
+}
+
+void EffectsHandlerImpl::addRepaint(const QRectF &r)
+{
+    m_compositor->scene()->addRepaint(r.toAlignedRect());
 }
 
 void EffectsHandlerImpl::addRepaint(const QRegion &r)
@@ -1260,33 +1278,33 @@ static VirtualDesktop *resolveVirtualDesktop(int desktopId)
     }
 }
 
-QRect EffectsHandlerImpl::clientArea(clientAreaOption opt, const EffectScreen *screen, int desktop) const
+QRectF EffectsHandlerImpl::clientArea(clientAreaOption opt, const EffectScreen *screen, int desktop) const
 {
     const EffectScreenImpl *screenImpl = static_cast<const EffectScreenImpl *>(screen);
     return Workspace::self()->clientArea(opt, screenImpl->platformOutput(), resolveVirtualDesktop(desktop));
 }
 
-QRect EffectsHandlerImpl::clientArea(clientAreaOption opt, const EffectWindow *effectWindow) const
+QRectF EffectsHandlerImpl::clientArea(clientAreaOption opt, const EffectWindow *effectWindow) const
 {
     const Window *window = static_cast<const EffectWindowImpl *>(effectWindow)->window();
     return Workspace::self()->clientArea(opt, window);
 }
 
-QRect EffectsHandlerImpl::clientArea(clientAreaOption opt, const QPoint &p, int desktop) const
+QRectF EffectsHandlerImpl::clientArea(clientAreaOption opt, const QPoint &p, int desktop) const
 {
-    const Output *output = kwinApp()->platform()->outputAt(p);
+    const Output *output = Workspace::self()->outputAt(p);
     const VirtualDesktop *virtualDesktop = resolveVirtualDesktop(desktop);
     return Workspace::self()->clientArea(opt, output, virtualDesktop);
 }
 
 QRect EffectsHandlerImpl::virtualScreenGeometry() const
 {
-    return Screens::self()->geometry();
+    return Workspace::self()->geometry();
 }
 
 QSize EffectsHandlerImpl::virtualScreenSize() const
 {
-    return Screens::self()->size();
+    return Workspace::self()->geometry().size();
 }
 
 void EffectsHandlerImpl::defineCursor(Qt::CursorShape shape)
@@ -1359,29 +1377,29 @@ QPoint EffectsHandlerImpl::cursorPos() const
 
 void EffectsHandlerImpl::reserveElectricBorder(ElectricBorder border, Effect *effect)
 {
-    ScreenEdges::self()->reserve(border, effect, "borderActivated");
+    workspace()->screenEdges()->reserve(border, effect, "borderActivated");
 }
 
 void EffectsHandlerImpl::unreserveElectricBorder(ElectricBorder border, Effect *effect)
 {
-    ScreenEdges::self()->unreserve(border, effect);
+    workspace()->screenEdges()->unreserve(border, effect);
 }
 
 void EffectsHandlerImpl::registerTouchBorder(ElectricBorder border, QAction *action)
 {
-    ScreenEdges::self()->reserveTouch(border, action);
+    workspace()->screenEdges()->reserveTouch(border, action);
 }
 
 void EffectsHandlerImpl::registerRealtimeTouchBorder(ElectricBorder border, QAction *action, EffectsHandler::TouchBorderCallback progressCallback)
 {
-    ScreenEdges::self()->reserveTouch(border, action, [progressCallback](ElectricBorder border, const QSizeF &deltaProgress, Output *output) {
+    workspace()->screenEdges()->reserveTouch(border, action, [progressCallback](ElectricBorder border, const QSizeF &deltaProgress, Output *output) {
         progressCallback(border, deltaProgress, EffectScreenImpl::get(output));
     });
 }
 
 void EffectsHandlerImpl::unregisterTouchBorder(ElectricBorder border, QAction *action)
 {
-    ScreenEdges::self()->unreserveTouch(border, action);
+    workspace()->screenEdges()->unreserveTouch(border, action);
 }
 
 QPainter *EffectsHandlerImpl::scenePainter()
@@ -1565,9 +1583,9 @@ KWaylandServer::Display *EffectsHandlerImpl::waylandDisplay() const
     return nullptr;
 }
 
-EffectFrame *EffectsHandlerImpl::effectFrame(EffectFrameStyle style, bool staticSize, const QPoint &position, Qt::Alignment alignment) const
+std::unique_ptr<EffectFrame> EffectsHandlerImpl::effectFrame(EffectFrameStyle style, bool staticSize, const QPoint &position, Qt::Alignment alignment) const
 {
-    return new EffectFrameImpl(style, staticSize, position, alignment);
+    return std::make_unique<EffectFrameImpl>(style, staticSize, position, alignment);
 }
 
 QVariant EffectsHandlerImpl::kwinOption(KWinOption kwopt)
@@ -1575,13 +1593,13 @@ QVariant EffectsHandlerImpl::kwinOption(KWinOption kwopt)
     switch (kwopt) {
     case CloseButtonCorner: {
         // TODO: this could become per window and be derived from the actual position in the deco
-        const auto settings = Decoration::DecorationBridge::self()->settings();
+        const auto settings = Workspace::self()->decorationBridge()->settings();
         return settings && settings->decorationButtonsLeft().contains(KDecoration2::DecorationButtonType::Close) ? Qt::TopLeftCorner : Qt::TopRightCorner;
     }
     case SwitchDesktopOnScreenEdge:
-        return ScreenEdges::self()->isDesktopSwitching();
+        return workspace()->screenEdges()->isDesktopSwitching();
     case SwitchDesktopOnScreenEdgeMovingWindows:
-        return ScreenEdges::self()->isDesktopSwitchingMovingClients();
+        return workspace()->screenEdges()->isDesktopSwitchingMovingClients();
     default:
         return QVariant(); // an invalid one
     }
@@ -1613,7 +1631,7 @@ QString EffectsHandlerImpl::supportInformation(const QString &name) const
 bool EffectsHandlerImpl::isScreenLocked() const
 {
 #if KWIN_BUILD_SCREENLOCKER
-    return ScreenLockerWatcher::self()->isLocked();
+    return kwinApp()->screenLockerWatcher()->isLocked();
 #else
     return false;
 #endif
@@ -1745,7 +1763,7 @@ QList<EffectScreen *> EffectsHandlerImpl::screens() const
 
 EffectScreen *EffectsHandlerImpl::screenAt(const QPoint &point) const
 {
-    return EffectScreenImpl::get(kwinApp()->platform()->outputAt(point));
+    return EffectScreenImpl::get(Workspace::self()->outputAt(point));
 }
 
 EffectScreen *EffectsHandlerImpl::findScreen(const QString &name) const
@@ -1763,14 +1781,14 @@ EffectScreen *EffectsHandlerImpl::findScreen(int screenId) const
     return m_effectScreens.value(screenId);
 }
 
-void EffectsHandlerImpl::slotOutputEnabled(Output *output)
+void EffectsHandlerImpl::slotOutputAdded(Output *output)
 {
     EffectScreen *screen = new EffectScreenImpl(output, this);
     m_effectScreens.append(screen);
     Q_EMIT screenAdded(screen);
 }
 
-void EffectsHandlerImpl::slotOutputDisabled(Output *output)
+void EffectsHandlerImpl::slotOutputRemoved(Output *output)
 {
     EffectScreen *screen = EffectScreenImpl::get(output);
     m_effectScreens.removeOne(screen);
@@ -1806,11 +1824,11 @@ qreal EffectsHandlerImpl::renderTargetScale() const
 
 KWin::EffectWindow *EffectsHandlerImpl::inputPanel() const
 {
-    if (!InputMethod::self() || !InputMethod::self()->isEnabled()) {
+    if (!kwinApp()->inputMethod() || !kwinApp()->inputMethod()->isEnabled()) {
         return nullptr;
     }
 
-    auto panel = InputMethod::self()->panel();
+    auto panel = kwinApp()->inputMethod()->panel();
     if (panel) {
         return panel->effectWindow();
     }
@@ -1819,11 +1837,11 @@ KWin::EffectWindow *EffectsHandlerImpl::inputPanel() const
 
 bool EffectsHandlerImpl::isInputPanelOverlay() const
 {
-    if (!InputMethod::self() || !InputMethod::self()->isEnabled()) {
+    if (!kwinApp()->inputMethod() || !kwinApp()->inputMethod()->isEnabled()) {
         return true;
     }
 
-    auto panel = InputMethod::self()->panel();
+    auto panel = kwinApp()->inputMethod()->panel();
     if (panel) {
         return panel->mode() == InputPanelV1Window::Overlay;
     }
@@ -1868,6 +1886,21 @@ Output *EffectScreenImpl::platformOutput() const
 QString EffectScreenImpl::name() const
 {
     return m_platformOutput->name();
+}
+
+QString EffectScreenImpl::manufacturer() const
+{
+    return m_platformOutput->manufacturer();
+}
+
+QString EffectScreenImpl::model() const
+{
+    return m_platformOutput->model();
+}
+
+QString EffectScreenImpl::serialNumber() const
+{
+    return m_platformOutput->serialNumber();
 }
 
 qreal EffectScreenImpl::devicePixelRatio() const
@@ -1916,19 +1949,19 @@ EffectWindowImpl::~EffectWindowImpl()
 {
 }
 
-void EffectWindowImpl::refVisible(int reason)
+void EffectWindowImpl::refVisible(const EffectWindowVisibleRef *holder)
 {
-    m_windowItem->refVisible(reason);
+    m_windowItem->refVisible(holder->reason());
 }
 
-void EffectWindowImpl::unrefVisible(int reason)
+void EffectWindowImpl::unrefVisible(const EffectWindowVisibleRef *holder)
 {
-    m_windowItem->unrefVisible(reason);
+    m_windowItem->unrefVisible(holder->reason());
 }
 
 void EffectWindowImpl::addRepaint(const QRect &r)
 {
-    m_windowItem->scheduleRepaint(r);
+    m_windowItem->scheduleRepaint(QRegion(r));
 }
 
 void EffectWindowImpl::addRepaintFull()
@@ -1978,18 +2011,18 @@ EffectScreen *EffectWindowImpl::screen() const
 
 WINDOW_HELPER(double, opacity, opacity)
 WINDOW_HELPER(bool, hasAlpha, hasAlpha)
-WINDOW_HELPER(int, x, x)
-WINDOW_HELPER(int, y, y)
-WINDOW_HELPER(int, width, width)
-WINDOW_HELPER(int, height, height)
-WINDOW_HELPER(QPoint, pos, pos)
-WINDOW_HELPER(QSize, size, size)
-WINDOW_HELPER(QRect, geometry, frameGeometry)
-WINDOW_HELPER(QRect, frameGeometry, frameGeometry)
-WINDOW_HELPER(QRect, bufferGeometry, bufferGeometry)
-WINDOW_HELPER(QRect, clientGeometry, clientGeometry)
-WINDOW_HELPER(QRect, expandedGeometry, visibleGeometry)
-WINDOW_HELPER(QRect, rect, rect)
+WINDOW_HELPER(qreal, x, x)
+WINDOW_HELPER(qreal, y, y)
+WINDOW_HELPER(qreal, width, width)
+WINDOW_HELPER(qreal, height, height)
+WINDOW_HELPER(QPointF, pos, pos)
+WINDOW_HELPER(QSizeF, size, size)
+WINDOW_HELPER(QRectF, geometry, frameGeometry)
+WINDOW_HELPER(QRectF, frameGeometry, frameGeometry)
+WINDOW_HELPER(QRectF, bufferGeometry, bufferGeometry)
+WINDOW_HELPER(QRectF, clientGeometry, clientGeometry)
+WINDOW_HELPER(QRectF, expandedGeometry, visibleGeometry)
+WINDOW_HELPER(QRectF, rect, rect)
 WINDOW_HELPER(int, desktop, desktop)
 WINDOW_HELPER(bool, isDesktop, isDesktop)
 WINDOW_HELPER(bool, isDock, isDock)
@@ -2004,6 +2037,7 @@ WINDOW_HELPER(bool, isPopupMenu, isPopupMenu)
 WINDOW_HELPER(bool, isTooltip, isTooltip)
 WINDOW_HELPER(bool, isNotification, isNotification)
 WINDOW_HELPER(bool, isCriticalNotification, isCriticalNotification)
+WINDOW_HELPER(bool, isAppletPopup, isAppletPopup)
 WINDOW_HELPER(bool, isOnScreenDisplay, isOnScreenDisplay)
 WINDOW_HELPER(bool, isComboBox, isComboBox)
 WINDOW_HELPER(bool, isDNDIcon, isDNDIcon)
@@ -2047,7 +2081,7 @@ MANAGED_HELPER(bool, isMovable, isMovable, false)
 MANAGED_HELPER(bool, isMovableAcrossScreens, isMovableAcrossScreens, false)
 MANAGED_HELPER(bool, isUserMove, isInteractiveMove, false)
 MANAGED_HELPER(bool, isUserResize, isInteractiveResize, false)
-MANAGED_HELPER(QRect, iconGeometry, iconGeometry, QRect())
+MANAGED_HELPER(QRectF, iconGeometry, iconGeometry, QRectF())
 MANAGED_HELPER(bool, isSpecialWindow, isSpecialWindow, true)
 MANAGED_HELPER(bool, acceptsFocus, wantsInput, true) // We don't actually know...
 MANAGED_HELPER(QIcon, icon, icon, QIcon())
@@ -2068,9 +2102,9 @@ QString EffectWindowImpl::windowClass() const
     return m_window->resourceName() + QLatin1Char(' ') + m_window->resourceClass();
 }
 
-QRect EffectWindowImpl::contentsRect() const
+QRectF EffectWindowImpl::contentsRect() const
 {
-    return QRect(m_window->clientPos(), m_window->clientSize());
+    return QRectF(m_window->clientPos(), m_window->clientSize());
 }
 
 NET::WindowType EffectWindowImpl::windowType() const
@@ -2078,7 +2112,7 @@ NET::WindowType EffectWindowImpl::windowType() const
     return m_window->windowType();
 }
 
-QSize EffectWindowImpl::basicUnit() const
+QSizeF EffectWindowImpl::basicUnit() const
 {
     if (auto window = qobject_cast<X11Window *>(m_window)) {
         return window->basicUnit();
@@ -2097,7 +2131,7 @@ void EffectWindowImpl::setWindowItem(WindowItem *item)
     m_windowItem = item;
 }
 
-QRect EffectWindowImpl::decorationInnerRect() const
+QRectF EffectWindowImpl::decorationInnerRect() const
 {
     return m_window->rect() - m_window->frameMargins();
 }

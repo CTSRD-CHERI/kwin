@@ -198,6 +198,11 @@ QPoint Cursor::pos()
     return m_pos;
 }
 
+void Cursor::setPos(const QPointF &pos)
+{
+    setPos(pos.toPoint());
+}
+
 void Cursor::setPos(const QPoint &pos)
 {
     // first query the current pos to not warp to the already existing pos
@@ -243,7 +248,7 @@ xcb_cursor_t Cursor::x11Cursor(const QByteArray &name)
     }
 
     xcb_cursor_context_t *ctx;
-    if (xcb_cursor_context_new(kwinApp()->x11Connection(), kwinApp()->x11DefaultScreen(), &ctx) < 0) {
+    if (xcb_cursor_context_new(kwinApp()->x11Connection(), Xcb::defaultScreen(), &ctx) < 0) {
         return XCB_CURSOR_NONE;
     }
 

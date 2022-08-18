@@ -28,22 +28,19 @@ public:
     };
 
     EglDmabufBuffer(EGLImage image,
-                    const QVector<KWaylandServer::LinuxDmaBufV1Plane> &planes,
-                    quint32 format,
-                    const QSize &size,
+                    DmaBufAttributes &&attrs,
                     quint32 flags,
                     EglDmabuf *interfaceImpl);
 
-    EglDmabufBuffer(const QVector<KWaylandServer::LinuxDmaBufV1Plane> &planes,
-                    quint32 format,
-                    const QSize &size,
+    EglDmabufBuffer(const QVector<EGLImage> &images,
+                    DmaBufAttributes &&attrs,
                     quint32 flags,
                     EglDmabuf *interfaceImpl);
 
     ~EglDmabufBuffer() override;
 
     void setInterfaceImplementation(EglDmabuf *interfaceImpl);
-    void addImage(EGLImage image);
+    void setImages(const QVector<EGLImage> &images);
     void removeImages();
 
     QVector<EGLImage> images() const
@@ -65,10 +62,7 @@ public:
     explicit EglDmabuf(AbstractEglBackend *backend);
     ~EglDmabuf() override;
 
-    KWaylandServer::LinuxDmaBufV1ClientBuffer *importBuffer(const QVector<KWaylandServer::LinuxDmaBufV1Plane> &planes,
-                                                            quint32 format,
-                                                            const QSize &size,
-                                                            quint32 flags) override;
+    KWaylandServer::LinuxDmaBufV1ClientBuffer *importBuffer(DmaBufAttributes &&attrs, quint32 flags) override;
 
     QVector<KWaylandServer::LinuxDmaBufV1Feedback::Tranche> tranches() const
     {
@@ -76,14 +70,7 @@ public:
     }
 
 private:
-    EGLImage createImage(const QVector<KWaylandServer::LinuxDmaBufV1Plane> &planes,
-                         uint32_t format,
-                         const QSize &size);
-
-    KWaylandServer::LinuxDmaBufV1ClientBuffer *yuvImport(const QVector<KWaylandServer::LinuxDmaBufV1Plane> &planes,
-                                                         quint32 format,
-                                                         const QSize &size,
-                                                         quint32 flags);
+    KWaylandServer::LinuxDmaBufV1ClientBuffer *yuvImport(DmaBufAttributes &&attrs, quint32 flags);
 
     void setSupportedFormatsAndModifiers();
 

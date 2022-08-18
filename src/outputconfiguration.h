@@ -20,11 +20,10 @@ namespace KWin
 class KWIN_EXPORT OutputChangeSet
 {
 public:
+    std::shared_ptr<OutputMode> mode;
     bool enabled;
     QPoint pos;
     float scale;
-    QSize modeSize;
-    uint32_t refreshRate;
     Output::Transform transform;
     uint32_t overscan;
     Output::RgbRange rgbRange;
@@ -34,11 +33,11 @@ public:
 class KWIN_EXPORT OutputConfiguration
 {
 public:
-    QSharedPointer<OutputChangeSet> changeSet(Output *output);
-    QSharedPointer<OutputChangeSet> constChangeSet(Output *output) const;
+    std::shared_ptr<OutputChangeSet> changeSet(Output *output);
+    std::shared_ptr<OutputChangeSet> constChangeSet(Output *output) const;
 
 private:
-    QMap<Output *, QSharedPointer<OutputChangeSet>> m_properties;
+    QMap<Output *, std::shared_ptr<OutputChangeSet>> m_properties;
 };
 
 }

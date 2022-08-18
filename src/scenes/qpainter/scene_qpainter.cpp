@@ -9,16 +9,9 @@
 #include "scene_qpainter.h"
 #include "qpaintersurfacetexture.h"
 // KWin
-#include "composite.h"
-#include "cursor.h"
 #include "decorations/decoratedclient.h"
-#include "deleted.h"
 #include "effects.h"
-#include "main.h"
 #include "output.h"
-#include "platform.h"
-#include "renderloop.h"
-#include "screens.h"
 #include "surfaceitem.h"
 #include "window.h"
 #include "windowitem.h"
@@ -37,14 +30,13 @@ namespace KWin
 //****************************************
 // SceneQPainter
 //****************************************
-SceneQPainter *SceneQPainter::createScene(QPainterBackend *backend, QObject *parent)
+std::unique_ptr<SceneQPainter> SceneQPainter::createScene(QPainterBackend *backend)
 {
-    return new SceneQPainter(backend, parent);
+    return std::unique_ptr<SceneQPainter>(new SceneQPainter(backend));
 }
 
-SceneQPainter::SceneQPainter(QPainterBackend *backend, QObject *parent)
-    : Scene(parent)
-    , m_backend(backend)
+SceneQPainter::SceneQPainter(QPainterBackend *backend)
+    : m_backend(backend)
     , m_painter(new QPainter())
 {
 }
@@ -56,15 +48,6 @@ SceneQPainter::~SceneQPainter()
 bool SceneQPainter::initFailed() const
 {
     return false;
-}
-
-void SceneQPainter::paintGenericScreen(int mask, const ScreenPaintData &data)
-{
-    m_painter->save();
-    m_painter->translate(data.xTranslation(), data.yTranslation());
-    m_painter->scale(data.xScale(), data.yScale());
-    Scene::paintGenericScreen(mask, data);
-    m_painter->restore();
 }
 
 void SceneQPainter::paint(RenderTarget *target, const QRegion &region)
@@ -107,7 +90,7 @@ void SceneQPainter::render(Item *item, int mask, const QRegion &_region, const W
 {
     QRegion region = _region;
 
-    const QRect boundingRect = item->mapToGlobal(item->boundingRect());
+    const QRect boundingRect = item->mapToGlobal(item->boundingRect()).toAlignedRect();
     if (!(mask & (Scene::PAINT_WINDOW_TRANSFORMED | Scene::PAINT_SCREEN_TRANSFORMED))) {
         region &= boundingRect;
     }
@@ -198,7 +181,7 @@ void SceneQPainter::renderSurfaceItem(QPainter *painter, SurfaceItem *surfaceIte
 void SceneQPainter::renderDecorationItem(QPainter *painter, DecorationItem *decorationItem) const
 {
     const auto renderer = static_cast<const SceneQPainterDecorationRenderer *>(decorationItem->renderer());
-    QRect dtr, dlr, drr, dbr;
+    QRectF dtr, dlr, drr, dbr;
     decorationItem->window()->layoutDecorationRects(dlr, dtr, drr, dbr);
 
     painter->drawImage(dtr, renderer->image(SceneQPainterDecorationRenderer::DecorationPart::Top));
@@ -212,12 +195,12 @@ DecorationRenderer *SceneQPainter::createDecorationRenderer(Decoration::Decorate
     return new SceneQPainterDecorationRenderer(impl);
 }
 
-SurfaceTexture *SceneQPainter::createSurfaceTextureInternal(SurfacePixmapInternal *pixmap)
+std::unique_ptr<SurfaceTexture> SceneQPainter::createSurfaceTextureInternal(SurfacePixmapInternal *pixmap)
 {
     return m_backend->createSurfaceTextureInternal(pixmap);
 }
 
-SurfaceTexture *SceneQPainter::createSurfaceTextureWayland(SurfacePixmapWayland *pixmap)
+std::unique_ptr<SurfaceTexture> SceneQPainter::createSurfaceTextureWayland(SurfacePixmapWayland *pixmap)
 {
     return m_backend->createSurfaceTextureWayland(pixmap);
 }
@@ -294,13 +277,13 @@ void SceneQPainterDecorationRenderer::render(const QRegion &region)
 
 void SceneQPainterDecorationRenderer::resizeImages()
 {
-    QRect left, top, right, bottom;
+    QRectF left, top, right, bottom;
     client()->window()->layoutDecorationRects(left, top, right, bottom);
 
-    auto checkAndCreate = [this](int index, const QSize &size) {
+    auto checkAndCreate = [this](int index, const QSizeF &size) {
         auto dpr = effectiveDevicePixelRatio();
         if (m_images[index].size() != size * dpr || m_images[index].devicePixelRatio() != dpr) {
-            m_images[index] = QImage(size * dpr, QImage::Format_ARGB32_Premultiplied);
+            m_images[index] = QImage(size.toSize() * dpr, QImage::Format_ARGB32_Premultiplied);
             m_images[index].setDevicePixelRatio(dpr);
             m_images[index].fill(Qt::transparent);
         }

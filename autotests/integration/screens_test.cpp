@@ -56,11 +56,10 @@ void ScreensTest::initTestCase()
 
     kwinApp()->start();
     QVERIFY(applicationStartedSpy.wait());
-    const auto outputs = kwinApp()->platform()->enabledOutputs();
+    const auto outputs = workspace()->outputs();
     QCOMPARE(outputs.count(), 2);
     QCOMPARE(outputs[0]->geometry(), QRect(0, 0, 1280, 1024));
     QCOMPARE(outputs[1]->geometry(), QRect(1280, 0, 1280, 1024));
-    Test::initWaylandWorkspace();
 }
 
 void ScreensTest::init()
@@ -108,7 +107,7 @@ void ScreensTest::testSize_data()
 
 void ScreensTest::testSize()
 {
-    QSignalSpy sizeChangedSpy(screens(), &Screens::sizeChanged);
+    QSignalSpy sizeChangedSpy(workspace()->screens(), &Screens::sizeChanged);
     QVERIFY(sizeChangedSpy.isValid());
 
     QFETCH(QVector<QRect>, geometries);
@@ -116,25 +115,25 @@ void ScreensTest::testSize()
                               Q_ARG(int, geometries.count()), Q_ARG(QVector<QRect>, geometries));
 
     QVERIFY(sizeChangedSpy.wait());
-    QTEST(screens()->size(), "expectedSize");
+    QTEST(workspace()->screens()->size(), "expectedSize");
 }
 
 void ScreensTest::testCount()
 {
-    QSignalSpy countChangedSpy(screens(), &Screens::countChanged);
+    QSignalSpy countChangedSpy(workspace()->screens(), &Screens::countChanged);
     QVERIFY(countChangedSpy.isValid());
 
     // the test environments has two outputs
-    QCOMPARE(screens()->count(), 2);
+    QCOMPARE(workspace()->screens()->count(), 2);
 
     // change to one screen
     QMetaObject::invokeMethod(kwinApp()->platform(), "setVirtualOutputs", Qt::QueuedConnection, Q_ARG(int, 1));
     QVERIFY(countChangedSpy.wait());
     QCOMPARE(countChangedSpy.count(), 1);
-    QCOMPARE(screens()->count(), 1);
+    QCOMPARE(workspace()->screens()->count(), 1);
 
     // setting the same geometries shouldn't emit the signal, but we should get a changed signal
-    QSignalSpy changedSpy(screens(), &Screens::changed);
+    QSignalSpy changedSpy(workspace()->screens(), &Screens::changed);
     QVERIFY(changedSpy.isValid());
     QMetaObject::invokeMethod(kwinApp()->platform(), "setVirtualOutputs", Qt::QueuedConnection, Q_ARG(int, 1));
     QVERIFY(changedSpy.wait());
@@ -152,7 +151,7 @@ void ScreensTest::testCurrent_data()
 void ScreensTest::testCurrent()
 {
     QFETCH(int, currentId);
-    Output *output = kwinApp()->platform()->findOutput(currentId);
+    Output *output = workspace()->outputs().at(currentId);
 
     // Disable "active screen follows mouse"
     auto group = kwinApp()->config()->group("Windows");
@@ -179,7 +178,7 @@ void ScreensTest::testCurrentWithFollowsMouse_data()
 
 void ScreensTest::testCurrentWithFollowsMouse()
 {
-    QSignalSpy changedSpy(screens(), &Screens::changed);
+    QSignalSpy changedSpy(workspace()->screens(), &Screens::changed);
     QVERIFY(changedSpy.isValid());
 
     // Enable "active screen follows mouse"
@@ -197,7 +196,7 @@ void ScreensTest::testCurrentWithFollowsMouse()
     KWin::Cursors::self()->mouse()->setPos(cursorPos);
 
     QFETCH(int, expectedId);
-    Output *expected = kwinApp()->platform()->findOutput(expectedId);
+    Output *expected = workspace()->outputs().at(expectedId);
     QCOMPARE(workspace()->activeOutput(), expected);
 }
 
@@ -216,7 +215,7 @@ void ScreensTest::testCurrentPoint_data()
 
 void ScreensTest::testCurrentPoint()
 {
-    QSignalSpy changedSpy(screens(), &KWin::Screens::changed);
+    QSignalSpy changedSpy(workspace()->screens(), &KWin::Screens::changed);
     QVERIFY(changedSpy.isValid());
 
     QFETCH(QVector<QRect>, geometries);
@@ -234,7 +233,7 @@ void ScreensTest::testCurrentPoint()
     workspace()->setActiveOutput(cursorPos);
 
     QFETCH(int, expectedId);
-    Output *expected = kwinApp()->platform()->findOutput(expectedId);
+    Output *expected = workspace()->outputs().at(expectedId);
     QCOMPARE(workspace()->activeOutput(), expected);
 }
 

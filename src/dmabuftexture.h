@@ -5,42 +5,31 @@
 */
 
 #pragma once
+
 #include "kwin_export.h"
 
-#include <QScopedPointer>
-#include <QSharedPointer>
+#include "dmabufattributes.h"
+
+#include <memory>
 
 namespace KWin
 {
 class GLFramebuffer;
 class GLTexture;
 
-struct DmaBufAttributes
-{
-    int planeCount;
-    int width;
-    int height;
-    int format;
-
-    int fd[4];
-    int offset[4];
-    int pitch[4];
-    uint64_t modifier[4];
-};
-
 class KWIN_EXPORT DmaBufTexture
 {
 public:
-    explicit DmaBufTexture(QSharedPointer<GLTexture> texture, const DmaBufAttributes &attributes);
+    explicit DmaBufTexture(std::shared_ptr<GLTexture> texture, DmaBufAttributes &&attributes);
     virtual ~DmaBufTexture();
 
-    DmaBufAttributes attributes() const;
+    const DmaBufAttributes &attributes() const;
     GLTexture *texture() const;
     GLFramebuffer *framebuffer() const;
 
 protected:
-    QSharedPointer<GLTexture> m_texture;
-    QScopedPointer<GLFramebuffer> m_framebuffer;
+    std::shared_ptr<GLTexture> m_texture;
+    std::unique_ptr<GLFramebuffer> m_framebuffer;
     DmaBufAttributes m_attributes;
 };
 

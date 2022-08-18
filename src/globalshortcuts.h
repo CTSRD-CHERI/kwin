@@ -12,7 +12,8 @@
 #include <kwinglobals.h>
 // Qt
 #include <QKeySequence>
-#include <QSharedPointer>
+
+#include <memory>
 
 class QAction;
 class KGlobalAccelD;
@@ -73,6 +74,7 @@ public:
     void registerRealtimeTouchpadPinch(QAction *onUp, std::function<void(qreal)> progressCallback, PinchDirection direction, uint fingerCount = 4);
 
     void registerTouchscreenSwipe(QAction *action, std::function<void(qreal)> progressCallback, SwipeDirection direction, uint fingerCount);
+    void forceRegisterTouchscreenSwipe(QAction *action, std::function<void(qreal)> progressCallback, SwipeDirection direction, uint fingerCount);
 
     /**
      * @brief Processes a key event to decide whether a shortcut needs to be triggered.
@@ -122,10 +124,10 @@ private:
 
     QVector<GlobalShortcut> m_shortcuts;
 
-    KGlobalAccelD *m_kglobalAccel = nullptr;
+    std::unique_ptr<KGlobalAccelD> m_kglobalAccel;
     KGlobalAccelInterface *m_kglobalAccelInterface = nullptr;
-    QScopedPointer<GestureRecognizer> m_touchpadGestureRecognizer;
-    QScopedPointer<GestureRecognizer> m_touchscreenGestureRecognizer;
+    std::unique_ptr<GestureRecognizer> m_touchpadGestureRecognizer;
+    std::unique_ptr<GestureRecognizer> m_touchscreenGestureRecognizer;
 };
 
 struct KeyboardShortcut
@@ -216,8 +218,8 @@ public:
     PinchGesture *pinchGesture() const;
 
 private:
-    QSharedPointer<SwipeGesture> m_swipeGesture;
-    QSharedPointer<PinchGesture> m_pinchGesture;
+    std::shared_ptr<SwipeGesture> m_swipeGesture;
+    std::shared_ptr<PinchGesture> m_pinchGesture;
     Shortcut m_shortcut = {};
     QAction *m_action = nullptr;
 };

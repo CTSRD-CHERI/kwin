@@ -8,12 +8,13 @@
     SPDX-License-Identifier: GPL-2.0-or-later
 */
 #include "drm_buffer_gbm.h"
-#include "gbm_surface.h"
+#include "drm_gbm_surface.h"
 
 #include "config-kwin.h"
+#include "drm_backend.h"
 #include "drm_gpu.h"
+#include "drm_logging.h"
 #include "kwineglutils_p.h"
-#include "logging.h"
 #include "wayland/clientbuffer.h"
 #include "wayland/linuxdmabufv1clientbuffer.h"
 
@@ -132,12 +133,9 @@ void GbmBuffer::createFds()
 {
 #if HAVE_GBM_BO_GET_FD_FOR_PLANE
     for (uint32_t i = 0; i < m_planeCount; i++) {
-        m_fds[i] = gbm_bo_get_fd_for_plane(m_bo, i);
-        if (m_fds[i] == -1) {
-            for (uint32_t i2 = 0; i2 < i; i2++) {
-                close(m_fds[i2]);
-                m_fds[i2] = -1;
-            }
+        m_fds[i] = FileDescriptor(gbm_bo_get_fd_for_plane(m_bo, i));
+        if (!m_fds[i].isValid()) {
+            m_fds = {};
             return;
         }
     }
@@ -146,35 +144,34 @@ void GbmBuffer::createFds()
     if (m_planeCount > 1) {
         return;
     }
-    m_fds[0] = gbm_bo_get_fd(m_bo);
+    m_fds[0] = FileDescriptor(gbm_bo_get_fd(m_bo));
 #endif
 }
 
 std::shared_ptr<GbmBuffer> GbmBuffer::importBuffer(DrmGpu *gpu, KWaylandServer::LinuxDmaBufV1ClientBuffer *clientBuffer)
 {
-    const auto planes = clientBuffer->planes();
+    const auto &attrs = clientBuffer->attributes();
     gbm_bo *bo;
-    if (planes.first().modifier != DRM_FORMAT_MOD_INVALID || planes.first().offset > 0 || planes.count() > 1) {
+    if (attrs.modifier != DRM_FORMAT_MOD_INVALID || attrs.offset[0] > 0 || attrs.planeCount > 1) {
         gbm_import_fd_modifier_data data = {};
-        data.format = clientBuffer->format();
-        data.width = (uint32_t)clientBuffer->size().width();
-        data.height = (uint32_t)clientBuffer->size().height();
-        data.num_fds = planes.count();
-        data.modifier = planes.first().modifier;
-        for (int i = 0; i < planes.count(); i++) {
-            data.fds[i] = planes[i].fd;
-            data.offsets[i] = planes[i].offset;
-            data.strides[i] = planes[i].stride;
+        data.format = attrs.format;
+        data.width = static_cast<uint32_t>(attrs.width);
+        data.height = static_cast<uint32_t>(attrs.height);
+        data.num_fds = attrs.planeCount;
+        data.modifier = attrs.modifier;
+        for (int i = 0; i < attrs.planeCount; i++) {
+            data.fds[i] = attrs.fd[i].get();
+            data.offsets[i] = attrs.offset[i];
+            data.strides[i] = attrs.pitch[i];
         }
         bo = gbm_bo_import(gpu->gbmDevice(), GBM_BO_IMPORT_FD_MODIFIER, &data, GBM_BO_USE_SCANOUT);
     } else {
-        const auto &plane = planes.first();
         gbm_import_fd_data data = {};
-        data.fd = plane.fd;
-        data.width = (uint32_t)clientBuffer->size().width();
-        data.height = (uint32_t)clientBuffer->size().height();
-        data.stride = plane.stride;
-        data.format = clientBuffer->format();
+        data.fd = attrs.fd[0].get();
+        data.width = static_cast<uint32_t>(attrs.width);
+        data.height = static_cast<uint32_t>(attrs.height);
+        data.stride = attrs.pitch[0];
+        data.format = attrs.format;
         bo = gbm_bo_import(gpu->gbmDevice(), GBM_BO_IMPORT_FD, &data, GBM_BO_USE_SCANOUT);
     }
     if (bo) {
@@ -186,8 +183,8 @@ std::shared_ptr<GbmBuffer> GbmBuffer::importBuffer(DrmGpu *gpu, KWaylandServer::
 
 std::shared_ptr<GbmBuffer> GbmBuffer::importBuffer(DrmGpu *gpu, GbmBuffer *buffer, uint32_t flags)
 {
-    const auto fds = buffer->fds();
-    if (fds[0] == -1) {
+    const auto &fds = buffer->fds();
+    if (!fds[0].isValid()) {
         return nullptr;
     }
     const auto strides = buffer->strides();
@@ -203,7 +200,7 @@ std::shared_ptr<GbmBuffer> GbmBuffer::importBuffer(DrmGpu *gpu, GbmBuffer *buffe
         .modifier = buffer->modifier(),
     };
     for (uint32_t i = 0; i < data.num_fds; i++) {
-        data.fds[i] = fds[i];
+        data.fds[i] = fds[i].get();
         data.strides[i] = strides[i];
         data.offsets[i] = offsets[i];
     }

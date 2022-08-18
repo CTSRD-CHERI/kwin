@@ -115,8 +115,8 @@ bool grabXKeyboard(xcb_window_t w)
     }
     const xcb_grab_keyboard_cookie_t c = xcb_grab_keyboard_unchecked(connection(), false, w, xTime(),
                                                                      XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC);
-    ScopedCPointer<xcb_grab_keyboard_reply_t> grab(xcb_grab_keyboard_reply(connection(), c, nullptr));
-    if (grab.isNull()) {
+    UniqueCPtr<xcb_grab_keyboard_reply_t> grab(xcb_grab_keyboard_reply(connection(), c, nullptr));
+    if (!grab) {
         qCDebug(KWIN_CORE) << "Failed to grab X Keyboard: grab null";
         return false;
     }
@@ -201,9 +201,9 @@ Qt::KeyboardModifiers x11ToQtKeyboardModifiers(int state)
     return ret;
 }
 
-QPoint popupOffset(const QRect &anchorRect, const Qt::Edges anchorEdge, const Qt::Edges gravity, const QSize popupSize)
+QPointF popupOffset(const QRectF &anchorRect, const Qt::Edges anchorEdge, const Qt::Edges gravity, const QSizeF popupSize)
 {
-    QPoint anchorPoint;
+    QPointF anchorPoint;
     switch (anchorEdge & (Qt::LeftEdge | Qt::RightEdge)) {
     case Qt::LeftEdge:
         anchorPoint.setX(anchorRect.x());
@@ -228,7 +228,7 @@ QPoint popupOffset(const QRect &anchorRect, const Qt::Edges anchorEdge, const Qt
     // calculate where the top left point of the popup will end up with the applied gravity
     // gravity indicates direction. i.e if gravitating towards the top the popup's bottom edge
     // will next to the anchor point
-    QPoint popupPosAdjust;
+    QPointF popupPosAdjust;
     switch (gravity & (Qt::LeftEdge | Qt::RightEdge)) {
     case Qt::LeftEdge:
         popupPosAdjust.setX(-popupSize.width());

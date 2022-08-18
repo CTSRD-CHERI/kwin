@@ -60,6 +60,7 @@ target_sources(kwin PRIVATE
     globalshortcuts.cpp
     group.cpp
     idle_inhibition.cpp
+    idledetector.cpp
     input.cpp
     input_event.cpp
     input_event_spy.cpp
@@ -137,7 +138,6 @@ target_sources(kwin PRIVATE
     tabletmodemanager.cpp
     hide_cursor_spy.cpp
     touch_input.cpp
-    udev.cpp
     unmanaged.cpp
     useractions.cpp
     virtualdesktops.cpp
@@ -162,7 +162,6 @@ target_sources(kwin PRIVATE
     xdgshellwindow.cpp
     xkb.cpp
     xwaylandwindow.cpp
-    xwayland/xwayland_interface.cpp
 )
 
 target_link_libraries(kwin
@@ -199,6 +198,7 @@ target_link_libraries(kwin
     XCB::SYNC
     XCB::XCB
     XCB::XFIXES
+    XCB::XINERAMA
 
     UDev::UDev
     XKB::XKB
@@ -210,7 +210,7 @@ target_link_libraries(kwin
     lcms2::lcms2
 )
 if (QT_MAJOR_VERSION EQUAL "5")
-    target_link_libraries(kwin Qt5::XkbCommonSupportPrivate)
+    target_link_libraries(kwin Qt5::X11Extras Qt5::XkbCommonSupportPrivate)
 endif()
 
 if (KWIN_BUILD_NOTIFICATIONS)
@@ -286,12 +286,10 @@ generate_export_header(kwin EXPORT_FILE_NAME kwin_export.h)
 
 add_executable(kwin_x11 main_x11.cpp)
 target_link_libraries(kwin_x11
+    KWinX11Platform
     kwin
     KF5::Crash
 )
-if (QT_MAJOR_VERSION EQUAL "5")
-    target_link_libraries(kwin_x11 Qt::X11Extras)
-endif()
 kcoreaddons_target_static_plugins(kwin_x11 "kwin/effects/plugins")
 
 install(TARGETS kwin ${KDE_INSTALL_TARGETS_DEFAULT_ARGS} LIBRARY NAMELINK_SKIP)
@@ -305,9 +303,6 @@ target_link_libraries(kwin_wayland
     KWinXwaylandServerModule
 )
 kcoreaddons_target_static_plugins(kwin_wayland "kwin/effects/plugins")
-if (HAVE_LIBCAP)
-    target_link_libraries(kwin_wayland ${Libcap_LIBRARIES})
-endif()
 
 install(TARGETS kwin_wayland ${KDE_INSTALL_TARGETS_DEFAULT_ARGS})
 if (HAVE_LIBCAP)

@@ -49,8 +49,7 @@ public:
         const bool hardwareClipping;
     };
 
-    class EffectFrame;
-    explicit SceneOpenGL(OpenGLBackend *backend, QObject *parent = nullptr);
+    explicit SceneOpenGL(OpenGLBackend *backend);
     ~SceneOpenGL() override;
     bool initFailed() const override;
     void paint(RenderTarget *renderTarget, const QRegion &region) override;
@@ -60,9 +59,9 @@ public:
     bool supportsNativeFence() const override;
     DecorationRenderer *createDecorationRenderer(Decoration::DecoratedClientImpl *impl) override;
     bool animationsSupported() const override;
-    SurfaceTexture *createSurfaceTextureInternal(SurfacePixmapInternal *pixmap) override;
-    SurfaceTexture *createSurfaceTextureX11(SurfacePixmapX11 *pixmap) override;
-    SurfaceTexture *createSurfaceTextureWayland(SurfacePixmapWayland *pixmap) override;
+    std::unique_ptr<SurfaceTexture> createSurfaceTextureInternal(SurfacePixmapInternal *pixmap) override;
+    std::unique_ptr<SurfaceTexture> createSurfaceTextureX11(SurfacePixmapX11 *pixmap) override;
+    std::unique_ptr<SurfaceTexture> createSurfaceTextureWayland(SurfacePixmapWayland *pixmap) override;
     void render(Item *item, int mask, const QRegion &region, const WindowPaintData &data) override;
 
     OpenGLBackend *backend() const
@@ -71,34 +70,24 @@ public:
     }
 
     QVector<QByteArray> openGLPlatformInterfaceExtensions() const override;
-    QSharedPointer<GLTexture> textureForOutput(Output *output) const override;
+    std::shared_ptr<GLTexture> textureForOutput(Output *output) const override;
 
-    QMatrix4x4 screenProjectionMatrix() const override
-    {
-        return m_screenProjectionMatrix;
-    }
-
-    static SceneOpenGL *createScene(OpenGLBackend *backend, QObject *parent);
+    static std::unique_ptr<SceneOpenGL> createScene(OpenGLBackend *backend);
     static bool supported(OpenGLBackend *backend);
 
 protected:
     void paintBackground(const QRegion &region) override;
-    QMatrix4x4 transformation(int mask, const ScreenPaintData &data) const;
     void paintOffscreenQuickView(OffscreenQuickView *w) override;
-
-    void paintSimpleScreen(int mask, const QRegion &region) override;
-    void paintGenericScreen(int mask, const ScreenPaintData &data) override;
 
 private:
     void doPaintBackground(const QVector<float> &vertices);
-    QMatrix4x4 modelViewProjectionMatrix(int mask, const WindowPaintData &data) const;
+    QMatrix4x4 modelViewProjectionMatrix(const WindowPaintData &data) const;
     QVector4D modulate(float opacity, float brightness) const;
     void setBlendEnabled(bool enabled);
     void createRenderNode(Item *item, RenderContext *context);
 
     bool init_ok = true;
     OpenGLBackend *m_backend;
-    QMatrix4x4 m_screenProjectionMatrix;
     GLuint vao = 0;
     bool m_blendingEnabled = false;
 };
@@ -118,14 +107,14 @@ public:
 
     GLTexture *shadowTexture()
     {
-        return m_texture.data();
+        return m_texture.get();
     }
 
 protected:
     bool prepareBackend() override;
 
 private:
-    QSharedPointer<GLTexture> m_texture;
+    std::shared_ptr<GLTexture> m_texture;
 };
 
 class SceneOpenGLDecorationRenderer : public DecorationRenderer
@@ -146,18 +135,19 @@ public:
 
     GLTexture *texture()
     {
-        return m_texture.data();
+        return m_texture.get();
     }
     GLTexture *texture() const
     {
-        return m_texture.data();
+        return m_texture.get();
     }
 
 private:
     void renderPart(const QRect &rect, const QRect &partRect, const QPoint &textureOffset, qreal devicePixelRatio, bool rotated = false);
     static const QMargins texturePadForPart(const QRect &rect, const QRect &partRect);
     void resizeTexture();
-    QScopedPointer<GLTexture> m_texture;
+    int toNativeSize(int size) const;
+    std::unique_ptr<GLTexture> m_texture;
 };
 
 } // namespace

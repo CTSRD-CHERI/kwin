@@ -36,11 +36,11 @@ public:
     QRegion opaque() const override;
 
 private Q_SLOTS:
-    void handleBufferGeometryChanged(Window *window, const QRect &old);
+    void handleBufferGeometryChanged(Window *window, const QRectF &old);
     void handleGeometryShapeChanged();
 
 protected:
-    SurfacePixmap *createPixmap() override;
+    std::unique_ptr<SurfacePixmap> createPixmap() override;
 
 private:
     xcb_damage_damage_t m_damageHandle = XCB_NONE;

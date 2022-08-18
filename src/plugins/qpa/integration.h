@@ -46,6 +46,7 @@ public:
     QStringList themeNames() const override;
     QPlatformTheme *createPlatformTheme(const QString &name) const override;
     QPlatformOpenGLContext *createPlatformOpenGLContext(QOpenGLContext *context) const override;
+    QPlatformNativeInterface *nativeInterface() const override;
     QPlatformServices *services() const override;
     void initialize() override;
 
@@ -54,14 +55,14 @@ public:
 private Q_SLOTS:
     void handleOutputEnabled(Output *output);
     void handleOutputDisabled(Output *output);
-    void handlePlatformCreated();
+    void handleWorkspaceCreated();
 
 private:
-    QScopedPointer<QPlatformFontDatabase> m_fontDb;
-    QPlatformNativeInterface *m_nativeInterface;
+    std::unique_ptr<QPlatformFontDatabase> m_fontDb;
+    std::unique_ptr<QPlatformNativeInterface> m_nativeInterface;
     QPlatformPlaceholderScreen *m_dummyScreen = nullptr;
     QHash<Output *, Screen *> m_screens;
-    QScopedPointer<QGenericUnixServices> m_services;
+    std::unique_ptr<QGenericUnixServices> m_services;
 };
 
 }

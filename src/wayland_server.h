@@ -42,12 +42,12 @@ class PrimaryOutputV1Interface;
 class OutputManagementV2Interface;
 class XdgForeignV2Interface;
 class XdgOutputManagerV1Interface;
-class KeyStateInterface;
 class LinuxDmaBufV1ClientBufferIntegration;
 class LinuxDmaBufV1ClientBuffer;
 class TabletManagerV2Interface;
 class KeyboardShortcutsInhibitManagerV1Interface;
 class XdgDecorationManagerV1Interface;
+class PrimarySelectionDeviceManagerV1Interface;
 }
 
 namespace KWin
@@ -55,6 +55,7 @@ namespace KWin
 
 class Window;
 class Output;
+class XdgActivationV1Integration;
 class XdgPopupWindow;
 class XdgSurfaceWindow;
 class XdgToplevelWindow;
@@ -178,7 +179,6 @@ public:
      */
     bool hasGlobalShortcutSupport() const;
 
-    void initPlatform();
     void initWorkspace();
 
     KWaylandServer::ClientConnection *xWaylandConnection() const;
@@ -208,9 +208,6 @@ public:
      */
     SocketPairConnection createConnection();
 
-    void simulateUserActivity();
-    void updateKeyState(KWin::LEDs leds);
-
     QSet<KWaylandServer::LinuxDmaBufV1ClientBuffer *> linuxDmabufBuffers() const
     {
         return m_linuxDmabufBuffers;
@@ -223,6 +220,7 @@ public:
     {
         m_linuxDmabufBuffers.remove(buffer);
     }
+    void setEnablePrimarySelection(bool enable);
 
     Output *findOutput(KWaylandServer::OutputInterface *output) const;
 
@@ -231,6 +229,11 @@ public:
      * For a full list, use display()->socketNames()
      */
     QString socketName() const;
+
+    XdgActivationV1Integration *xdgActivationIntegration() const
+    {
+        return m_xdgActivationIntegration;
+    }
 
 Q_SIGNALS:
     void windowAdded(KWin::Window *);
@@ -285,8 +288,9 @@ private:
     QPointer<KWaylandServer::ClientConnection> m_inputMethodServerConnection;
     KWaylandServer::ClientConnection *m_screenLockerClientConnection = nullptr;
     KWaylandServer::XdgForeignV2Interface *m_XdgForeign = nullptr;
-    KWaylandServer::KeyStateInterface *m_keyState = nullptr;
     KWaylandServer::PrimaryOutputV1Interface *m_primary = nullptr;
+    XdgActivationV1Integration *m_xdgActivationIntegration = nullptr;
+    KWaylandServer::PrimarySelectionDeviceManagerV1Interface *m_primarySelectionDeviceManager = nullptr;
     QList<Window *> m_windows;
     InitializationFlags m_initFlags;
     QHash<Output *, WaylandOutput *> m_waylandOutputs;

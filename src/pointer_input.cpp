@@ -88,7 +88,7 @@ static Qt::MouseButton buttonToQtMouseButton(uint32_t button)
 
 static bool screenContainsPos(const QPointF &pos)
 {
-    const auto outputs = kwinApp()->platform()->enabledOutputs();
+    const auto outputs = workspace()->outputs();
     for (const Output *output : outputs) {
         if (output->geometry().contains(pos.toPoint())) {
             return true;
@@ -142,7 +142,7 @@ void PointerInputRedirection::init()
     });
     Q_EMIT m_cursor->changed();
 
-    connect(screens(), &Screens::changed, this, &PointerInputRedirection::updateAfterScreenChange);
+    connect(workspace()->screens(), &Screens::changed, this, &PointerInputRedirection::updateAfterScreenChange);
 #if KWIN_BUILD_SCREENLOCKER
     if (waylandServer()->hasScreenLockerIntegration()) {
         connect(ScreenLocker::KSldApp::self(), &ScreenLocker::KSldApp::lockStateChanged, this, [this]() {
@@ -175,7 +175,7 @@ void PointerInputRedirection::init()
     connect(workspace(), &Workspace::windowAdded, this, setupMoveResizeConnection);
 
     // warp the cursor to center of screen containing the workspace center
-    if (const Output *output = kwinApp()->platform()->outputAt(workspace()->geometry().center())) {
+    if (const Output *output = workspace()->outputAt(workspace()->geometry().center())) {
         warp(output->geometry().center());
     }
     updateAfterScreenChange();
@@ -534,7 +534,7 @@ void PointerInputRedirection::cleanupDecoration(Decoration::DecoratedClientImpl 
     auto pos = m_pos - now->window()->pos();
     QHoverEvent event(QEvent::HoverEnter, pos, pos);
     QCoreApplication::instance()->sendEvent(now->decoration(), &event);
-    now->window()->processDecorationMove(pos.toPoint(), m_pos.toPoint());
+    now->window()->processDecorationMove(pos, m_pos);
 
     m_decorationGeometryConnection = connect(
         decoration()->window(), &Window::frameGeometryChanged, this, [this]() {
@@ -565,7 +565,7 @@ void PointerInputRedirection::focusUpdate(Window *focusOld, Window *focusNow)
     m_focusGeometryConnection = QMetaObject::Connection();
 
     if (focusNow && focusNow->isClient()) {
-        focusNow->pointerEnterEvent(m_pos.toPoint());
+        focusNow->pointerEnterEvent(m_pos);
     }
 
     auto seat = waylandServer()->seat();
@@ -644,7 +644,7 @@ static QRegion getConstraintRegion(Window *window, T *constraint)
 {
     const QRegion windowShape = window->inputShape();
     const QRegion intersected = constraint->region().isEmpty() ? windowShape : windowShape.intersected(constraint->region());
-    return intersected.translated(window->pos() + window->clientPos());
+    return intersected.translated(QPointF(window->pos() + window->clientPos()).toPoint());
 }
 
 void PointerInputRedirection::setEnableConstraints(bool set)
@@ -800,7 +800,7 @@ void PointerInputRedirection::updatePosition(const QPointF &pos)
         const QRectF unitedScreensGeometry = workspace()->geometry();
         p = confineToBoundingBox(p, unitedScreensGeometry);
         if (!screenContainsPos(p)) {
-            const Output *currentOutput = kwinApp()->platform()->outputAt(m_pos.toPoint());
+            const Output *currentOutput = workspace()->outputAt(m_pos);
             p = confineToBoundingBox(p, currentOutput->geometry());
         }
     }
@@ -884,14 +884,14 @@ void PointerInputRedirection::updateAfterScreenChange()
         return;
     }
     // pointer no longer on a screen, reposition to closes screen
-    const Output *output = kwinApp()->platform()->outputAt(m_pos.toPoint());
+    const Output *output = workspace()->outputAt(m_pos);
     // TODO: better way to get timestamps
     processMotionAbsolute(output->geometry().center(), waylandServer()->seat()->timestamp());
 }
 
 QPointF PointerInputRedirection::position() const
 {
-    return m_pos.toPoint();
+    return m_pos;
 }
 
 void PointerInputRedirection::setEffectsOverrideCursor(Qt::CursorShape shape)
@@ -1248,7 +1248,7 @@ WaylandCursorImage::WaylandCursorImage(QObject *parent)
     Cursor *pointerCursor = Cursors::self()->mouse();
 
     connect(pointerCursor, &Cursor::themeChanged, this, &WaylandCursorImage::invalidateCursorTheme);
-    connect(screens(), &Screens::maxScaleChanged, this, &WaylandCursorImage::invalidateCursorTheme);
+    connect(workspace()->screens(), &Screens::maxScaleChanged, this, &WaylandCursorImage::invalidateCursorTheme);
 }
 
 bool WaylandCursorImage::ensureCursorTheme()
@@ -1258,7 +1258,7 @@ bool WaylandCursorImage::ensureCursorTheme()
     }
 
     const Cursor *pointerCursor = Cursors::self()->mouse();
-    const qreal targetDevicePixelRatio = screens()->maxScale();
+    const qreal targetDevicePixelRatio = workspace()->screens()->maxScale();
 
     m_cursorTheme = KXcursorTheme(pointerCursor->themeName(), pointerCursor->themeSize(), targetDevicePixelRatio);
     if (!m_cursorTheme.isEmpty()) {

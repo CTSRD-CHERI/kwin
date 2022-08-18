@@ -11,7 +11,6 @@
 #include "effects.h"
 #include "renderbackend.h"
 #include "scene.h"
-#include "screens.h"
 #include "scripting_logging.h"
 #include "virtualdesktops.h"
 #include "window.h"
@@ -34,13 +33,13 @@ public:
     explicit ThumbnailTextureProvider(QQuickWindow *window);
 
     QSGTexture *texture() const override;
-    void setTexture(const QSharedPointer<GLTexture> &nativeTexture);
+    void setTexture(const std::shared_ptr<GLTexture> &nativeTexture);
     void setTexture(QSGTexture *texture);
 
 private:
     QQuickWindow *m_window;
-    QSharedPointer<GLTexture> m_nativeTexture;
-    QScopedPointer<QSGTexture> m_texture;
+    std::shared_ptr<GLTexture> m_nativeTexture;
+    std::unique_ptr<QSGTexture> m_texture;
 };
 
 ThumbnailTextureProvider::ThumbnailTextureProvider(QQuickWindow *window)
@@ -50,10 +49,10 @@ ThumbnailTextureProvider::ThumbnailTextureProvider(QQuickWindow *window)
 
 QSGTexture *ThumbnailTextureProvider::texture() const
 {
-    return m_texture.data();
+    return m_texture.get();
 }
 
-void ThumbnailTextureProvider::setTexture(const QSharedPointer<GLTexture> &nativeTexture)
+void ThumbnailTextureProvider::setTexture(const std::shared_ptr<GLTexture> &nativeTexture)
 {
     if (m_nativeTexture != nativeTexture) {
         const GLuint textureId = nativeTexture->texture();
@@ -98,7 +97,7 @@ public:
     }
 
 private:
-    QScopedPointer<ThumbnailTextureProvider> m_provider;
+    std::unique_ptr<ThumbnailTextureProvider> m_provider;
 };
 
 WindowThumbnailItem::WindowThumbnailItem(QQuickItem *parent)
@@ -166,7 +165,7 @@ void WindowThumbnailItem::updateFrameRenderingConnection()
     }
 
     if (Compositor::self()->backend()->compositingType() == OpenGLCompositing) {
-        m_frameRenderingConnection = connect(Compositor::self()->scene(), &Scene::frameRendered, this, &WindowThumbnailItem::updateOffscreenTexture);
+        m_frameRenderingConnection = connect(Compositor::self()->scene(), &Scene::preFrameRender, this, &WindowThumbnailItem::updateOffscreenTexture);
     }
 }
 
@@ -343,7 +342,7 @@ void WindowThumbnailItem::updateImplicitSize()
 {
     QSize frameSize;
     if (m_client) {
-        frameSize = m_client->frameGeometry().size();
+        frameSize = m_client->frameGeometry().toAlignedRect().size();
     }
     setImplicitSize(frameSize.width(), frameSize.height());
 }
@@ -374,8 +373,8 @@ QRectF WindowThumbnailItem::paintedRect() const
         return centeredSize(boundingRect(), iconSize);
     }
 
-    const QRect visibleGeometry = m_client->visibleGeometry();
-    const QRect frameGeometry = m_client->frameGeometry();
+    const QRectF visibleGeometry = m_client->visibleGeometry();
+    const QRectF frameGeometry = m_client->frameGeometry();
     const QSizeF scaled = QSizeF(frameGeometry.size()).scaled(boundingRect().size(), Qt::KeepAspectRatio);
 
     const qreal xScale = scaled.width() / frameGeometry.width();
@@ -405,8 +404,8 @@ void WindowThumbnailItem::updateOffscreenTexture()
     }
     Q_ASSERT(window());
 
-    const QRect geometry = m_client->visibleGeometry();
-    QSize textureSize = geometry.size();
+    const QRectF geometry = m_client->visibleGeometry();
+    QSize textureSize = geometry.toAlignedRect().size();
     if (sourceSize().width() > 0) {
         textureSize.setWidth(sourceSize().width());
     }
@@ -421,10 +420,10 @@ void WindowThumbnailItem::updateOffscreenTexture()
         m_offscreenTexture.reset(new GLTexture(GL_RGBA8, textureSize));
         m_offscreenTexture->setFilter(GL_LINEAR);
         m_offscreenTexture->setWrapMode(GL_CLAMP_TO_EDGE);
-        m_offscreenTarget.reset(new GLFramebuffer(m_offscreenTexture.data()));
+        m_offscreenTarget.reset(new GLFramebuffer(m_offscreenTexture.get()));
     }
 
-    GLFramebuffer::pushFramebuffer(m_offscreenTarget.data());
+    GLFramebuffer::pushFramebuffer(m_offscreenTarget.get());
     glClearColor(0.0, 0.0, 0.0, 0.0);
     glClear(GL_COLOR_BUFFER_BIT);
 

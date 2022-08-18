@@ -13,7 +13,6 @@
 #include "clientbuffer_p.h"
 #include "display.h"
 #include "display_p.h"
-#include "drm_fourcc.h"
 #include "linuxdmabufv1clientbuffer.h"
 
 #include "qwayland-server-linux-dmabuf-unstable-v1.h"
@@ -21,6 +20,8 @@
 
 #include <QDebug>
 #include <QVector>
+
+#include <drm_fourcc.h>
 
 namespace KWaylandServer
 {
@@ -34,8 +35,8 @@ public:
 
     LinuxDmaBufV1ClientBufferIntegration *q;
     LinuxDmaBufV1ClientBufferIntegration::RendererInterface *rendererInterface = nullptr;
-    QScopedPointer<LinuxDmaBufV1Feedback> defaultFeedback;
-    QScopedPointer<LinuxDmaBufV1FormatTable> table;
+    std::unique_ptr<LinuxDmaBufV1Feedback> defaultFeedback;
+    std::unique_ptr<LinuxDmaBufV1FormatTable> table;
     dev_t mainDevice;
     QHash<uint32_t, QVector<uint64_t>> supportedModifiers;
 
@@ -50,10 +51,8 @@ protected:
 class LinuxDmaBufV1ClientBufferPrivate : public ClientBufferPrivate, public QtWaylandServer::wl_buffer
 {
 public:
-    QSize size;
-    quint32 format;
+    KWin::DmaBufAttributes attrs;
     quint32 flags;
-    QVector<LinuxDmaBufV1Plane> planes;
     bool hasAlphaChannel = false;
 
 protected:
@@ -64,7 +63,6 @@ class LinuxDmaBufParamsV1 : public QtWaylandServer::zwp_linux_buffer_params_v1
 {
 public:
     LinuxDmaBufParamsV1(LinuxDmaBufV1ClientBufferIntegration *integration, ::wl_resource *resource);
-    ~LinuxDmaBufParamsV1() override;
 
 protected:
     void zwp_linux_buffer_params_v1_destroy_resource(Resource *resource) override;
@@ -84,8 +82,7 @@ private:
     bool test(Resource *resource, uint32_t width, uint32_t height);
 
     LinuxDmaBufV1ClientBufferIntegration *m_integration;
-    QVector<LinuxDmaBufV1Plane> m_planes;
-    int m_planeCount = 0;
+    KWin::DmaBufAttributes m_attrs;
     bool m_isUsed = false;
 };
 
@@ -93,9 +90,8 @@ class LinuxDmaBufV1FormatTable
 {
 public:
     LinuxDmaBufV1FormatTable(const QHash<uint32_t, QVector<uint64_t>> &supportedModifiers);
-    ~LinuxDmaBufV1FormatTable();
 
-    int fd = -1;
+    KWin::FileDescriptor fd;
     int size;
     QMap<std::pair<uint32_t, uint64_t>, uint16_t> indices;
 };

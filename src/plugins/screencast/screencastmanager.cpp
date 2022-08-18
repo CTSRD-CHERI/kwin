@@ -29,12 +29,10 @@
 namespace KWin
 {
 
-ScreencastManager::ScreencastManager(QObject *parent)
-    : Plugin(parent)
-    , m_screencast(new KWaylandServer::ScreencastV1Interface(waylandServer()->display(), this))
+ScreencastManager::ScreencastManager()
+    : m_screencast(new KWaylandServer::ScreencastV1Interface(waylandServer()->display(), this))
 {
-    connect(m_screencast, &KWaylandServer::ScreencastV1Interface::windowScreencastRequested,
-            this, &ScreencastManager::streamWindow);
+    connect(m_screencast, &KWaylandServer::ScreencastV1Interface::windowScreencastRequested, this, &ScreencastManager::streamWindow);
     connect(m_screencast, &KWaylandServer::ScreencastV1Interface::outputScreencastRequested, this, &ScreencastManager::streamWaylandOutput);
     connect(m_screencast, &KWaylandServer::ScreencastV1Interface::virtualOutputScreencastRequested, this, &ScreencastManager::streamVirtualOutput);
     connect(m_screencast, &KWaylandServer::ScreencastV1Interface::regionScreencastRequested, this, &ScreencastManager::streamRegion);
@@ -58,7 +56,7 @@ private:
         connect(Compositor::self()->scene(), &Scene::frameRendered, this, &WindowStream::bufferToStream);
 
         connect(m_window, &Window::damaged, this, &WindowStream::includeDamage);
-        m_damagedRegion = m_window->visibleGeometry();
+        m_damagedRegion = m_window->visibleGeometry().toAlignedRect();
         m_window->output()->renderLoop()->scheduleRepaint();
     }
 
@@ -85,7 +83,9 @@ private:
     Window *m_window;
 };
 
-void ScreencastManager::streamWindow(KWaylandServer::ScreencastStreamV1Interface *waylandStream, const QString &winid)
+void ScreencastManager::streamWindow(KWaylandServer::ScreencastStreamV1Interface *waylandStream,
+                                     const QString &winid,
+                                     KWaylandServer::ScreencastV1Interface::CursorMode mode)
 {
     auto window = Workspace::self()->findToplevel(QUuid(winid));
     if (!window) {
@@ -94,6 +94,13 @@ void ScreencastManager::streamWindow(KWaylandServer::ScreencastStreamV1Interface
     }
 
     auto stream = new WindowStream(window, this);
+    stream->setCursorMode(mode, 1, window->clientGeometry().toRect());
+    if (mode != KWaylandServer::ScreencastV1Interface::CursorMode::Hidden) {
+        connect(window, &Window::clientGeometryChanged, stream, [window, stream, mode]() {
+            stream->setCursorMode(mode, 1, window->clientGeometry().toRect());
+        });
+    }
+
     integrateStreams(waylandStream, stream);
 }
 
@@ -161,7 +168,7 @@ void ScreencastManager::streamRegion(KWaylandServer::ScreencastStreamV1Interface
     connect(stream, &ScreenCastStream::startStreaming, waylandStream, [geometry, stream, source] {
         Compositor::self()->scene()->addRepaint(geometry);
 
-        const auto allOutputs = kwinApp()->platform()->enabledOutputs();
+        const auto allOutputs = workspace()->outputs();
         for (auto output : allOutputs) {
             if (output->geometry().intersects(geometry)) {
                 auto bufferToStream = [output, stream, source](const QRegion &damagedRegion) {

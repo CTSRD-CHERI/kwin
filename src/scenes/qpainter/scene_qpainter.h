@@ -25,12 +25,11 @@ class KWIN_EXPORT SceneQPainter : public Scene
 public:
     ~SceneQPainter() override;
     void paint(RenderTarget *renderTarget, const QRegion &region) override;
-    void paintGenericScreen(int mask, const ScreenPaintData &data) override;
     bool initFailed() const override;
     Shadow *createShadow(Window *window) override;
     DecorationRenderer *createDecorationRenderer(Decoration::DecoratedClientImpl *impl) override;
-    SurfaceTexture *createSurfaceTextureInternal(SurfacePixmapInternal *pixmap) override;
-    SurfaceTexture *createSurfaceTextureWayland(SurfacePixmapWayland *pixmap) override;
+    std::unique_ptr<SurfaceTexture> createSurfaceTextureInternal(SurfacePixmapInternal *pixmap) override;
+    std::unique_ptr<SurfaceTexture> createSurfaceTextureWayland(SurfacePixmapWayland *pixmap) override;
     void render(Item *item, int mask, const QRegion &region, const WindowPaintData &data) override;
 
     bool animationsSupported() const override
@@ -45,21 +44,21 @@ public:
         return m_backend;
     }
 
-    static SceneQPainter *createScene(QPainterBackend *backend, QObject *parent);
+    static std::unique_ptr<SceneQPainter> createScene(QPainterBackend *backend);
 
 protected:
     void paintBackground(const QRegion &region) override;
     void paintOffscreenQuickView(OffscreenQuickView *w) override;
 
 private:
-    explicit SceneQPainter(QPainterBackend *backend, QObject *parent = nullptr);
+    explicit SceneQPainter(QPainterBackend *backend);
 
     void renderSurfaceItem(QPainter *painter, SurfaceItem *surfaceItem) const;
     void renderDecorationItem(QPainter *painter, DecorationItem *decorationItem) const;
     void renderItem(QPainter *painter, Item *item) const;
 
     QPainterBackend *m_backend;
-    QScopedPointer<QPainter> m_painter;
+    std::unique_ptr<QPainter> m_painter;
 };
 
 class SceneQPainterShadow : public Shadow
@@ -96,7 +95,7 @@ private:
 
 inline QPainter *SceneQPainter::scenePainter() const
 {
-    return m_painter.data();
+    return m_painter.get();
 }
 
 } // KWin

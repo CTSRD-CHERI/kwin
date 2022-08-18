@@ -11,6 +11,8 @@
 #include "clientbuffer.h"
 #include "clientbufferintegration.h"
 
+#include "dmabufattributes.h"
+
 #include <QHash>
 #include <QSet>
 #include <sys/types.h>
@@ -20,17 +22,6 @@ namespace KWaylandServer
 class LinuxDmaBufV1ClientBufferPrivate;
 class LinuxDmaBufV1ClientBufferIntegrationPrivate;
 class LinuxDmaBufV1FeedbackPrivate;
-
-/**
- * The LinuxDmaBufV1Plane type represents a plane in a client buffer.
- */
-struct LinuxDmaBufV1Plane
-{
-    int fd = -1; ///< The dmabuf file descriptor
-    quint32 offset = 0; ///< The offset from the start of buffer
-    quint32 stride = 0; ///< The distance from the start of a row to the next row in bytes
-    quint64 modifier = 0; ///< The layout modifier
-};
 
 /**
  * The LinuxDmaBufV1ClientBuffer class represents a linux dma-buf client buffer.
@@ -44,12 +35,12 @@ class KWIN_EXPORT LinuxDmaBufV1ClientBuffer : public ClientBuffer
     Q_DECLARE_PRIVATE(LinuxDmaBufV1ClientBuffer)
 
 public:
-    LinuxDmaBufV1ClientBuffer(const QSize &size, quint32 format, quint32 flags, const QVector<LinuxDmaBufV1Plane> &planes);
+    LinuxDmaBufV1ClientBuffer(KWin::DmaBufAttributes &&attrs, quint32 flags);
     ~LinuxDmaBufV1ClientBuffer() override;
 
     quint32 format() const;
     quint32 flags() const;
-    QVector<LinuxDmaBufV1Plane> planes() const;
+    const KWin::DmaBufAttributes &attributes() const;
 
     QSize size() const override;
     bool hasAlphaChannel() const override;
@@ -88,7 +79,7 @@ private:
     LinuxDmaBufV1Feedback(LinuxDmaBufV1ClientBufferIntegrationPrivate *integration);
     friend class LinuxDmaBufV1ClientBufferIntegrationPrivate;
     friend class LinuxDmaBufV1FeedbackPrivate;
-    QScopedPointer<LinuxDmaBufV1FeedbackPrivate> d;
+    std::unique_ptr<LinuxDmaBufV1FeedbackPrivate> d;
 };
 
 /**
@@ -124,7 +115,7 @@ public:
          *
          * @return The imported buffer on success, and nullptr otherwise.
          */
-        virtual LinuxDmaBufV1ClientBuffer *importBuffer(const QVector<LinuxDmaBufV1Plane> &planes, quint32 format, const QSize &size, quint32 flags) = 0;
+        virtual LinuxDmaBufV1ClientBuffer *importBuffer(KWin::DmaBufAttributes &&attrs, quint32 flags) = 0;
     };
 
     RendererInterface *rendererInterface() const;
@@ -140,7 +131,7 @@ public:
 
 private:
     friend class LinuxDmaBufV1ClientBufferIntegrationPrivate;
-    QScopedPointer<LinuxDmaBufV1ClientBufferIntegrationPrivate> d;
+    std::unique_ptr<LinuxDmaBufV1ClientBufferIntegrationPrivate> d;
 };
 
 } // namespace KWaylandServer

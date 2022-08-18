@@ -188,11 +188,10 @@ void InternalWindowTest::initTestCase()
 
     kwinApp()->start();
     QVERIFY(applicationStartedSpy.wait());
-    const auto outputs = kwinApp()->platform()->enabledOutputs();
+    const auto outputs = workspace()->outputs();
     QCOMPARE(outputs.count(), 2);
     QCOMPARE(outputs[0]->geometry(), QRect(0, 0, 1280, 1024));
     QCOMPARE(outputs[1]->geometry(), QRect(1280, 0, 1280, 1024));
-    Test::initWaylandWorkspace();
 }
 
 void InternalWindowTest::init()
@@ -373,18 +372,18 @@ void InternalWindowTest::testKeyboardTriggersLeave()
 {
     // this test verifies that a leave event is sent to a window when an internal window
     // gets a key event
-    QScopedPointer<Keyboard> keyboard(Test::waylandSeat()->createKeyboard());
-    QVERIFY(!keyboard.isNull());
+    std::unique_ptr<Keyboard> keyboard(Test::waylandSeat()->createKeyboard());
+    QVERIFY(keyboard != nullptr);
     QVERIFY(keyboard->isValid());
-    QSignalSpy enteredSpy(keyboard.data(), &Keyboard::entered);
+    QSignalSpy enteredSpy(keyboard.get(), &Keyboard::entered);
     QVERIFY(enteredSpy.isValid());
-    QSignalSpy leftSpy(keyboard.data(), &Keyboard::left);
+    QSignalSpy leftSpy(keyboard.get(), &Keyboard::left);
     QVERIFY(leftSpy.isValid());
-    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
-    QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
+    std::unique_ptr<KWayland::Client::Surface> surface(Test::createSurface());
+    std::unique_ptr<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.get()));
 
     // now let's render
-    auto window = Test::renderAndWaitForShown(surface.data(), QSize(100, 50), Qt::blue);
+    auto window = Test::renderAndWaitForShown(surface.get(), QSize(100, 50), Qt::blue);
     QVERIFY(window);
     QVERIFY(window->isActive());
     QVERIFY(!window->isInternal());
@@ -713,6 +712,7 @@ void InternalWindowTest::testWindowType_data()
     QTest::newRow("ComboBox") << NET::ComboBox;
     QTest::newRow("OnScreenDisplay") << NET::OnScreenDisplay;
     QTest::newRow("CriticalNotification") << NET::CriticalNotification;
+    QTest::newRow("AppletPopup") << NET::AppletPopup;
 }
 
 void InternalWindowTest::testWindowType()
@@ -748,6 +748,7 @@ void InternalWindowTest::testChangeWindowType_data()
     QTest::newRow("ComboBox") << NET::ComboBox;
     QTest::newRow("OnScreenDisplay") << NET::OnScreenDisplay;
     QTest::newRow("CriticalNotification") << NET::CriticalNotification;
+    QTest::newRow("AppletPopup") << NET::AppletPopup;
 }
 
 void InternalWindowTest::testChangeWindowType()
@@ -805,7 +806,7 @@ void InternalWindowTest::testReentrantMoveResize()
 
     // Let's pretend that there is a script that really wants the window to be at (100, 100).
     connect(window, &Window::frameGeometryChanged, this, [window]() {
-        window->moveResize(QRect(QPoint(100, 100), window->size()));
+        window->moveResize(QRectF(QPointF(100, 100), window->size()));
     });
 
     // Trigger the lambda above.

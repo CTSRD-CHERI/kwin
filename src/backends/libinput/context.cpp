@@ -10,10 +10,8 @@
 #include "events.h"
 #include "libinput_logging.h"
 
-#include "main.h"
-#include "platform.h"
 #include "session.h"
-#include "udev.h"
+#include "utils/udev.h"
 
 #include <fcntl.h>
 #include <unistd.h>
@@ -46,9 +44,11 @@ static void libinputLogHandler(libinput *libinput, libinput_log_priority priorit
     }
 }
 
-Context::Context(const Udev &udev)
-    : m_libinput(libinput_udev_create_context(&Context::s_interface, this, udev))
+Context::Context(Session *session, std::unique_ptr<Udev> &&udev)
+    : m_session(session)
+    , m_libinput(libinput_udev_create_context(&Context::s_interface, this, *udev.get()))
     , m_suspended(false)
+    , m_udev(std::move(udev))
 {
     libinput_log_set_priority(m_libinput, LIBINPUT_LOG_PRIORITY_DEBUG);
     libinput_log_set_handler(m_libinput, &libinputLogHandler);
@@ -61,12 +61,17 @@ Context::~Context()
     }
 }
 
-bool Context::assignSeat(const char *seat)
+bool Context::initialize()
 {
     if (!isValid()) {
         return false;
     }
-    return libinput_udev_assign_seat(m_libinput, seat) == 0;
+    return libinput_udev_assign_seat(m_libinput, m_session->seat().toUtf8().constData()) == 0;
+}
+
+Session *Context::session() const
+{
+    return m_session;
 }
 
 int Context::fileDescriptor()
@@ -99,7 +104,7 @@ void Context::closeRestrictedCallBack(int fd, void *user_data)
 
 int Context::openRestricted(const char *path, int flags)
 {
-    int fd = kwinApp()->platform()->session()->openRestricted(path);
+    int fd = m_session->openRestricted(path);
     if (fd < 0) {
         // failed
         return fd;
@@ -143,10 +148,10 @@ int Context::openRestricted(const char *path, int flags)
 
 void Context::closeRestricted(int fd)
 {
-    kwinApp()->platform()->session()->closeRestricted(fd);
+    m_session->closeRestricted(fd);
 }
 
-Event *Context::event()
+std::unique_ptr<Event> Context::event()
 {
     return Event::create(libinput_get_event(m_libinput));
 }

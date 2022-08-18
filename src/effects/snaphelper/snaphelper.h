@@ -36,17 +36,16 @@ private Q_SLOTS:
     void slotWindowClosed(EffectWindow *w);
     void slotWindowStartUserMovedResized(EffectWindow *w);
     void slotWindowFinishUserMovedResized(EffectWindow *w);
-    void slotWindowFrameGeometryChanged(EffectWindow *w, const QRect &old);
+    void slotWindowFrameGeometryChanged(EffectWindow *w, const QRectF &old);
 
 private:
-    QRect m_geometry;
+    QRectF m_geometry;
     EffectWindow *m_window = nullptr;
 
     struct Animation
     {
         bool active = false;
         TimeLine timeLine;
-        std::chrono::milliseconds lastPresentTime = std::chrono::milliseconds::zero();
     };
 
     Animation m_animation;

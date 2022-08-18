@@ -10,6 +10,7 @@
 #ifndef DRM_GPU_H
 #define DRM_GPU_H
 
+#include "drm_pipeline.h"
 #include "drm_virtual_output.h"
 
 #include <QPointer>
@@ -39,9 +40,7 @@ class DrmConnector;
 class DrmPlane;
 class DrmBackend;
 class EglGbmBackend;
-class DrmPipeline;
 class DrmAbstractOutput;
-class DrmLeaseOutput;
 class DrmRenderBackend;
 
 class DrmGpu : public QObject
@@ -78,7 +77,7 @@ public:
     DrmVirtualOutput *createVirtualOutput(const QString &name, const QSize &size, double scale, DrmVirtualOutput::Type type);
     void removeVirtualOutput(DrmVirtualOutput *output);
 
-    bool testPendingConfiguration();
+    DrmPipeline::Error testPendingConfiguration();
     bool needsModeset() const;
     bool maybeModeset();
 
@@ -88,20 +87,16 @@ public:
 Q_SIGNALS:
     void outputAdded(DrmAbstractOutput *output);
     void outputRemoved(DrmAbstractOutput *output);
-    void outputEnabled(DrmAbstractOutput *output);
-    void outputDisabled(DrmAbstractOutput *output);
 
 private:
     void dispatchEvents();
     DrmOutput *findOutput(quint32 connector);
-    DrmLeaseOutput *findLeaseOutput(quint32 connector);
     void removeOutput(DrmOutput *output);
-    void removeLeaseOutput(DrmLeaseOutput *output);
     void initDrmResources();
     void waitIdle();
 
-    bool checkCrtcAssignment(QVector<DrmConnector *> connectors, const QVector<DrmCrtc *> &crtcs);
-    bool testPipelines();
+    DrmPipeline::Error checkCrtcAssignment(QVector<DrmConnector *> connectors, const QVector<DrmCrtc *> &crtcs);
+    DrmPipeline::Error testPipelines();
     QVector<DrmObject *> unusedObjects() const;
 
     void handleLeaseRequest(KWaylandServer::DrmLeaseV1Interface *leaseRequest);
@@ -121,15 +116,14 @@ private:
     EGLDisplay m_eglDisplay = EGL_NO_DISPLAY;
     DrmBackend *const m_platform;
 
-    QVector<DrmPlane *> m_planes;
-    QVector<DrmCrtc *> m_crtcs;
-    QVector<DrmConnector *> m_connectors;
+    std::vector<std::unique_ptr<DrmPlane>> m_planes;
+    std::vector<std::unique_ptr<DrmCrtc>> m_crtcs;
+    std::vector<std::unique_ptr<DrmConnector>> m_connectors;
     QVector<DrmObject *> m_allObjects;
     QVector<DrmPipeline *> m_pipelines;
 
     QVector<DrmOutput *> m_drmOutputs;
     QVector<DrmAbstractOutput *> m_outputs;
-    QVector<DrmLeaseOutput *> m_leaseOutputs;
     KWaylandServer::DrmLeaseDeviceV1Interface *m_leaseDevice = nullptr;
 
     QSocketNotifier *m_socketNotifier = nullptr;

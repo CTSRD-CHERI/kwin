@@ -25,9 +25,7 @@
 #include <kconfiggroup.h>
 #include <ksharedconfig.h>
 
-#if defined(__SSE2__)
-#include <emmintrin.h>
-#endif
+#include <optional>
 
 namespace KWin
 {
@@ -206,6 +204,26 @@ void PaintData::setRotationOrigin(const QVector3D &origin)
     d->rotationOrigin = origin;
 }
 
+QMatrix4x4 PaintData::toMatrix() const
+{
+    QMatrix4x4 ret;
+    if (d->translation != QVector3D(0, 0, 0)) {
+        ret.translate(d->translation);
+    }
+    if (d->scale != QVector3D(1, 1, 1)) {
+        ret.scale(d->scale);
+    }
+
+    if (d->rotationAngle != 0) {
+        ret.translate(d->rotationOrigin);
+        const QVector3D axis = d->rotationAxis;
+        ret.rotate(d->rotationAngle, axis.x(), axis.y(), axis.z());
+        ret.translate(-d->rotationOrigin);
+    }
+
+    return ret;
+}
+
 class WindowPaintDataPrivate
 {
 public:
@@ -215,7 +233,6 @@ public:
     int screen;
     qreal crossFadeProgress;
     QMatrix4x4 pMatrix;
-    QMatrix4x4 mvMatrix;
     QMatrix4x4 screenProjectionMatrix;
 };
 
@@ -255,7 +272,6 @@ WindowPaintData::WindowPaintData(const WindowPaintData &other)
     setScreen(other.screen());
     setCrossFadeProgress(other.crossFadeProgress());
     setProjectionMatrix(other.projectionMatrix());
-    setModelViewMatrix(other.modelViewMatrix());
     d->screenProjectionMatrix = other.d->screenProjectionMatrix;
 }
 
@@ -347,21 +363,6 @@ QMatrix4x4 &WindowPaintData::rprojectionMatrix()
     return d->pMatrix;
 }
 
-void WindowPaintData::setModelViewMatrix(const QMatrix4x4 &matrix)
-{
-    d->mvMatrix = matrix;
-}
-
-QMatrix4x4 WindowPaintData::modelViewMatrix() const
-{
-    return d->mvMatrix;
-}
-
-QMatrix4x4 &WindowPaintData::rmodelViewMatrix()
-{
-    return d->mvMatrix;
-}
-
 WindowPaintData &WindowPaintData::operator*=(qreal scale)
 {
     this->setXScale(this->xScale() * scale);
@@ -419,14 +420,12 @@ public:
 };
 
 ScreenPaintData::ScreenPaintData()
-    : PaintData()
-    , d(new Private())
+    : d(new Private())
 {
 }
 
 ScreenPaintData::ScreenPaintData(const QMatrix4x4 &projectionMatrix, EffectScreen *screen)
-    : PaintData()
-    , d(new Private())
+    : d(new Private())
 {
     d->projectionMatrix = projectionMatrix;
     d->screen = screen;
@@ -435,77 +434,16 @@ ScreenPaintData::ScreenPaintData(const QMatrix4x4 &projectionMatrix, EffectScree
 ScreenPaintData::~ScreenPaintData() = default;
 
 ScreenPaintData::ScreenPaintData(const ScreenPaintData &other)
-    : PaintData()
-    , d(new Private())
+    : d(new Private())
 {
-    translate(other.translation());
-    setXScale(other.xScale());
-    setYScale(other.yScale());
-    setZScale(other.zScale());
-    setRotationOrigin(other.rotationOrigin());
-    setRotationAxis(other.rotationAxis());
-    setRotationAngle(other.rotationAngle());
     d->projectionMatrix = other.d->projectionMatrix;
     d->screen = other.d->screen;
 }
 
 ScreenPaintData &ScreenPaintData::operator=(const ScreenPaintData &rhs)
 {
-    setXScale(rhs.xScale());
-    setYScale(rhs.yScale());
-    setZScale(rhs.zScale());
-    setXTranslation(rhs.xTranslation());
-    setYTranslation(rhs.yTranslation());
-    setZTranslation(rhs.zTranslation());
-    setRotationOrigin(rhs.rotationOrigin());
-    setRotationAxis(rhs.rotationAxis());
-    setRotationAngle(rhs.rotationAngle());
     d->projectionMatrix = rhs.d->projectionMatrix;
     d->screen = rhs.d->screen;
-    return *this;
-}
-
-ScreenPaintData &ScreenPaintData::operator*=(qreal scale)
-{
-    setXScale(this->xScale() * scale);
-    setYScale(this->yScale() * scale);
-    setZScale(this->zScale() * scale);
-    return *this;
-}
-
-ScreenPaintData &ScreenPaintData::operator*=(const QVector2D &scale)
-{
-    setXScale(this->xScale() * scale.x());
-    setYScale(this->yScale() * scale.y());
-    return *this;
-}
-
-ScreenPaintData &ScreenPaintData::operator*=(const QVector3D &scale)
-{
-    setXScale(this->xScale() * scale.x());
-    setYScale(this->yScale() * scale.y());
-    setZScale(this->zScale() * scale.z());
-    return *this;
-}
-
-ScreenPaintData &ScreenPaintData::operator+=(const QPointF &translation)
-{
-    return this->operator+=(QVector3D(translation));
-}
-
-ScreenPaintData &ScreenPaintData::operator+=(const QPoint &translation)
-{
-    return this->operator+=(QVector3D(translation));
-}
-
-ScreenPaintData &ScreenPaintData::operator+=(const QVector2D &translation)
-{
-    return this->operator+=(QVector3D(translation));
-}
-
-ScreenPaintData &ScreenPaintData::operator+=(const QVector3D &translation)
-{
-    translate(translation);
     return *this;
 }
 
@@ -607,7 +545,7 @@ void Effect::drawWindow(EffectWindow *w, int mask, const QRegion &region, Window
 void Effect::setPositionTransformations(WindowPaintData &data, QRect &region, EffectWindow *w,
                                         const QRect &r, Qt::AspectRatioMode aspect)
 {
-    QSize size = w->size();
+    QSizeF size = w->size();
     size.scale(r.size(), aspect);
     data.setXScale(size.width() / double(w->width()));
     data.setYScale(size.height() / double(w->height()));
@@ -804,6 +742,16 @@ EffectsHandler *effects = nullptr;
 EffectScreen::EffectScreen(QObject *parent)
     : QObject(parent)
 {
+}
+
+QPointF EffectScreen::mapToGlobal(const QPointF &pos) const
+{
+    return pos + geometry().topLeft();
+}
+
+QPointF EffectScreen::mapFromGlobal(const QPointF &pos) const
+{
+    return pos - geometry().topLeft();
 }
 
 //****************************************
@@ -1123,106 +1071,43 @@ void WindowQuadList::makeInterleavedArrays(unsigned int type, GLVertex2D *vertic
     Q_ASSERT(type == GL_QUADS || type == GL_TRIANGLES);
 
     switch (type) {
-    case GL_QUADS:
-#if defined(__SSE2__)
-        if (!(intptr_t(vertex) & 0xf)) {
-            for (const WindowQuad &quad : *this) {
-                alignas(16) GLVertex2D v[4];
+    case GL_QUADS: {
+        for (const WindowQuad &quad : *this) {
+#pragma GCC unroll 4
+            for (int j = 0; j < 4; j++) {
+                const WindowVertex &wv = quad[j];
 
-                for (int j = 0; j < 4; j++) {
-                    const WindowVertex &wv = quad[j];
+                GLVertex2D v;
+                v.position = QVector2D(wv.x(), wv.y());
+                v.texcoord = QVector2D(wv.u(), wv.v()) * coeff + offset;
 
-                    v[j].position = QVector2D(wv.x(), wv.y());
-                    v[j].texcoord = QVector2D(wv.u(), wv.v()) * coeff + offset;
-                }
-
-                const __m128i *srcP = reinterpret_cast<const __m128i *>(&v);
-                __m128i *dstP = reinterpret_cast<__m128i *>(vertex);
-
-                _mm_stream_si128(&dstP[0], _mm_load_si128(&srcP[0])); // Top-left
-                _mm_stream_si128(&dstP[1], _mm_load_si128(&srcP[1])); // Top-right
-                _mm_stream_si128(&dstP[2], _mm_load_si128(&srcP[2])); // Bottom-right
-                _mm_stream_si128(&dstP[3], _mm_load_si128(&srcP[3])); // Bottom-left
-
-                vertex += 4;
-            }
-        } else
-#endif // __SSE2__
-        {
-            for (const WindowQuad &quad : *this) {
-                for (int j = 0; j < 4; j++) {
-                    const WindowVertex &wv = quad[j];
-
-                    GLVertex2D v;
-                    v.position = QVector2D(wv.x(), wv.y());
-                    v.texcoord = QVector2D(wv.u(), wv.v()) * coeff + offset;
-
-                    *(vertex++) = v;
-                }
+                *(vertex++) = v;
             }
         }
-        break;
+    } break;
+    case GL_TRIANGLES: {
+        for (const WindowQuad &quad : *this) {
+            GLVertex2D v[4]; // Four unique vertices / quad
 
-    case GL_TRIANGLES:
-#if defined(__SSE2__)
-        if (!(intptr_t(vertex) & 0xf)) {
-            for (const WindowQuad &quad : *this) {
-                alignas(16) GLVertex2D v[4];
+#pragma GCC unroll 4
+            for (int j = 0; j < 4; j++) {
+                const WindowVertex &wv = quad[j];
 
-                for (int j = 0; j < 4; j++) {
-                    const WindowVertex &wv = quad[j];
-
-                    v[j].position = QVector2D(wv.x(), wv.y());
-                    v[j].texcoord = QVector2D(wv.u(), wv.v()) * coeff + offset;
-                }
-
-                const __m128i *srcP = reinterpret_cast<const __m128i *>(&v);
-                __m128i *dstP = reinterpret_cast<__m128i *>(vertex);
-
-                __m128i src[4];
-                src[0] = _mm_load_si128(&srcP[0]); // Top-left
-                src[1] = _mm_load_si128(&srcP[1]); // Top-right
-                src[2] = _mm_load_si128(&srcP[2]); // Bottom-right
-                src[3] = _mm_load_si128(&srcP[3]); // Bottom-left
-
-                // First triangle
-                _mm_stream_si128(&dstP[0], src[1]); // Top-right
-                _mm_stream_si128(&dstP[1], src[0]); // Top-left
-                _mm_stream_si128(&dstP[2], src[3]); // Bottom-left
-
-                // Second triangle
-                _mm_stream_si128(&dstP[3], src[3]); // Bottom-left
-                _mm_stream_si128(&dstP[4], src[2]); // Bottom-right
-                _mm_stream_si128(&dstP[5], src[1]); // Top-right
-
-                vertex += 6;
+                v[j].position = QVector2D(wv.x(), wv.y());
+                v[j].texcoord = QVector2D(wv.u(), wv.v()) * coeff + offset;
             }
-        } else
-#endif // __SSE2__
-        {
-            for (const WindowQuad &quad : *this) {
-                GLVertex2D v[4]; // Four unique vertices / quad
 
-                for (int j = 0; j < 4; j++) {
-                    const WindowVertex &wv = quad[j];
+            // First triangle
+            *(vertex++) = v[1]; // Top-right
+            *(vertex++) = v[0]; // Top-left
+            *(vertex++) = v[3]; // Bottom-left
 
-                    v[j].position = QVector2D(wv.x(), wv.y());
-                    v[j].texcoord = QVector2D(wv.u(), wv.v()) * coeff + offset;
-                }
-
-                // First triangle
-                *(vertex++) = v[1]; // Top-right
-                *(vertex++) = v[0]; // Top-left
-                *(vertex++) = v[3]; // Bottom-left
-
-                // Second triangle
-                *(vertex++) = v[3]; // Bottom-left
-                *(vertex++) = v[2]; // Bottom-right
-                *(vertex++) = v[1]; // Top-right
-            }
+            // Second triangle
+            *(vertex++) = v[3]; // Bottom-left
+            *(vertex++) = v[2]; // Bottom-right
+            *(vertex++) = v[1]; // Top-right
         }
-        break;
-
+    } break;
     default:
         break;
     }
@@ -1592,6 +1477,7 @@ public:
     QEasingCurve easingCurve;
 
     std::chrono::milliseconds elapsed = std::chrono::milliseconds::zero();
+    std::optional<std::chrono::milliseconds> lastTimestamp = std::nullopt;
     bool done = false;
     RedirectMode sourceRedirectMode = RedirectMode::Relaxed;
     RedirectMode targetRedirectMode = RedirectMode::Strict;
@@ -1624,16 +1510,25 @@ qreal TimeLine::value() const
         d->direction == Backward ? 1.0 - t : t);
 }
 
-void TimeLine::update(std::chrono::milliseconds delta)
+void TimeLine::advance(std::chrono::milliseconds timestamp)
 {
-    Q_ASSERT(delta >= std::chrono::milliseconds::zero());
     if (d->done) {
         return;
     }
+
+    std::chrono::milliseconds delta = std::chrono::milliseconds::zero();
+    if (d->lastTimestamp.has_value()) {
+        delta = timestamp - d->lastTimestamp.value();
+    }
+
+    Q_ASSERT(delta >= std::chrono::milliseconds::zero());
+    d->lastTimestamp = timestamp;
+
     d->elapsed += delta;
     if (d->elapsed >= d->duration) {
-        d->done = true;
         d->elapsed = d->duration;
+        d->done = true;
+        d->lastTimestamp = std::nullopt;
     }
 }
 
@@ -1648,8 +1543,16 @@ void TimeLine::setElapsed(std::chrono::milliseconds elapsed)
     if (elapsed == d->elapsed) {
         return;
     }
+
     reset();
-    update(elapsed);
+
+    d->elapsed = elapsed;
+
+    if (d->elapsed >= d->duration) {
+        d->elapsed = d->duration;
+        d->done = true;
+        d->lastTimestamp = std::nullopt;
+    }
 }
 
 std::chrono::milliseconds TimeLine::duration() const
@@ -1667,6 +1570,7 @@ void TimeLine::setDuration(std::chrono::milliseconds duration)
     d->duration = duration;
     if (d->elapsed == d->duration) {
         d->done = true;
+        d->lastTimestamp = std::nullopt;
     }
 }
 
@@ -1694,6 +1598,7 @@ void TimeLine::setDirection(TimeLine::Direction direction)
 
     if (d->elapsed >= d->duration) {
         d->done = true;
+        d->lastTimestamp = std::nullopt;
     }
 }
 
@@ -1730,6 +1635,7 @@ bool TimeLine::done() const
 
 void TimeLine::reset()
 {
+    d->lastTimestamp = std::nullopt;
     d->elapsed = std::chrono::milliseconds::zero();
     d->done = false;
 }

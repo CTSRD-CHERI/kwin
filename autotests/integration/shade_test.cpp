@@ -46,12 +46,11 @@ void ShadeTest::initTestCase()
 
     kwinApp()->start();
     QVERIFY(applicationStartedSpy.wait());
-    const auto outputs = kwinApp()->platform()->enabledOutputs();
+    const auto outputs = workspace()->outputs();
     QCOMPARE(outputs.count(), 2);
     QCOMPARE(outputs[0]->geometry(), QRect(0, 0, 1280, 1024));
     QCOMPARE(outputs[1]->geometry(), QRect(1280, 0, 1280, 1024));
     setenv("QT_QPA_PLATFORM", "wayland", true);
-    Test::initWaylandWorkspace();
 }
 
 void ShadeTest::init()
@@ -67,16 +66,16 @@ void ShadeTest::testShadeGeometry()
     // create an xcb window
     struct XcbConnectionDeleter
     {
-        static inline void cleanup(xcb_connection_t *pointer)
+        void operator()(xcb_connection_t *pointer)
         {
             xcb_disconnect(pointer);
         }
     };
-    QScopedPointer<xcb_connection_t, XcbConnectionDeleter> c(xcb_connect(nullptr, nullptr));
-    QVERIFY(!xcb_connection_has_error(c.data()));
+    std::unique_ptr<xcb_connection_t, XcbConnectionDeleter> c(xcb_connect(nullptr, nullptr));
+    QVERIFY(!xcb_connection_has_error(c.get()));
     const QRect windowGeometry(0, 0, 100, 200);
-    xcb_window_t windowId = xcb_generate_id(c.data());
-    xcb_create_window(c.data(), XCB_COPY_FROM_PARENT, windowId, rootWindow(),
+    xcb_window_t windowId = xcb_generate_id(c.get());
+    xcb_create_window(c.get(), XCB_COPY_FROM_PARENT, windowId, rootWindow(),
                       windowGeometry.x(),
                       windowGeometry.y(),
                       windowGeometry.width(),
@@ -86,9 +85,9 @@ void ShadeTest::testShadeGeometry()
     memset(&hints, 0, sizeof(hints));
     xcb_icccm_size_hints_set_position(&hints, 1, windowGeometry.x(), windowGeometry.y());
     xcb_icccm_size_hints_set_size(&hints, 1, windowGeometry.width(), windowGeometry.height());
-    xcb_icccm_set_wm_normal_hints(c.data(), windowId, &hints);
-    xcb_map_window(c.data(), windowId);
-    xcb_flush(c.data());
+    xcb_icccm_set_wm_normal_hints(c.get(), windowId, &hints);
+    xcb_map_window(c.get(), windowId);
+    xcb_flush(c.get());
 
     // we should get a window for it
     QSignalSpy windowCreatedSpy(workspace(), &Workspace::windowAdded);
@@ -103,7 +102,7 @@ void ShadeTest::testShadeGeometry()
     QVERIFY(window->isActive());
 
     // now shade the window
-    const QRect geoBeforeShade = window->frameGeometry();
+    const QRectF geoBeforeShade = window->frameGeometry();
     QVERIFY(geoBeforeShade.isValid());
     QVERIFY(!geoBeforeShade.isEmpty());
     workspace()->slotWindowShade();
@@ -115,9 +114,9 @@ void ShadeTest::testShadeGeometry()
     QCOMPARE(window->frameGeometry(), geoBeforeShade);
 
     // and destroy the window again
-    xcb_unmap_window(c.data(), windowId);
-    xcb_destroy_window(c.data(), windowId);
-    xcb_flush(c.data());
+    xcb_unmap_window(c.get(), windowId);
+    xcb_destroy_window(c.get(), windowId);
+    xcb_flush(c.get());
     c.reset();
 
     QSignalSpy windowClosedSpy(window, &X11Window::windowClosed);

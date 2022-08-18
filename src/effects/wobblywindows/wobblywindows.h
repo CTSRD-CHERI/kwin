@@ -11,7 +11,7 @@
 #define KWIN_WOBBLYWINDOWS_H
 
 // Include with base class for effects.
-#include <kwindeformeffect.h>
+#include <kwinoffscreeneffect.h>
 
 namespace KWin
 {
@@ -21,7 +21,7 @@ struct ParameterSet;
 /**
  * Effect which wobble windows
  */
-class WobblyWindowsEffect : public DeformEffect
+class WobblyWindowsEffect : public OffscreenEffect
 {
     Q_OBJECT
     Q_PROPERTY(qreal stiffness READ stiffness)
@@ -75,65 +75,26 @@ public:
     static bool supported();
 
     // for properties
-    qreal stiffness() const
-    {
-        return m_stiffness;
-    }
-    qreal drag() const
-    {
-        return m_drag;
-    }
-    qreal moveFactor() const
-    {
-        return m_move_factor;
-    }
-    qreal xTesselation() const
-    {
-        return m_xTesselation;
-    }
-    qreal yTesselation() const
-    {
-        return m_yTesselation;
-    }
-    qreal minVelocity() const
-    {
-        return m_minVelocity;
-    }
-    qreal maxVelocity() const
-    {
-        return m_maxVelocity;
-    }
-    qreal stopVelocity() const
-    {
-        return m_stopVelocity;
-    }
-    qreal minAcceleration() const
-    {
-        return m_minAcceleration;
-    }
-    qreal maxAcceleration() const
-    {
-        return m_maxAcceleration;
-    }
-    qreal stopAcceleration() const
-    {
-        return m_stopAcceleration;
-    }
-    bool isMoveWobble() const
-    {
-        return m_moveWobble;
-    }
-    bool isResizeWobble() const
-    {
-        return m_resizeWobble;
-    }
+    qreal stiffness() const;
+    qreal drag() const;
+    qreal moveFactor() const;
+    qreal xTesselation() const;
+    qreal yTesselation() const;
+    qreal minVelocity() const;
+    qreal maxVelocity() const;
+    qreal stopVelocity() const;
+    qreal minAcceleration() const;
+    qreal maxAcceleration() const;
+    qreal stopAcceleration() const;
+    bool isMoveWobble() const;
+    bool isResizeWobble() const;
 
 protected:
-    void deform(EffectWindow *w, int mask, WindowPaintData &data, WindowQuadList &quads) override;
+    void apply(EffectWindow *w, int mask, WindowPaintData &data, WindowQuadList &quads) override;
 
 public Q_SLOTS:
     void slotWindowStartUserMovedResized(KWin::EffectWindow *w);
-    void slotWindowStepUserMovedResized(KWin::EffectWindow *w, const QRect &geometry);
+    void slotWindowStepUserMovedResized(KWin::EffectWindow *w, const QRectF &geometry);
     void slotWindowFinishUserMovedResized(KWin::EffectWindow *w);
     void slotWindowMaximizeStateChanged(KWin::EffectWindow *w, bool horizontal, bool vertical);
 
@@ -144,21 +105,21 @@ private:
 
     struct WindowWobblyInfos
     {
-        Pair *origin;
-        Pair *position;
-        Pair *velocity;
-        Pair *acceleration;
-        Pair *buffer;
+        QVector<Pair> origin;
+        QVector<Pair> position;
+        QVector<Pair> velocity;
+        QVector<Pair> acceleration;
+        QVector<Pair> buffer;
 
         // if true, the physics system moves this point based only on it "normal" destination
         // given by the window position, ignoring neighbour points.
-        bool *constraint;
+        QVector<bool> constraint;
 
         unsigned int width;
         unsigned int height;
         unsigned int count;
 
-        Pair *bezierSurface;
+        QVector<Pair> bezierSurface;
         unsigned int bezierWidth;
         unsigned int bezierHeight;
         unsigned int bezierCount;
@@ -167,7 +128,7 @@ private:
 
         // for resizing. Only sides that have moved will wobble
         bool can_wobble_top, can_wobble_left, can_wobble_right, can_wobble_bottom;
-        QRect resize_original_rect;
+        QRectF resize_original_rect;
 
         std::chrono::milliseconds clock;
     };
@@ -196,12 +157,11 @@ private:
     bool m_moveWobble;
     bool m_resizeWobble;
 
-    void initWobblyInfo(WindowWobblyInfos &wwi, QRect geometry) const;
-    void freeWobblyInfo(WindowWobblyInfos &wwi) const;
+    void initWobblyInfo(WindowWobblyInfos &wwi, QRectF geometry) const;
 
     WobblyWindowsEffect::Pair computeBezierPoint(const WindowWobblyInfos &wwi, Pair point) const;
 
-    static void heightRingLinearMean(Pair **data_pointer, WindowWobblyInfos &wwi);
+    static void heightRingLinearMean(QVector<Pair> &data, WindowWobblyInfos &wwi);
 
     void setParameterSet(const ParameterSet &pset);
 };

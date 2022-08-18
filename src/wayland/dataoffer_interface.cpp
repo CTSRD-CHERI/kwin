@@ -25,9 +25,8 @@ public:
     DataOfferInterface *q;
     QPointer<AbstractDataSource> source;
 
-    // defaults are set to sensible values for < version 3 interfaces
-    DataDeviceManagerInterface::DnDActions supportedDnDActions = DataDeviceManagerInterface::DnDAction::Copy | DataDeviceManagerInterface::DnDAction::Move;
-    DataDeviceManagerInterface::DnDAction preferredDnDAction = DataDeviceManagerInterface::DnDAction::Copy;
+    std::optional<DataDeviceManagerInterface::DnDActions> supportedDnDActions = std::nullopt;
+    std::optional<DataDeviceManagerInterface::DnDAction> preferredDnDAction = std::nullopt;
 
 protected:
     void data_offer_destroy_resource(Resource *resource) override;
@@ -43,6 +42,11 @@ DataOfferInterfacePrivate::DataOfferInterfacePrivate(AbstractDataSource *_source
     , q(_q)
     , source(_source)
 {
+    // defaults are set to sensible values for < version 3 interfaces
+    if (wl_resource_get_version(resource) < WL_DATA_OFFER_ACTION_SINCE_VERSION) {
+        supportedDnDActions = DataDeviceManagerInterface::DnDAction::Copy | DataDeviceManagerInterface::DnDAction::Move;
+        preferredDnDAction = DataDeviceManagerInterface::DnDAction::Copy;
+    }
 }
 
 void DataOfferInterfacePrivate::data_offer_accept(Resource *resource, uint32_t serial, const QString &mime_type)
@@ -178,12 +182,12 @@ wl_resource *DataOfferInterface::resource() const
     return d->resource()->handle;
 }
 
-DataDeviceManagerInterface::DnDActions DataOfferInterface::supportedDragAndDropActions() const
+std::optional<DataDeviceManagerInterface::DnDActions> DataOfferInterface::supportedDragAndDropActions() const
 {
     return d->supportedDnDActions;
 }
 
-DataDeviceManagerInterface::DnDAction DataOfferInterface::preferredDragAndDropAction() const
+std::optional<DataDeviceManagerInterface::DnDAction> DataOfferInterface::preferredDragAndDropAction() const
 {
     return d->preferredDnDAction;
 }

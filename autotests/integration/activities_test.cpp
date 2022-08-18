@@ -57,12 +57,11 @@ void ActivitiesTest::initTestCase()
     kwinApp()->setUseKActivities(true);
     kwinApp()->start();
     QVERIFY(applicationStartedSpy.wait());
-    const auto outputs = kwinApp()->platform()->enabledOutputs();
+    const auto outputs = workspace()->outputs();
     QCOMPARE(outputs.count(), 2);
     QCOMPARE(outputs[0]->geometry(), QRect(0, 0, 1280, 1024));
     QCOMPARE(outputs[1]->geometry(), QRect(1280, 0, 1280, 1024));
     setenv("QT_QPA_PLATFORM", "wayland", true);
-    Test::initWaylandWorkspace();
 }
 
 void ActivitiesTest::cleanupTestCase()
@@ -87,7 +86,7 @@ void ActivitiesTest::cleanup()
 
 struct XcbConnectionDeleter
 {
-    static inline void cleanup(xcb_connection_t *pointer)
+    void operator()(xcb_connection_t *pointer)
     {
         xcb_disconnect(pointer);
     }
@@ -97,26 +96,26 @@ void ActivitiesTest::testSetOnActivitiesValidates()
 {
     // this test verifies that windows can't be placed on activities that don't exist
     // create an xcb window
-    QScopedPointer<xcb_connection_t, XcbConnectionDeleter> c(xcb_connect(nullptr, nullptr));
-    QVERIFY(!xcb_connection_has_error(c.data()));
+    std::unique_ptr<xcb_connection_t, XcbConnectionDeleter> c(xcb_connect(nullptr, nullptr));
+    QVERIFY(!xcb_connection_has_error(c.get()));
 
-    xcb_window_t windowId = xcb_generate_id(c.data());
+    xcb_window_t windowId = xcb_generate_id(c.get());
     const QRect windowGeometry(0, 0, 100, 200);
 
-    auto cookie = xcb_create_window_checked(c.data(), 0, windowId, rootWindow(),
+    auto cookie = xcb_create_window_checked(c.get(), 0, windowId, rootWindow(),
                                             windowGeometry.x(),
                                             windowGeometry.y(),
                                             windowGeometry.width(),
                                             windowGeometry.height(),
                                             0, XCB_WINDOW_CLASS_INPUT_OUTPUT, 0, 0, nullptr);
-    QVERIFY(!xcb_request_check(c.data(), cookie));
+    QVERIFY(!xcb_request_check(c.get(), cookie));
     xcb_size_hints_t hints;
     memset(&hints, 0, sizeof(hints));
     xcb_icccm_size_hints_set_position(&hints, 1, windowGeometry.x(), windowGeometry.y());
     xcb_icccm_size_hints_set_size(&hints, 1, windowGeometry.width(), windowGeometry.height());
-    xcb_icccm_set_wm_normal_hints(c.data(), windowId, &hints);
-    xcb_map_window(c.data(), windowId);
-    xcb_flush(c.data());
+    xcb_icccm_set_wm_normal_hints(c.get(), windowId, &hints);
+    xcb_map_window(c.get(), windowId);
+    xcb_flush(c.get());
 
     // we should get a window for it
     QSignalSpy windowCreatedSpy(workspace(), &Workspace::windowAdded);
@@ -128,17 +127,17 @@ void ActivitiesTest::testSetOnActivitiesValidates()
     QVERIFY(window->isDecorated());
 
     // verify the test machine doesn't have the following activities used
-    QVERIFY(!Activities::self()->all().contains(QStringLiteral("foo")));
-    QVERIFY(!Activities::self()->all().contains(QStringLiteral("bar")));
+    QVERIFY(!Workspace::self()->activities()->all().contains(QStringLiteral("foo")));
+    QVERIFY(!Workspace::self()->activities()->all().contains(QStringLiteral("bar")));
 
     window->setOnActivities(QStringList{QStringLiteral("foo"), QStringLiteral("bar")});
     QVERIFY(!window->activities().contains(QLatin1String("foo")));
     QVERIFY(!window->activities().contains(QLatin1String("bar")));
 
     // and destroy the window again
-    xcb_unmap_window(c.data(), windowId);
-    xcb_destroy_window(c.data(), windowId);
-    xcb_flush(c.data());
+    xcb_unmap_window(c.get(), windowId);
+    xcb_destroy_window(c.get(), windowId);
+    xcb_flush(c.get());
     c.reset();
 
     QSignalSpy windowClosedSpy(window, &X11Window::windowClosed);

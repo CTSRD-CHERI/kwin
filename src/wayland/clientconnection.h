@@ -10,6 +10,7 @@
 #include <sys/types.h>
 
 #include <QObject>
+#include <memory>
 
 struct wl_client;
 struct wl_resource;
@@ -109,6 +110,21 @@ public:
      */
     void destroy();
 
+    /**
+     * Set an additional mapping between kwin's logical co-ordinate space and
+     * the client's logical co-ordinate space.
+     *
+     * This is used in the same way as if the client was setting the
+     * surface.buffer_scale on every surface i.e a value of 2.0 will make
+     * the windows appear smaller on a regular DPI monitor.
+     *
+     * Only the minimal set of protocols used by xwayland have support.
+     *
+     * Buffer sizes are unaffected.
+     */
+    void setScaleOverride(qreal scaleOverride);
+    qreal scaleOverride() const;
+
 Q_SIGNALS:
     /**
      * This signal is emitted when the client is about to be destroyed.
@@ -119,10 +135,12 @@ Q_SIGNALS:
      */
     void disconnected(KWaylandServer::ClientConnection *);
 
+    void scaleOverrideChanged();
+
 private:
     friend class Display;
     explicit ClientConnection(wl_client *c, Display *parent);
-    QScopedPointer<ClientConnectionPrivate> d;
+    std::unique_ptr<ClientConnectionPrivate> d;
 };
 
 }

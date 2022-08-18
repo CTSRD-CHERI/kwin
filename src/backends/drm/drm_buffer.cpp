@@ -10,7 +10,7 @@
 #include "drm_buffer.h"
 
 #include "drm_gpu.h"
-#include "logging.h"
+#include "drm_logging.h"
 
 // system
 #include <sys/mman.h>
@@ -34,17 +34,7 @@ DrmGpuBuffer::DrmGpuBuffer(DrmGpu *gpu, QSize size, uint32_t format, uint64_t mo
     , m_strides(strides)
     , m_offsets(offsets)
     , m_planeCount(planeCount)
-    , m_fds({-1, -1, -1, -1})
 {
-}
-
-DrmGpuBuffer::~DrmGpuBuffer()
-{
-    for (uint32_t i = 0; i < m_planeCount; i++) {
-        if (m_fds[i] != -1) {
-            close(m_fds[i]);
-        }
-    }
 }
 
 DrmGpu *DrmGpuBuffer::gpu() const
@@ -67,9 +57,9 @@ QSize DrmGpuBuffer::size() const
     return m_size;
 }
 
-std::array<int, 4> DrmGpuBuffer::fds()
+const std::array<FileDescriptor, 4> &DrmGpuBuffer::fds()
 {
-    if (m_fds[0] == -1) {
+    if (!m_fds[0].isValid()) {
         createFds();
     }
     return m_fds;
@@ -150,7 +140,6 @@ std::shared_ptr<DrmFramebuffer> DrmFramebuffer::createFramebuffer(const std::sha
     if (ret == 0) {
         return std::make_shared<DrmFramebuffer>(buffer, framebufferId);
     } else {
-        qCWarning(KWIN_DRM) << "Could not create drm framebuffer!" << strerror(errno);
         return nullptr;
     }
 }

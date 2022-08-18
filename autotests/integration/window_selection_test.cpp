@@ -63,11 +63,10 @@ void TestWindowSelection::initTestCase()
 
     kwinApp()->start();
     QVERIFY(applicationStartedSpy.wait());
-    const auto outputs = kwinApp()->platform()->enabledOutputs();
+    const auto outputs = workspace()->outputs();
     QCOMPARE(outputs.count(), 2);
     QCOMPARE(outputs[0]->geometry(), QRect(0, 0, 1280, 1024));
     QCOMPARE(outputs[1]->geometry(), QRect(1280, 0, 1280, 1024));
-    Test::initWaylandWorkspace();
 }
 
 void TestWindowSelection::init()
@@ -87,20 +86,20 @@ void TestWindowSelection::cleanup()
 void TestWindowSelection::testSelectOnWindowPointer()
 {
     // this test verifies window selection through pointer works
-    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
-    QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
-    QScopedPointer<Pointer> pointer(Test::waylandSeat()->createPointer());
-    QScopedPointer<Keyboard> keyboard(Test::waylandSeat()->createKeyboard());
-    QSignalSpy pointerEnteredSpy(pointer.data(), &Pointer::entered);
+    std::unique_ptr<KWayland::Client::Surface> surface(Test::createSurface());
+    std::unique_ptr<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.get()));
+    std::unique_ptr<Pointer> pointer(Test::waylandSeat()->createPointer());
+    std::unique_ptr<Keyboard> keyboard(Test::waylandSeat()->createKeyboard());
+    QSignalSpy pointerEnteredSpy(pointer.get(), &Pointer::entered);
     QVERIFY(pointerEnteredSpy.isValid());
-    QSignalSpy pointerLeftSpy(pointer.data(), &Pointer::left);
+    QSignalSpy pointerLeftSpy(pointer.get(), &Pointer::left);
     QVERIFY(pointerLeftSpy.isValid());
-    QSignalSpy keyboardEnteredSpy(keyboard.data(), &Keyboard::entered);
+    QSignalSpy keyboardEnteredSpy(keyboard.get(), &Keyboard::entered);
     QVERIFY(keyboardEnteredSpy.isValid());
-    QSignalSpy keyboardLeftSpy(keyboard.data(), &Keyboard::left);
+    QSignalSpy keyboardLeftSpy(keyboard.get(), &Keyboard::left);
     QVERIFY(keyboardLeftSpy.isValid());
 
-    auto window = Test::renderAndWaitForShown(surface.data(), QSize(100, 50), Qt::blue);
+    auto window = Test::renderAndWaitForShown(surface.get(), QSize(100, 50), Qt::blue);
     QVERIFY(window);
     QVERIFY(keyboardEnteredSpy.wait());
     KWin::Cursors::self()->mouse()->setPos(window->frameGeometry().center());
@@ -173,20 +172,20 @@ void TestWindowSelection::testSelectOnWindowKeyboard_data()
 void TestWindowSelection::testSelectOnWindowKeyboard()
 {
     // this test verifies window selection through keyboard key
-    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
-    QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
-    QScopedPointer<Pointer> pointer(Test::waylandSeat()->createPointer());
-    QScopedPointer<Keyboard> keyboard(Test::waylandSeat()->createKeyboard());
-    QSignalSpy pointerEnteredSpy(pointer.data(), &Pointer::entered);
+    std::unique_ptr<KWayland::Client::Surface> surface(Test::createSurface());
+    std::unique_ptr<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.get()));
+    std::unique_ptr<Pointer> pointer(Test::waylandSeat()->createPointer());
+    std::unique_ptr<Keyboard> keyboard(Test::waylandSeat()->createKeyboard());
+    QSignalSpy pointerEnteredSpy(pointer.get(), &Pointer::entered);
     QVERIFY(pointerEnteredSpy.isValid());
-    QSignalSpy pointerLeftSpy(pointer.data(), &Pointer::left);
+    QSignalSpy pointerLeftSpy(pointer.get(), &Pointer::left);
     QVERIFY(pointerLeftSpy.isValid());
-    QSignalSpy keyboardEnteredSpy(keyboard.data(), &Keyboard::entered);
+    QSignalSpy keyboardEnteredSpy(keyboard.get(), &Keyboard::entered);
     QVERIFY(keyboardEnteredSpy.isValid());
-    QSignalSpy keyboardLeftSpy(keyboard.data(), &Keyboard::left);
+    QSignalSpy keyboardLeftSpy(keyboard.get(), &Keyboard::left);
     QVERIFY(keyboardLeftSpy.isValid());
 
-    auto window = Test::renderAndWaitForShown(surface.data(), QSize(100, 50), Qt::blue);
+    auto window = Test::renderAndWaitForShown(surface.get(), QSize(100, 50), Qt::blue);
     QVERIFY(window);
     QVERIFY(keyboardEnteredSpy.wait());
     QVERIFY(!window->frameGeometry().contains(KWin::Cursors::self()->mouse()->pos()));
@@ -245,14 +244,14 @@ void TestWindowSelection::testSelectOnWindowKeyboard()
 void TestWindowSelection::testSelectOnWindowTouch()
 {
     // this test verifies window selection through touch
-    QScopedPointer<Touch> touch(Test::waylandSeat()->createTouch());
-    QSignalSpy touchStartedSpy(touch.data(), &Touch::sequenceStarted);
+    std::unique_ptr<Touch> touch(Test::waylandSeat()->createTouch());
+    QSignalSpy touchStartedSpy(touch.get(), &Touch::sequenceStarted);
     QVERIFY(touchStartedSpy.isValid());
-    QSignalSpy touchCanceledSpy(touch.data(), &Touch::sequenceCanceled);
+    QSignalSpy touchCanceledSpy(touch.get(), &Touch::sequenceCanceled);
     QVERIFY(touchCanceledSpy.isValid());
-    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
-    QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
-    auto window = Test::renderAndWaitForShown(surface.data(), QSize(100, 50), Qt::blue);
+    std::unique_ptr<KWayland::Client::Surface> surface(Test::createSurface());
+    std::unique_ptr<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.get()));
+    auto window = Test::renderAndWaitForShown(surface.get(), QSize(100, 50), Qt::blue);
     QVERIFY(window);
 
     Window *selectedWindow = nullptr;
@@ -308,20 +307,20 @@ void TestWindowSelection::testSelectOnWindowTouch()
 void TestWindowSelection::testCancelOnWindowPointer()
 {
     // this test verifies that window selection cancels through right button click
-    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
-    QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
-    QScopedPointer<Pointer> pointer(Test::waylandSeat()->createPointer());
-    QScopedPointer<Keyboard> keyboard(Test::waylandSeat()->createKeyboard());
-    QSignalSpy pointerEnteredSpy(pointer.data(), &Pointer::entered);
+    std::unique_ptr<KWayland::Client::Surface> surface(Test::createSurface());
+    std::unique_ptr<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.get()));
+    std::unique_ptr<Pointer> pointer(Test::waylandSeat()->createPointer());
+    std::unique_ptr<Keyboard> keyboard(Test::waylandSeat()->createKeyboard());
+    QSignalSpy pointerEnteredSpy(pointer.get(), &Pointer::entered);
     QVERIFY(pointerEnteredSpy.isValid());
-    QSignalSpy pointerLeftSpy(pointer.data(), &Pointer::left);
+    QSignalSpy pointerLeftSpy(pointer.get(), &Pointer::left);
     QVERIFY(pointerLeftSpy.isValid());
-    QSignalSpy keyboardEnteredSpy(keyboard.data(), &Keyboard::entered);
+    QSignalSpy keyboardEnteredSpy(keyboard.get(), &Keyboard::entered);
     QVERIFY(keyboardEnteredSpy.isValid());
-    QSignalSpy keyboardLeftSpy(keyboard.data(), &Keyboard::left);
+    QSignalSpy keyboardLeftSpy(keyboard.get(), &Keyboard::left);
     QVERIFY(keyboardLeftSpy.isValid());
 
-    auto window = Test::renderAndWaitForShown(surface.data(), QSize(100, 50), Qt::blue);
+    auto window = Test::renderAndWaitForShown(surface.get(), QSize(100, 50), Qt::blue);
     QVERIFY(window);
     QVERIFY(keyboardEnteredSpy.wait());
     KWin::Cursors::self()->mouse()->setPos(window->frameGeometry().center());
@@ -367,20 +366,20 @@ void TestWindowSelection::testCancelOnWindowPointer()
 void TestWindowSelection::testCancelOnWindowKeyboard()
 {
     // this test verifies that cancel window selection through escape key works
-    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
-    QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
-    QScopedPointer<Pointer> pointer(Test::waylandSeat()->createPointer());
-    QScopedPointer<Keyboard> keyboard(Test::waylandSeat()->createKeyboard());
-    QSignalSpy pointerEnteredSpy(pointer.data(), &Pointer::entered);
+    std::unique_ptr<KWayland::Client::Surface> surface(Test::createSurface());
+    std::unique_ptr<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.get()));
+    std::unique_ptr<Pointer> pointer(Test::waylandSeat()->createPointer());
+    std::unique_ptr<Keyboard> keyboard(Test::waylandSeat()->createKeyboard());
+    QSignalSpy pointerEnteredSpy(pointer.get(), &Pointer::entered);
     QVERIFY(pointerEnteredSpy.isValid());
-    QSignalSpy pointerLeftSpy(pointer.data(), &Pointer::left);
+    QSignalSpy pointerLeftSpy(pointer.get(), &Pointer::left);
     QVERIFY(pointerLeftSpy.isValid());
-    QSignalSpy keyboardEnteredSpy(keyboard.data(), &Keyboard::entered);
+    QSignalSpy keyboardEnteredSpy(keyboard.get(), &Keyboard::entered);
     QVERIFY(keyboardEnteredSpy.isValid());
-    QSignalSpy keyboardLeftSpy(keyboard.data(), &Keyboard::left);
+    QSignalSpy keyboardLeftSpy(keyboard.get(), &Keyboard::left);
     QVERIFY(keyboardLeftSpy.isValid());
 
-    auto window = Test::renderAndWaitForShown(surface.data(), QSize(100, 50), Qt::blue);
+    auto window = Test::renderAndWaitForShown(surface.get(), QSize(100, 50), Qt::blue);
     QVERIFY(window);
     QVERIFY(keyboardEnteredSpy.wait());
     KWin::Cursors::self()->mouse()->setPos(window->frameGeometry().center());
@@ -426,20 +425,20 @@ void TestWindowSelection::testCancelOnWindowKeyboard()
 void TestWindowSelection::testSelectPointPointer()
 {
     // this test verifies point selection through pointer works
-    QScopedPointer<KWayland::Client::Surface> surface(Test::createSurface());
-    QScopedPointer<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.data()));
-    QScopedPointer<Pointer> pointer(Test::waylandSeat()->createPointer());
-    QScopedPointer<Keyboard> keyboard(Test::waylandSeat()->createKeyboard());
-    QSignalSpy pointerEnteredSpy(pointer.data(), &Pointer::entered);
+    std::unique_ptr<KWayland::Client::Surface> surface(Test::createSurface());
+    std::unique_ptr<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.get()));
+    std::unique_ptr<Pointer> pointer(Test::waylandSeat()->createPointer());
+    std::unique_ptr<Keyboard> keyboard(Test::waylandSeat()->createKeyboard());
+    QSignalSpy pointerEnteredSpy(pointer.get(), &Pointer::entered);
     QVERIFY(pointerEnteredSpy.isValid());
-    QSignalSpy pointerLeftSpy(pointer.data(), &Pointer::left);
+    QSignalSpy pointerLeftSpy(pointer.get(), &Pointer::left);
     QVERIFY(pointerLeftSpy.isValid());
-    QSignalSpy keyboardEnteredSpy(keyboard.data(), &Keyboard::entered);
+    QSignalSpy keyboardEnteredSpy(keyboard.get(), &Keyboard::entered);
     QVERIFY(keyboardEnteredSpy.isValid());
-    QSignalSpy keyboardLeftSpy(keyboard.data(), &Keyboard::left);
+    QSignalSpy keyboardLeftSpy(keyboard.get(), &Keyboard::left);
     QVERIFY(keyboardLeftSpy.isValid());
 
-    auto window = Test::renderAndWaitForShown(surface.data(), QSize(100, 50), Qt::blue);
+    auto window = Test::renderAndWaitForShown(surface.get(), QSize(100, 50), Qt::blue);
     QVERIFY(window);
     QVERIFY(keyboardEnteredSpy.wait());
     KWin::Cursors::self()->mouse()->setPos(window->frameGeometry().center());

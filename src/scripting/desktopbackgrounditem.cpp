@@ -101,17 +101,24 @@ void DesktopBackgroundItem::updateWindow()
     QString activity = m_activity;
     if (activity.isEmpty()) {
 #if KWIN_BUILD_ACTIVITIES
-        activity = Activities::self()->current();
+        activity = Workspace::self()->activities()->current();
 #endif
     }
+
+    Window *clientCandidate = nullptr;
 
     const auto clients = workspace()->allClientList();
     for (Window *client : clients) {
         if (client->isDesktop() && client->isOnOutput(m_output) && client->isOnDesktop(desktop) && client->isOnActivity(activity)) {
-            setClient(client);
-            break;
+            // In the unlikely event there are multiple desktop windows (e.g. conky's floating panel is of type "desktop")
+            // choose the one which matches the ouptut size, if possible.
+            if (!clientCandidate || client->size() == m_output->geometry().size()) {
+                clientCandidate = client;
+            }
         }
     }
+
+    setClient(clientCandidate);
 }
 
 } // namespace KWin

@@ -15,6 +15,7 @@
 #include <kwinglobals.h>
 
 #include <KSharedConfig>
+#include <memory>
 // Qt
 #include <QAbstractNativeEventFilter>
 #include <QApplication>
@@ -27,7 +28,14 @@ namespace KWin
 {
 
 class Platform;
+class Session;
 class X11EventFilter;
+class PluginManager;
+class InputMethod;
+class ColorManager;
+class ScreenLockerWatcher;
+class TabletModeManager;
+class XwaylandInterface;
 
 class XcbEventFilter : public QAbstractNativeEventFilter
 {
@@ -58,7 +66,6 @@ class KWIN_EXPORT Application : public QApplication
     Q_PROPERTY(quint32 x11Time READ x11Time WRITE setX11Time)
     Q_PROPERTY(quint32 x11RootWindow READ x11RootWindow CONSTANT)
     Q_PROPERTY(void *x11Connection READ x11Connection NOTIFY x11ConnectionChanged)
-    Q_PROPERTY(int x11ScreenNumber READ x11ScreenNumber CONSTANT)
     Q_PROPERTY(KSharedConfigPtr config READ config WRITE setConfig)
     Q_PROPERTY(KSharedConfigPtr kxkbConfig READ kxkbConfig WRITE setKxkbConfig)
 public:
@@ -82,6 +89,7 @@ public:
          */
         OperationModeXwayland
     };
+    Q_ENUM(OperationMode)
     ~Application() override;
 
     void setConfigLock(bool lock);
@@ -137,7 +145,6 @@ public:
         }
     }
     void updateX11Time(xcb_generic_event_t *event);
-    void createScreens();
 
     static void setCrashCount(int count);
     static bool wasCrash();
@@ -148,23 +155,6 @@ public:
      * KAboutData::setApplicationData.
      */
     static void createAboutData();
-
-    /**
-     * @returns the X11 Screen number. If not applicable it's set to @c -1.
-     */
-    static int x11ScreenNumber();
-    /**
-     * Sets the X11 screen number of this KWin instance to @p screenNumber.
-     */
-    static void setX11ScreenNumber(int screenNumber);
-    /**
-     * @returns whether this is a multi head setup on X11.
-     */
-    static bool isX11MultiHead();
-    /**
-     * Sets whether this is a multi head setup on X11.
-     */
-    static void setX11MultiHead(bool multiHead);
 
     /**
      * @returns the X11 root window.
@@ -183,71 +173,6 @@ public:
     }
 
     /**
-     * @returns the X11 default screen
-     */
-    xcb_screen_t *x11DefaultScreen() const
-    {
-        return m_defaultScreen;
-    }
-
-#if KWIN_BUILD_ACTIVITIES
-    bool usesKActivities() const
-    {
-        return m_useKActivities;
-    }
-    void setUseKActivities(bool use)
-    {
-        m_useKActivities = use;
-    }
-#endif
-
-    virtual QProcessEnvironment processStartupEnvironment() const;
-
-    void initPlatform(const KPluginMetaData &plugin);
-    Platform *platform() const
-    {
-        return m_platform;
-    }
-
-    bool isTerminating() const
-    {
-        return m_terminating;
-    }
-
-    static void setupMalloc();
-    static void setupLocalizedString();
-
-Q_SIGNALS:
-    void x11ConnectionChanged();
-    void x11ConnectionAboutToBeDestroyed();
-    void workspaceCreated();
-    void screensCreated();
-    void platformCreated();
-    void virtualTerminalCreated();
-    void started();
-
-protected:
-    Application(OperationMode mode, int &argc, char **argv);
-    virtual void performStartup() = 0;
-
-    void notifyKSplash();
-    void notifyStarted();
-    void createInput();
-    void createWorkspace();
-    void createAtoms();
-    void createOptions();
-    void createPlugins();
-    void createColorManager();
-    void createInputMethod();
-    void installNativeX11EventFilter();
-    void removeNativeX11EventFilter();
-    void destroyInput();
-    void destroyWorkspace();
-    void destroyCompositor();
-    void destroyPlugins();
-    void destroyColorManager();
-    void destroyInputMethod();
-    /**
      * Inheriting classes should use this method to set the X11 root window
      * before accessing any X11 specific code pathes.
      */
@@ -263,15 +188,89 @@ protected:
     {
         m_connection = c;
     }
-    /**
-     * Inheriting classes should use this method to set the default screen
-     * before accessing any X11 specific code pathes.
-     */
-    void setX11DefaultScreen(xcb_screen_t *screen)
+
+    qreal xwaylandScale() const
     {
-        m_defaultScreen = screen;
+        return m_xwaylandScale;
     }
+
+    void setXwaylandScale(qreal scale);
+
+#if KWIN_BUILD_ACTIVITIES
+    bool usesKActivities() const
+    {
+        return m_useKActivities;
+    }
+    void setUseKActivities(bool use)
+    {
+        m_useKActivities = use;
+    }
+#endif
+
+    QProcessEnvironment processStartupEnvironment() const;
+    void setProcessStartupEnvironment(const QProcessEnvironment &environment);
+
+    Platform *platform() const
+    {
+        return m_platform.get();
+    }
+    void setPlatform(std::unique_ptr<Platform> &&platform);
+
+    Session *session() const
+    {
+        return m_session.get();
+    }
+    void setSession(std::unique_ptr<Session> &&session);
+
+    bool isTerminating() const
+    {
+        return m_terminating;
+    }
+
+    void installNativeX11EventFilter();
+    void removeNativeX11EventFilter();
+
+    void createAtoms();
     void destroyAtoms();
+
+    static void setupMalloc();
+    static void setupLocalizedString();
+
+    PluginManager *pluginManager() const;
+    InputMethod *inputMethod() const;
+    ColorManager *colorManager() const;
+    virtual XwaylandInterface *xwayland() const;
+#if KWIN_BUILD_SCREENLOCKER
+    ScreenLockerWatcher *screenLockerWatcher() const;
+#endif
+
+Q_SIGNALS:
+    void x11ConnectionChanged();
+    void x11ConnectionAboutToBeDestroyed();
+    void xwaylandScaleChanged();
+    void workspaceCreated();
+    void virtualTerminalCreated();
+    void started();
+
+protected:
+    Application(OperationMode mode, int &argc, char **argv);
+    virtual void performStartup() = 0;
+
+    void notifyKSplash();
+    void notifyStarted();
+    void createInput();
+    void createWorkspace();
+    void createOptions();
+    void createPlugins();
+    void createColorManager();
+    void createInputMethod();
+    void createTabletModeManager();
+    void destroyInput();
+    void destroyWorkspace();
+    void destroyCompositor();
+    void destroyPlugins();
+    void destroyColorManager();
+    void destroyInputMethod();
     void destroyPlatform();
 
     void setTerminating()
@@ -285,7 +284,7 @@ protected:
 private:
     QList<QPointer<X11EventFilterContainer>> m_eventFilters;
     QList<QPointer<X11EventFilterContainer>> m_genericEventFilters;
-    QScopedPointer<XcbEventFilter> m_eventFilter;
+    std::unique_ptr<XcbEventFilter> m_eventFilter;
     bool m_configLock;
     KSharedConfigPtr m_config;
     KSharedConfigPtr m_kxkbConfig;
@@ -293,42 +292,27 @@ private:
     xcb_timestamp_t m_x11Time = XCB_TIME_CURRENT_TIME;
     xcb_window_t m_rootWindow = XCB_WINDOW_NONE;
     xcb_connection_t *m_connection = nullptr;
-    xcb_screen_t *m_defaultScreen = nullptr;
 #if KWIN_BUILD_ACTIVITIES
     bool m_useKActivities = true;
 #endif
-    Platform *m_platform = nullptr;
+    std::unique_ptr<Session> m_session;
+    std::unique_ptr<Platform> m_platform;
     bool m_terminating = false;
+    qreal m_xwaylandScale = 1;
+    QProcessEnvironment m_processEnvironment;
+    std::unique_ptr<PluginManager> m_pluginManager;
+    std::unique_ptr<InputMethod> m_inputMethod;
+    std::unique_ptr<ColorManager> m_colorManager;
+    std::unique_ptr<TabletModeManager> m_tabletModeManager;
+#if KWIN_BUILD_SCREENLOCKER
+    std::unique_ptr<ScreenLockerWatcher> m_screenLockerWatcher;
+#endif
 };
 
 inline static Application *kwinApp()
 {
     return static_cast<Application *>(QCoreApplication::instance());
 }
-
-namespace Xwl
-{
-class Xwayland;
-}
-
-class KWIN_EXPORT ApplicationWaylandAbstract : public Application
-{
-    Q_OBJECT
-public:
-    ~ApplicationWaylandAbstract() override = 0;
-
-protected:
-    friend class Xwl::Xwayland;
-
-    ApplicationWaylandAbstract(OperationMode mode, int &argc, char **argv);
-    virtual void setProcessStartupEnvironment(const QProcessEnvironment &environment)
-    {
-        Q_UNUSED(environment);
-    }
-    virtual void startSession()
-    {
-    }
-};
 
 } // namespace
 

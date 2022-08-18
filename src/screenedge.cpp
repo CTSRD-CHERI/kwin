@@ -41,8 +41,9 @@
 #include <QAction>
 #include <QDBusInterface>
 #include <QDBusPendingCall>
+#include <QFontDatabase>
+#include <QFontMetrics>
 #include <QMouseEvent>
-#include <QSharedPointer>
 #include <QTextStream>
 #include <QTimer>
 #include <QWidget>
@@ -490,10 +491,10 @@ void Edge::switchDesktop(const QPoint &cursorPos)
     if (vds->currentDesktop() != oldDesktop) {
         m_pushBackBlocked = true;
         Cursors::self()->mouse()->setPos(pos);
-        QSharedPointer<QMetaObject::Connection> me(new QMetaObject::Connection);
+        QMetaObject::Connection *me = new QMetaObject::Connection();
         *me = QObject::connect(QCoreApplication::eventDispatcher(), &QAbstractEventDispatcher::aboutToBlock, this, [this, me]() {
             QObject::disconnect(*me);
-            const_cast<QSharedPointer<QMetaObject::Connection> *>(&me)->reset(nullptr);
+            delete me;
             m_pushBackBlocked = false;
         });
     }
@@ -567,7 +568,7 @@ void Edge::setGeometry(const QRect &geometry)
     doGeometryUpdate();
 
     if (isScreenEdge()) {
-        const Output *output = kwinApp()->platform()->outputAt(m_geometry.center());
+        const Output *output = workspace()->outputAt(m_geometry.center());
         m_gesture->setStartGeometry(m_geometry);
         m_gesture->setMinimumDelta(QSizeF(MINIMUM_DELTA, MINIMUM_DELTA) / output->scale());
     }
@@ -576,12 +577,15 @@ void Edge::setGeometry(const QRect &geometry)
 void Edge::checkBlocking()
 {
     Window *client = Workspace::self()->activeWindow();
-    const bool newValue = !m_edges->remainActiveOnFullscreen() && client && client->isFullScreen() && client->frameGeometry().contains(m_geometry.center());
+    const bool newValue = !m_edges->remainActiveOnFullscreen() && client && client->isFullScreen() && client->frameGeometry().contains(m_geometry.center()) && !(effects && effects->hasActiveFullScreenEffect());
     if (newValue == m_blocked) {
         return;
     }
     const bool wasTouch = activatesForTouchGesture();
     m_blocked = newValue;
+    if (m_blocked && m_approaching) {
+        stopApproaching();
+    }
     if (wasTouch != activatesForTouchGesture()) {
         Q_EMIT activatesForTouchGestureChanged();
     }
@@ -756,11 +760,9 @@ Output *Edge::output() const
 /**********************************************************
  * ScreenEdges
  *********************************************************/
-KWIN_SINGLETON_FACTORY(ScreenEdges)
 
-ScreenEdges::ScreenEdges(QObject *parent)
-    : QObject(parent)
-    , m_desktopSwitching(false)
+ScreenEdges::ScreenEdges()
+    : m_desktopSwitching(false)
     , m_desktopSwitchingMovingClients(false)
     , m_timeThreshold(0)
     , m_reactivateThreshold(0)
@@ -775,24 +777,10 @@ ScreenEdges::ScreenEdges(QObject *parent)
     , m_actionLeft(ElectricActionNone)
     , m_gestureRecognizer(new GestureRecognizer(this))
 {
-    // TODO: Maybe calculate the corner offset based on font metrics instead?
-    const auto outputs = kwinApp()->platform()->enabledOutputs();
-    if (!outputs.isEmpty()) {
-        const QSize size = outputs[0]->geometry().size();
-        const QSizeF physicalSize = outputs[0]->physicalSize();
-
-        const int physicalDpiX = size.width() / physicalSize.width() * qreal(25.4);
-        const int physicalDpiY = size.height() / physicalSize.height() * qreal(25.4);
-
-        m_cornerOffset = (physicalDpiX + physicalDpiY + 5) / 6;
-    }
+    const int gridUnit = QFontMetrics(QFontDatabase::systemFont(QFontDatabase::GeneralFont)).boundingRect(QLatin1Char('M')).height();
+    m_cornerOffset = 4 * gridUnit;
 
     connect(workspace(), &Workspace::windowRemoved, this, &ScreenEdges::deleteEdgeForClient);
-}
-
-ScreenEdges::~ScreenEdges()
-{
-    s_self = nullptr;
 }
 
 void ScreenEdges::init()
@@ -961,7 +949,7 @@ void ScreenEdges::updateLayout()
 
 static bool isLeftScreen(const QRect &screen, const QRect &fullArea)
 {
-    const auto outputs = kwinApp()->platform()->enabledOutputs();
+    const auto outputs = workspace()->outputs();
     if (outputs.count() == 1) {
         return true;
     }
@@ -988,7 +976,7 @@ static bool isLeftScreen(const QRect &screen, const QRect &fullArea)
 
 static bool isRightScreen(const QRect &screen, const QRect &fullArea)
 {
-    const auto outputs = kwinApp()->platform()->enabledOutputs();
+    const auto outputs = workspace()->outputs();
     if (outputs.count() == 1) {
         return true;
     }
@@ -1015,7 +1003,7 @@ static bool isRightScreen(const QRect &screen, const QRect &fullArea)
 
 static bool isTopScreen(const QRect &screen, const QRect &fullArea)
 {
-    const auto outputs = kwinApp()->platform()->enabledOutputs();
+    const auto outputs = workspace()->outputs();
     if (outputs.count() == 1) {
         return true;
     }
@@ -1042,7 +1030,7 @@ static bool isTopScreen(const QRect &screen, const QRect &fullArea)
 
 static bool isBottomScreen(const QRect &screen, const QRect &fullArea)
 {
-    const auto outputs = kwinApp()->platform()->enabledOutputs();
+    const auto outputs = workspace()->outputs();
     if (outputs.count() == 1) {
         return true;
     }
@@ -1079,7 +1067,7 @@ void ScreenEdges::recreateEdges()
     const QRect fullArea = workspace()->geometry();
     QRegion processedRegion;
 
-    const auto outputs = kwinApp()->platform()->enabledOutputs();
+    const auto outputs = workspace()->outputs();
     for (Output *output : outputs) {
         const QRegion screen = QRegion(output->geometry()).subtracted(processedRegion);
         processedRegion += screen;
@@ -1350,10 +1338,10 @@ void ScreenEdges::createEdgeForClient(Window *client, ElectricBorder border)
     int x = 0;
     int width = 0;
     int height = 0;
-    const QRect geo = client->frameGeometry();
+    const QRect geo = client->frameGeometry().toRect();
     const QRect fullArea = workspace()->geometry();
 
-    const auto outputs = kwinApp()->platform()->enabledOutputs();
+    const auto outputs = workspace()->outputs();
     Output *foundOutput = nullptr;
     for (Output *output : outputs) {
         foundOutput = output;
@@ -1438,7 +1426,7 @@ void ScreenEdges::check(const QPoint &pos, const QDateTime &now, bool forceNoPus
 {
     bool activatedForClient = false;
     for (auto it = m_edges.begin(); it != m_edges.end(); ++it) {
-        if (!(*it)->isReserved()) {
+        if (!(*it)->isReserved() || (*it)->isBlocked()) {
             continue;
         }
         if (!(*it)->activatesForPointer()) {
@@ -1468,7 +1456,7 @@ bool ScreenEdges::isEntered(QMouseEvent *event)
     bool activatedForClient = false;
     for (auto it = m_edges.begin(); it != m_edges.end(); ++it) {
         Edge *edge = *it;
-        if (!edge->isReserved()) {
+        if (!edge->isReserved() || edge->isBlocked()) {
             continue;
         }
         if (!edge->activatesForPointer()) {
@@ -1512,7 +1500,7 @@ bool ScreenEdges::handleEnterNotifiy(xcb_window_t window, const QPoint &point, c
         if (!edge || edge->window() == XCB_WINDOW_NONE) {
             continue;
         }
-        if (!edge->isReserved()) {
+        if (!edge->isReserved() || edge->isBlocked()) {
             continue;
         }
         if (!edge->activatesForPointer()) {

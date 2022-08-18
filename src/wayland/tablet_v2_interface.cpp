@@ -259,7 +259,8 @@ void TabletToolV2Interface::sendButton(uint32_t button, bool pressed)
 
 void TabletToolV2Interface::sendMotion(const QPointF &pos)
 {
-    d->send_motion(d->targetResource(), wl_fixed_from_double(pos.x()), wl_fixed_from_double(pos.y()));
+    const QPointF surfacePos = d->m_surface->toSurfaceLocal(pos);
+    d->send_motion(d->targetResource(), wl_fixed_from_double(surfacePos.x()), wl_fixed_from_double(surfacePos.y()));
 }
 
 void TabletToolV2Interface::sendDistance(uint32_t distance)
@@ -541,7 +542,7 @@ public:
     QVector<TabletPadStripV2Interface *> m_strips;
     TabletPadGroupV2Interface *const m_padGroup;
     TabletSeatV2Interface *m_seat = nullptr;
-    SurfaceInterface *m_currentSurface = nullptr;
+    QPointer<SurfaceInterface> m_currentSurface;
     Display *const m_display;
 };
 
@@ -589,7 +590,7 @@ void TabletPadV2Interface::setCurrentSurface(SurfaceInterface *surface, TabletV2
     }
 
     if (d->m_currentSurface) {
-        d->send_leave(d->m_display->nextSerial(), surface->resource());
+        d->send_leave(d->resourceForSurface(d->m_currentSurface), d->m_display->nextSerial(), d->m_currentSurface->resource());
     }
 
     d->m_currentSurface = surface;

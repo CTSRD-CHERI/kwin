@@ -106,7 +106,7 @@ static bool activate(const QString &sessionPath)
     return reply.type() != QDBusMessage::ErrorMessage;
 }
 
-LogindSession *LogindSession::create(QObject *parent)
+std::unique_ptr<LogindSession> LogindSession::create()
 {
     if (!QDBusConnection::systemBus().interface() || !QDBusConnection::systemBus().interface()->isServiceRegistered(s_serviceName)) {
         return nullptr;
@@ -130,13 +130,12 @@ LogindSession *LogindSession::create(QObject *parent)
         return nullptr;
     }
 
-    LogindSession *session = new LogindSession(sessionPath, parent);
+    std::unique_ptr<LogindSession> session{new LogindSession(sessionPath)};
     if (session->initialize()) {
         return session;
+    } else {
+        return nullptr;
     }
-
-    delete session;
-    return nullptr;
 }
 
 bool LogindSession::isActive() const
@@ -174,13 +173,14 @@ int LogindSession::openRestricted(const QString &fileName)
 
     const QDBusMessage reply = QDBusConnection::systemBus().call(message);
     if (reply.type() == QDBusMessage::ErrorMessage) {
-        qCDebug(KWIN_CORE, "Failed to open %s device (%s)",
-                qPrintable(fileName), qPrintable(reply.errorMessage()));
+        qCWarning(KWIN_CORE, "Failed to open %s device (%s)",
+                  qPrintable(fileName), qPrintable(reply.errorMessage()));
         return -1;
     }
 
     const QDBusUnixFileDescriptor descriptor = reply.arguments().constFirst().value<QDBusUnixFileDescriptor>();
     if (!descriptor.isValid()) {
+        qCWarning(KWIN_CORE, "File descriptor for %s from logind is invalid", qPrintable(fileName));
         return -1;
     }
 
@@ -216,9 +216,8 @@ void LogindSession::switchTo(uint terminal)
     QDBusConnection::systemBus().asyncCall(message);
 }
 
-LogindSession::LogindSession(const QString &sessionPath, QObject *parent)
-    : Session(parent)
-    , m_sessionPath(sessionPath)
+LogindSession::LogindSession(const QString &sessionPath)
+    : m_sessionPath(sessionPath)
 {
     qDBusRegisterMetaType<DBusLogindSeat>();
 }

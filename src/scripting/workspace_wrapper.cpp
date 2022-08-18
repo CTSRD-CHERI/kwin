@@ -10,8 +10,8 @@
 
 #include "workspace_wrapper.h"
 #include "outline.h"
+#include "output.h"
 #include "platform.h"
-#include "screens.h"
 #include "virtualdesktops.h"
 #include "workspace.h"
 #include "x11window.h"
@@ -20,7 +20,9 @@
 #endif
 
 #include <QApplication>
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
 #include <QDesktopWidget>
+#endif
 
 namespace KWin
 {
@@ -41,7 +43,7 @@ WorkspaceWrapper::WorkspaceWrapper(QObject *parent)
     connect(vds, &VirtualDesktopManager::currentChanged, this, &WorkspaceWrapper::currentVirtualDesktopChanged);
     connect(ws, &Workspace::windowDemandsAttentionChanged, this, &WorkspaceWrapper::clientDemandsAttentionChanged);
 #if KWIN_BUILD_ACTIVITIES
-    if (KWin::Activities *activities = KWin::Activities::self()) {
+    if (KWin::Activities *activities = ws->activities()) {
         connect(activities, &Activities::currentChanged, this, &WorkspaceWrapper::currentActivityChanged);
         connect(activities, &Activities::added, this, &WorkspaceWrapper::activitiesChanged);
         connect(activities, &Activities::added, this, &WorkspaceWrapper::activityAdded);
@@ -49,14 +51,17 @@ WorkspaceWrapper::WorkspaceWrapper(QObject *parent)
         connect(activities, &Activities::removed, this, &WorkspaceWrapper::activityRemoved);
     }
 #endif
-    connect(screens(), &Screens::sizeChanged, this, &WorkspaceWrapper::virtualScreenSizeChanged);
-    connect(screens(), &Screens::geometryChanged, this, &WorkspaceWrapper::virtualScreenGeometryChanged);
-    connect(screens(), &Screens::countChanged, this, [this](int previousCount, int currentCount) {
-        Q_UNUSED(previousCount)
-        Q_EMIT numberScreensChanged(currentCount);
+    connect(ws, &Workspace::geometryChanged, this, &WorkspaceWrapper::virtualScreenSizeChanged);
+    connect(ws, &Workspace::geometryChanged, this, &WorkspaceWrapper::virtualScreenGeometryChanged);
+    connect(ws, &Workspace::outputAdded, this, [this]() {
+        Q_EMIT numberScreensChanged(numScreens());
     });
-    // TODO Plasma 6: Remove it.
+    connect(ws, &Workspace::outputRemoved, this, [this]() {
+        Q_EMIT numberScreensChanged(numScreens());
+    });
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
     connect(QApplication::desktop(), &QDesktopWidget::resized, this, &WorkspaceWrapper::screenResized);
+#endif
 
     const QList<Window *> clients = ws->allClientList();
     for (Window *client : clients) {
@@ -102,10 +107,10 @@ Window *WorkspaceWrapper::activeClient() const
 QString WorkspaceWrapper::currentActivity() const
 {
 #if KWIN_BUILD_ACTIVITIES
-    if (!Activities::self()) {
+    if (!Workspace::self()->activities()) {
         return QString();
     }
-    return Activities::self()->current();
+    return Workspace::self()->activities()->current();
 #else
     return QString();
 #endif
@@ -114,8 +119,8 @@ QString WorkspaceWrapper::currentActivity() const
 void WorkspaceWrapper::setCurrentActivity(QString activity)
 {
 #if KWIN_BUILD_ACTIVITIES
-    if (Activities::self()) {
-        Activities::self()->setCurrent(activity);
+    if (Workspace::self()->activities()) {
+        Workspace::self()->activities()->setCurrent(activity);
     }
 #else
     Q_UNUSED(activity)
@@ -125,10 +130,10 @@ void WorkspaceWrapper::setCurrentActivity(QString activity)
 QStringList WorkspaceWrapper::activityList() const
 {
 #if KWIN_BUILD_ACTIVITIES
-    if (!Activities::self()) {
+    if (!Workspace::self()->activities()) {
         return QStringList();
     }
-    return Activities::self()->all();
+    return Workspace::self()->activities()->all();
 #else
     return QStringList();
 #endif
@@ -263,51 +268,61 @@ static VirtualDesktop *resolveVirtualDesktop(int desktopId)
     }
 }
 
-QRect WorkspaceWrapper::clientArea(ClientAreaOption option, const QPoint &p, int desktop) const
+QRectF WorkspaceWrapper::clientArea(ClientAreaOption option, const QPoint &p, int desktop) const
 {
-    const Output *output = kwinApp()->platform()->outputAt(p);
+    const Output *output = Workspace::self()->outputAt(p);
     const VirtualDesktop *virtualDesktop = resolveVirtualDesktop(desktop);
     return Workspace::self()->clientArea(static_cast<clientAreaOption>(option), output, virtualDesktop);
 }
 
-QRect WorkspaceWrapper::clientArea(ClientAreaOption option, const QPoint &p, VirtualDesktop *desktop) const
+QRectF WorkspaceWrapper::clientArea(ClientAreaOption option, const QPoint &p, VirtualDesktop *desktop) const
 {
-    return workspace()->clientArea(static_cast<clientAreaOption>(option), kwinApp()->platform()->outputAt(p), desktop);
+    return workspace()->clientArea(static_cast<clientAreaOption>(option), workspace()->outputAt(p), desktop);
 }
 
-QRect WorkspaceWrapper::clientArea(ClientAreaOption option, const KWin::Window *c) const
-{
-    return Workspace::self()->clientArea(static_cast<clientAreaOption>(option), c);
-}
-
-QRect WorkspaceWrapper::clientArea(ClientAreaOption option, KWin::Window *c) const
+QRectF WorkspaceWrapper::clientArea(ClientAreaOption option, const KWin::Window *c) const
 {
     return Workspace::self()->clientArea(static_cast<clientAreaOption>(option), c);
 }
 
-QRect WorkspaceWrapper::clientArea(ClientAreaOption option, int screen, int desktop) const
+QRectF WorkspaceWrapper::clientArea(ClientAreaOption option, KWin::Window *c) const
 {
-    VirtualDesktop *virtualDesktop;
-    Output *output;
-
-    if (desktop == NETWinInfo::OnAllDesktops || desktop == 0) {
-        virtualDesktop = VirtualDesktopManager::self()->currentDesktop();
-    } else {
-        virtualDesktop = VirtualDesktopManager::self()->desktopForX11Id(desktop);
-        Q_ASSERT(virtualDesktop);
-    }
-
-    if (screen == -1) {
-        output = workspace()->activeOutput();
-    } else {
-        output = kwinApp()->platform()->findOutput(screen);
-        Q_ASSERT(output);
-    }
-
-    return workspace()->clientArea(static_cast<clientAreaOption>(option), output, virtualDesktop);
+    return Workspace::self()->clientArea(static_cast<clientAreaOption>(option), c);
 }
 
-QRect WorkspaceWrapper::clientArea(ClientAreaOption option, Output *output, VirtualDesktop *desktop) const
+static VirtualDesktop *resolveDesktop(int desktopId)
+{
+    auto vdm = VirtualDesktopManager::self();
+    if (desktopId == NETWinInfo::OnAllDesktops || desktopId == 0) {
+        return vdm->currentDesktop();
+    }
+    return vdm->desktopForX11Id(desktopId);
+}
+
+static Output *resolveOutput(int outputId)
+{
+    if (outputId == -1) {
+        return workspace()->activeOutput();
+    }
+    return workspace()->outputs().value(outputId);
+}
+
+QRectF WorkspaceWrapper::clientArea(ClientAreaOption option, int outputId, int desktopId) const
+{
+    VirtualDesktop *desktop = resolveDesktop(desktopId);
+    if (Q_UNLIKELY(!desktop)) {
+        return QRect();
+    }
+
+    Output *output = resolveOutput(outputId);
+    if (Q_UNLIKELY(!output)) {
+        return QRect();
+    }
+
+    return workspace()->clientArea(static_cast<clientAreaOption>(option), output, desktop);
+}
+
+QRectF WorkspaceWrapper::clientArea(ClientAreaOption option, Output *output, VirtualDesktop *desktop) const
 {
     return workspace()->clientArea(static_cast<clientAreaOption>(option), output, desktop);
 }
@@ -356,17 +371,17 @@ void WorkspaceWrapper::setupClientConnections(Window *client)
 
 void WorkspaceWrapper::showOutline(const QRect &geometry)
 {
-    outline()->show(geometry);
+    workspace()->outline()->show(geometry);
 }
 
 void WorkspaceWrapper::showOutline(int x, int y, int width, int height)
 {
-    outline()->show(QRect(x, y, width, height));
+    workspace()->outline()->show(QRect(x, y, width, height));
 }
 
 void WorkspaceWrapper::hideOutline()
 {
-    outline()->hide();
+    workspace()->outline()->hide();
 }
 
 X11Window *WorkspaceWrapper::getClient(qulonglong windowId)
@@ -401,12 +416,17 @@ int WorkspaceWrapper::workspaceWidth() const
 
 int WorkspaceWrapper::numScreens() const
 {
-    return screens()->count();
+    return workspace()->outputs().count();
+}
+
+int WorkspaceWrapper::screenAt(const QPointF &pos) const
+{
+    return workspace()->outputs().indexOf(workspace()->outputAt(pos));
 }
 
 int WorkspaceWrapper::activeScreen() const
 {
-    return kwinApp()->platform()->enabledOutputs().indexOf(workspace()->activeOutput());
+    return workspace()->outputs().indexOf(workspace()->activeOutput());
 }
 
 QRect WorkspaceWrapper::virtualScreenGeometry() const
@@ -421,7 +441,7 @@ QSize WorkspaceWrapper::virtualScreenSize() const
 
 void WorkspaceWrapper::sendClientToScreen(Window *client, int screen)
 {
-    Output *output = kwinApp()->platform()->findOutput(screen);
+    Output *output = workspace()->outputs().value(screen);
     if (output) {
         workspace()->sendWindowToOutput(client, output);
     }

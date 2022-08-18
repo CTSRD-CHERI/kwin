@@ -1,12 +1,12 @@
 cmake_minimum_required(VERSION 3.16)
 
-set(PROJECT_VERSION "5.24.80") # Handled by release scripts
+set(PROJECT_VERSION "5.25.80") # Handled by release scripts
 project(KWin VERSION ${PROJECT_VERSION})
 
 set(CMAKE_C_STANDARD 99)
 
-set(QT_MIN_VERSION "5.15.0")
-set(KF5_MIN_VERSION "5.91")
+set(QT_MIN_VERSION "5.15.2")
+set(KF5_MIN_VERSION "5.97")
 set(KDE_COMPILERSETTINGS_LEVEL "5.82")
 
 find_package(ECM ${KF5_MIN_VERSION} REQUIRED NO_MODULE)
@@ -70,7 +70,7 @@ add_definitions(-DMESA_EGL_NO_X11_HEADERS)
 add_definitions(-DEGL_NO_X11)
 add_definitions(-DEGL_NO_PLATFORM_SPECIFIC_TYPES)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # required frameworks by Core
@@ -160,7 +160,7 @@ add_feature_info("Breeze-Decoration" HAVE_BREEZE_DECO "Default decoration plugin
 
 find_package(EGL)
 set_package_properties(EGL PROPERTIES
-    TYPE RUNTIME
+    TYPE REQUIRED
     PURPOSE "Required to build KWin with EGL support"
 )
 
@@ -286,6 +286,7 @@ find_package(XCB 1.10 REQUIRED COMPONENTS
     SYNC
     XCB
     XFIXES
+    XINERAMA
 )
 set_package_properties(XCB PROPERTIES TYPE REQUIRED)
 
@@ -356,7 +357,7 @@ set(HAVE_ACCESSIBILITY ${QAccessibilityClient_FOUND})
 
 include(ECMFindQmlModule)
 ecm_find_qmlmodule(QtQuick 2.3)
-ecm_find_qmlmodule(QtQuick.Controls 1.2)
+ecm_find_qmlmodule(QtQuick.Controls 2.15)
 ecm_find_qmlmodule(QtQuick.Layouts 1.3)
 ecm_find_qmlmodule(QtQuick.Window 2.1)
 ecm_find_qmlmodule(QtMultimedia 5.0)

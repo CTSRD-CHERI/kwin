@@ -32,6 +32,7 @@
 #include "moving_client_x11_filter.h"
 #include "netinfo.h"
 #include "outline.h"
+#include "outputconfiguration.h"
 #include "placement.h"
 #include "platform.h"
 #include "pluginmanager.h"
@@ -60,12 +61,11 @@
 #include <KStartupInfo>
 // Qt
 #include <QtConcurrentRun>
+// xcb
+#include <xcb/xinerama.h>
 
 namespace KWin
 {
-
-extern int screen_number;
-extern bool is_multihead;
 
 X11EventFilterContainer::X11EventFilterContainer(X11EventFilter *filter)
     : m_filter(filter)
@@ -79,9 +79,10 @@ X11EventFilter *X11EventFilterContainer::filter() const
 
 ColorMapper::ColorMapper(QObject *parent)
     : QObject(parent)
-    , m_default(kwinApp()->x11DefaultScreen()->default_colormap)
-    , m_installed(kwinApp()->x11DefaultScreen()->default_colormap)
 {
+    const xcb_screen_t *screen = Xcb::defaultScreen();
+    m_default = screen->default_colormap;
+    m_installed = screen->default_colormap;
 }
 
 ColorMapper::~ColorMapper()
@@ -122,6 +123,8 @@ Workspace::Workspace()
     , m_userActionsMenu(new UserActionsMenu(this))
     , workspaceInit(true)
     , m_sessionManager(new SessionManager(this))
+    , m_focusChain(std::make_unique<FocusChain>())
+    , m_applicationMenu(std::make_unique<ApplicationMenu>())
 {
     // If KWin was already running it saved its configuration after loosing the selection -> Reread
 #if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
@@ -130,17 +133,14 @@ Workspace::Workspace()
     QFuture<void> reparseConfigFuture = QtConcurrent::run(&Options::reparseConfiguration, options);
 #endif
 
-    ApplicationMenu::create(this);
-
     _self = this;
 
 #if KWIN_BUILD_ACTIVITIES
-    Activities *activities = nullptr;
     if (kwinApp()->usesKActivities()) {
-        activities = Activities::create(this);
+        m_activities = std::make_unique<Activities>();
     }
-    if (activities) {
-        connect(activities, &Activities::currentChanged, this, &Workspace::updateCurrentActivity);
+    if (m_activities) {
+        connect(m_activities.get(), &Activities::currentChanged, this, &Workspace::updateCurrentActivity);
     }
 #endif
 
@@ -155,10 +155,11 @@ Workspace::Workspace()
     m_quickTileCombineTimer = new QTimer(this);
     m_quickTileCombineTimer->setSingleShot(true);
 
-    RuleBook::create(this)->load();
+    m_rulebook = std::make_unique<RuleBook>();
+    m_rulebook->load();
 
-    kwinApp()->createScreens();
-    ScreenEdges::create(this);
+    m_screens = std::make_unique<Screens>();
+    m_screenEdges = std::make_unique<ScreenEdges>();
 
     // VirtualDesktopManager needs to be created prior to init shortcuts
     // and prior to TabBox, due to TabBox connecting to signals
@@ -169,7 +170,7 @@ Workspace::Workspace()
 
 #if KWIN_BUILD_TABBOX
     // need to create the tabbox before compositing scene is setup
-    TabBox::TabBox::create(this);
+    m_tabbox = std::make_unique<TabBox::TabBox>();
 #endif
 
     if (!Compositor::self()) {
@@ -177,12 +178,12 @@ Workspace::Workspace()
         X11Compositor::create(this);
     }
 
-    auto decorationBridge = Decoration::DecorationBridge::create(this);
-    decorationBridge->init();
-    connect(this, &Workspace::configChanged, decorationBridge, &Decoration::DecorationBridge::reconfigure);
+    m_decorationBridge = std::make_unique<Decoration::DecorationBridge>();
+    m_decorationBridge->init();
+    connect(this, &Workspace::configChanged, m_decorationBridge.get(), &Decoration::DecorationBridge::reconfigure);
 
     new DBusInterface(this);
-    Outline::create(this);
+    m_outline = std::make_unique<Outline>();
 
     initShortcuts();
 
@@ -192,30 +193,37 @@ Workspace::Workspace()
 void Workspace::init()
 {
     KSharedConfigPtr config = kwinApp()->config();
-    ScreenEdges *screenEdges = ScreenEdges::self();
-    screenEdges->setConfig(config);
-    screenEdges->init();
-    connect(options, &Options::configChanged, screenEdges, &ScreenEdges::reconfigure);
-    connect(VirtualDesktopManager::self(), &VirtualDesktopManager::layoutChanged, screenEdges, &ScreenEdges::updateLayout);
-    connect(this, &Workspace::windowActivated, screenEdges, &ScreenEdges::checkBlocking);
+    m_screenEdges->setConfig(config);
+    m_screenEdges->init();
+    connect(options, &Options::configChanged, m_screenEdges.get(), &ScreenEdges::reconfigure);
+    connect(VirtualDesktopManager::self(), &VirtualDesktopManager::layoutChanged, m_screenEdges.get(), &ScreenEdges::updateLayout);
+    connect(this, &Workspace::windowActivated, m_screenEdges.get(), &ScreenEdges::checkBlocking);
 
-    FocusChain *focusChain = FocusChain::create(this);
-    connect(this, &Workspace::windowRemoved, focusChain, &FocusChain::remove);
-    connect(this, &Workspace::windowActivated, focusChain, &FocusChain::setActiveWindow);
-    connect(VirtualDesktopManager::self(), &VirtualDesktopManager::currentChanged, focusChain, [focusChain]() {
-        focusChain->setCurrentDesktop(VirtualDesktopManager::self()->currentDesktop());
+    connect(this, &Workspace::windowRemoved, m_focusChain.get(), &FocusChain::remove);
+    connect(this, &Workspace::windowActivated, m_focusChain.get(), &FocusChain::setActiveWindow);
+    connect(VirtualDesktopManager::self(), &VirtualDesktopManager::currentChanged, m_focusChain.get(), [this]() {
+        m_focusChain->setCurrentDesktop(VirtualDesktopManager::self()->currentDesktop());
     });
-    connect(options, &Options::separateScreenFocusChanged, focusChain, &FocusChain::setSeparateScreenFocus);
-    focusChain->setSeparateScreenFocus(options->isSeparateScreenFocus());
+    connect(options, &Options::separateScreenFocusChanged, m_focusChain.get(), &FocusChain::setSeparateScreenFocus);
+    m_focusChain->setSeparateScreenFocus(options->isSeparateScreenFocus());
+
+    if (waylandServer()) {
+        updateOutputConfiguration();
+        connect(kwinApp()->platform(), &Platform::screensQueried, this, &Workspace::updateOutputConfiguration);
+    }
 
     Platform *platform = kwinApp()->platform();
     connect(platform, &Platform::outputEnabled, this, &Workspace::slotOutputEnabled);
     connect(platform, &Platform::outputDisabled, this, &Workspace::slotOutputDisabled);
 
-    const QVector<Output *> outputs = platform->enabledOutputs();
+    const QVector<Output *> outputs = platform->outputs();
     for (Output *output : outputs) {
-        slotOutputEnabled(output);
+        if (output->isEnabled()) {
+            slotOutputEnabled(output);
+        }
     }
+
+    m_screens->init();
 
     // create VirtualDesktopManager and perform dependency injection
     VirtualDesktopManager *vds = VirtualDesktopManager::self();
@@ -229,7 +237,7 @@ void Workspace::init()
     vds->setConfig(config);
 
     // Now we know how many desktops we'll have, thus we initialize the positioning object
-    Placement::create(this);
+    m_placement = std::make_unique<Placement>();
 
     // positioning object needs to be created before the virtual desktops are loaded.
     vds->load();
@@ -293,7 +301,7 @@ void Workspace::initializeX11()
     // first initialize the extensions
     Xcb::Extensions::self();
     m_colorMapper.reset(new ColorMapper(this));
-    connect(this, &Workspace::windowActivated, m_colorMapper.data(), &ColorMapper::update);
+    connect(this, &Workspace::windowActivated, m_colorMapper.get(), &ColorMapper::update);
 
     // Call this before XSelectInput() on the root window
     m_startup.reset(new KStartupInfo(
@@ -304,12 +312,6 @@ void Workspace::initializeX11()
 
     // Compatibility
     int32_t data = 1;
-
-    xcb_change_property(kwinApp()->x11Connection(),
-                        XCB_PROP_MODE_APPEND,
-                        kwinApp()->x11RootWindow(),
-                        atoms->kwin_running,
-                        atoms->kwin_running, 32, 1, &data);
 
     if (kwinApp()->operationMode() == Application::OperationModeX11) {
         m_wasUserInteractionFilter.reset(new WasUserInteractionX11Filter);
@@ -457,10 +459,6 @@ void Workspace::cleanupX11()
     RootInfo::destroy();
     Xcb::Extensions::destroy();
 
-    if (xcb_connection_t *connection = kwinApp()->x11Connection()) {
-        xcb_delete_property(connection, kwinApp()->x11RootWindow(), atoms->kwin_running);
-    }
-
     m_colorMapper.reset();
     m_movingClientFilter.reset();
     m_startup.reset();
@@ -494,20 +492,195 @@ Workspace::~Workspace()
         it = deleted.erase(it);
     }
 
-    delete RuleBook::self();
+    m_rulebook.reset();
     kwinApp()->config()->sync();
 
-    delete Placement::self();
+    m_placement.reset();
     delete m_windowKeysDialog;
 
     _self = nullptr;
+}
+
+namespace KWinKScreenIntegration
+{
+/// See KScreen::Output::hashMd5
+QString outputHash(Output *output)
+{
+    QCryptographicHash hash(QCryptographicHash::Md5);
+    if (!output->edid().isEmpty()) {
+        hash.addData(output->edid());
+    } else {
+        hash.addData(output->name().toLatin1());
+    }
+    return QString::fromLatin1(hash.result().toHex());
+}
+
+/// See KScreen::Config::connectedOutputsHash in libkscreen
+QString connectedOutputsHash(const QVector<Output *> &outputs)
+{
+    QStringList hashedOutputs;
+    hashedOutputs.reserve(outputs.count());
+    for (auto output : qAsConst(outputs)) {
+        if (!output->isPlaceholder() && !output->isNonDesktop()) {
+            hashedOutputs << outputHash(output);
+        }
+    }
+    std::sort(hashedOutputs.begin(), hashedOutputs.end());
+    const auto hash = QCryptographicHash::hash(hashedOutputs.join(QString()).toLatin1(), QCryptographicHash::Md5);
+    return QString::fromLatin1(hash.toHex());
+}
+
+QMap<Output *, QJsonObject> outputsConfig(const QVector<Output *> &outputs, const QString &hash)
+{
+    const QString kscreenJsonPath = QStandardPaths::locate(QStandardPaths::GenericDataLocation, QStringLiteral("kscreen/") % hash);
+    if (kscreenJsonPath.isEmpty()) {
+        return {};
+    }
+
+    QFile f(kscreenJsonPath);
+    if (!f.open(QIODevice::ReadOnly)) {
+        qCWarning(KWIN_CORE) << "Could not open file" << kscreenJsonPath;
+        return {};
+    }
+
+    QJsonParseError error;
+    const auto doc = QJsonDocument::fromJson(f.readAll(), &error);
+    if (error.error != QJsonParseError::NoError) {
+        qCWarning(KWIN_CORE) << "Failed to parse" << kscreenJsonPath << error.errorString();
+        return {};
+    }
+
+    QMap<Output *, QJsonObject> ret;
+    const auto outputsJson = doc.array();
+    for (const auto &outputJson : outputsJson) {
+        const auto outputObject = outputJson.toObject();
+        for (auto it = outputs.constBegin(), itEnd = outputs.constEnd(); it != itEnd;) {
+            if (!ret.contains(*it) && outputObject["id"] == outputHash(*it)) {
+                ret[*it] = outputObject;
+                continue;
+            }
+            ++it;
+        }
+    }
+    return ret;
+}
+
+/// See KScreen::Output::Rotation
+enum Rotation {
+    None = 1,
+    Left = 2,
+    Inverted = 4,
+    Right = 8,
+};
+
+Output::Transform toDrmTransform(int rotation)
+{
+    switch (Rotation(rotation)) {
+    case None:
+        return Output::Transform::Normal;
+    case Left:
+        return Output::Transform::Rotated90;
+    case Inverted:
+        return Output::Transform::Rotated180;
+    case Right:
+        return Output::Transform::Rotated270;
+    default:
+        Q_UNREACHABLE();
+    }
+}
+
+std::shared_ptr<OutputMode> parseMode(Output *output, const QJsonObject &modeInfo)
+{
+    const QJsonObject size = modeInfo["size"].toObject();
+    const QSize modeSize = QSize(size["width"].toInt(), size["height"].toInt());
+    const int refreshRate = std::round(modeInfo["refresh"].toDouble() * 1000);
+
+    const auto modes = output->modes();
+    auto it = std::find_if(modes.begin(), modes.end(), [&modeSize, &refreshRate](const auto &mode) {
+        return mode->size() == modeSize && mode->refreshRate() == refreshRate;
+    });
+    return (it != modes.end()) ? *it : nullptr;
+}
+}
+
+void Workspace::updateOutputConfiguration()
+{
+    // There's conflict between this code and setVirtualOutputs(), need to adjust the tests.
+    if (QStandardPaths::isTestModeEnabled()) {
+        return;
+    }
+
+    const auto outputs = kwinApp()->platform()->outputs();
+    const QString hash = KWinKScreenIntegration::connectedOutputsHash(outputs);
+    if (m_outputsHash == hash) {
+        return;
+    }
+
+    const auto outputsInfo = KWinKScreenIntegration::outputsConfig(outputs, hash);
+    m_outputsHash = hash;
+
+    Output *primaryOutput = outputs.constFirst();
+    OutputConfiguration cfg;
+    // default position goes from left to right
+    QPoint pos(0, 0);
+    for (const auto &output : qAsConst(outputs)) {
+        if (output->isPlaceholder() || output->isNonDesktop()) {
+            continue;
+        }
+        auto props = cfg.changeSet(output);
+        const QJsonObject outputInfo = outputsInfo[output];
+        qCDebug(KWIN_CORE) << "Reading output configuration for " << output;
+        if (!outputInfo.isEmpty()) {
+            if (outputInfo["primary"].toBool()) {
+                primaryOutput = output;
+            }
+            props->enabled = outputInfo["enabled"].toBool(true);
+            const QJsonObject pos = outputInfo["pos"].toObject();
+            props->pos = QPoint(pos["x"].toInt(), pos["y"].toInt());
+            if (const QJsonValue scale = outputInfo["scale"]; !scale.isUndefined()) {
+                props->scale = scale.toDouble(1.);
+            }
+            props->transform = KWinKScreenIntegration::toDrmTransform(outputInfo["rotation"].toInt());
+
+            props->overscan = static_cast<uint32_t>(outputInfo["overscan"].toInt(props->overscan));
+            props->vrrPolicy = static_cast<RenderLoop::VrrPolicy>(outputInfo["vrrpolicy"].toInt(static_cast<uint32_t>(props->vrrPolicy)));
+            props->rgbRange = static_cast<Output::RgbRange>(outputInfo["rgbrange"].toInt(static_cast<uint32_t>(props->rgbRange)));
+
+            if (const QJsonObject modeInfo = outputInfo["mode"].toObject(); !modeInfo.isEmpty()) {
+                if (auto mode = KWinKScreenIntegration::parseMode(output, modeInfo)) {
+                    props->mode = mode;
+                }
+            }
+        } else {
+            props->enabled = true;
+            props->pos = pos;
+            props->transform = Output::Transform::Normal;
+        }
+        pos.setX(pos.x() + output->geometry().width());
+    }
+    bool allDisabled = std::all_of(outputs.begin(), outputs.end(), [&cfg](const auto &output) {
+        return !cfg.changeSet(output)->enabled;
+    });
+    if (allDisabled) {
+        qCWarning(KWIN_CORE) << "KScreen config would disable all outputs!";
+        return;
+    }
+    if (!cfg.changeSet(primaryOutput)->enabled) {
+        qCWarning(KWIN_CORE) << "KScreen config would disable the primary output!";
+        return;
+    }
+    if (!kwinApp()->platform()->applyOutputChanges(cfg)) {
+        qCWarning(KWIN_CORE) << "Applying KScreen config failed!";
+        return;
+    }
+    kwinApp()->platform()->setPrimaryOutput(primaryOutput);
 }
 
 void Workspace::setupWindowConnections(Window *window)
 {
     connect(window, &Window::desktopPresenceChanged, this, &Workspace::desktopPresenceChanged);
     connect(window, &Window::minimizedChanged, this, std::bind(&Workspace::windowMinimizedChanged, this, window));
-    connect(window, &Window::fullScreenChanged, ScreenEdges::self(), &ScreenEdges::checkBlocking);
+    connect(window, &Window::fullScreenChanged, m_screenEdges.get(), &ScreenEdges::checkBlocking);
 }
 
 void Workspace::constrain(Window *below, Window *above)
@@ -657,6 +830,7 @@ X11Window *Workspace::createX11Window(xcb_window_t windowId, bool is_mapped)
         return nullptr;
     }
     addX11Window(window);
+    Q_EMIT windowAdded(window);
     return window;
 }
 
@@ -680,9 +854,6 @@ Unmanaged *Workspace::createUnmanaged(xcb_window_t windowId)
 void Workspace::addX11Window(X11Window *window)
 {
     Group *grp = findGroup(window->window());
-
-    Q_EMIT windowAdded(window);
-
     if (grp != nullptr) {
         grp->gotLeader(window);
     }
@@ -692,7 +863,7 @@ void Workspace::addX11Window(X11Window *window)
             requestFocus(window); // TODO: Make sure desktop is active after startup if there's no other window active
         }
     } else {
-        FocusChain::self()->update(window, FocusChain::Update);
+        m_focusChain->update(window, FocusChain::Update);
     }
     m_x11Clients.append(window);
     m_allClients.append(window);
@@ -726,13 +897,6 @@ void Workspace::addUnmanaged(Unmanaged *window)
  */
 void Workspace::removeX11Window(X11Window *window)
 {
-    if (window == m_activePopupWindow) {
-        closeActivePopup();
-    }
-    if (m_userActionsMenu->isMenuWindow(window)) {
-        m_userActionsMenu->close();
-    }
-
     Q_ASSERT(m_x11Clients.contains(window));
     // TODO: if marked window is removed, notify the marked list
     m_x11Clients.removeAll(window);
@@ -740,7 +904,7 @@ void Workspace::removeX11Window(X11Window *window)
     if (group != nullptr) {
         group->lostLeader();
     }
-    removeAbstractClient(window);
+    removeWindow(window);
 }
 
 void Workspace::removeUnmanaged(Unmanaged *window)
@@ -778,7 +942,7 @@ void Workspace::addWaylandWindow(Window *window)
     window->updateLayer();
 
     if (window->isPlaceable()) {
-        const QRect area = clientArea(PlacementArea, window, activeOutput());
+        const QRectF area = clientArea(PlacementArea, window, activeOutput());
         bool placementDone = false;
         if (window->isRequestedFullScreen()) {
             placementDone = true;
@@ -790,42 +954,36 @@ void Workspace::addWaylandWindow(Window *window)
             placementDone = true;
         }
         if (!placementDone) {
-            Placement::self()->place(window, area);
+            m_placement->place(window, area);
         }
     }
     m_allClients.append(window);
     addToStack(window);
 
-    updateStackingOrder();
+    updateStackingOrder(true);
     updateClientArea();
     if (window->wantsInput() && !window->isMinimized()) {
         activateWindow(window);
     }
     updateTabbox();
-    connect(window, &Window::windowShown, this, [this, window] {
-        window->updateLayer();
-        updateStackingOrder();
-        updateClientArea();
-        if (window->wantsInput()) {
-            activateWindow(window);
-        }
-    });
-    connect(window, &Window::windowHidden, this, [this] {
-        // TODO: update tabbox if it's displayed
-        updateStackingOrder();
-        updateClientArea();
-    });
     Q_EMIT windowAdded(window);
 }
 
 void Workspace::removeWaylandWindow(Window *window)
 {
     windowHidden(window);
-    removeAbstractClient(window);
+    removeWindow(window);
 }
 
-void Workspace::removeAbstractClient(Window *window)
+void Workspace::removeWindow(Window *window)
 {
+    if (window == m_activePopupWindow) {
+        closeActivePopup();
+    }
+    if (m_userActionsMenu->isMenuWindow(window)) {
+        m_userActionsMenu->close();
+    }
+
     m_allClients.removeAll(window);
     if (window == m_delayFocusWindow) {
         cancelDelayFocus();
@@ -979,11 +1137,11 @@ void Workspace::slotReconfigure()
     m_userActionsMenu->discard();
     updateToolWindows(true);
 
-    RuleBook::self()->load();
+    m_rulebook->load();
     for (Window *window : qAsConst(m_allClients)) {
         if (window->supportsWindowRules()) {
             window->evaluateWindowRules();
-            RuleBook::self()->discardUsed(window, false);
+            m_rulebook->discardUsed(window, false);
         }
     }
 
@@ -1086,7 +1244,7 @@ void Workspace::activateWindowOnNewDesktop(VirtualDesktop *desktop)
 
 Window *Workspace::findWindowToActivateOnDesktop(VirtualDesktop *desktop)
 {
-    if (m_moveResizeWindow != nullptr && m_activeWindow == m_moveResizeWindow && FocusChain::self()->contains(m_activeWindow, desktop) && m_activeWindow->isShown() && m_activeWindow->isOnCurrentDesktop()) {
+    if (m_moveResizeWindow != nullptr && m_activeWindow == m_moveResizeWindow && m_focusChain->contains(m_activeWindow, desktop) && m_activeWindow->isShown() && m_activeWindow->isOnCurrentDesktop()) {
         // A requestFocus call will fail, as the window is already active
         return m_activeWindow;
     }
@@ -1103,7 +1261,8 @@ Window *Workspace::findWindowToActivateOnDesktop(VirtualDesktop *desktop)
                 continue;
             }
 
-            if (window->frameGeometry().contains(Cursors::self()->mouse()->pos())) {
+            // port to hit test
+            if (window->frameGeometry().toRect().contains(Cursors::self()->mouse()->pos())) {
                 if (!window->isDesktop()) {
                     return window;
                 }
@@ -1111,7 +1270,7 @@ Window *Workspace::findWindowToActivateOnDesktop(VirtualDesktop *desktop)
             }
         }
     }
-    return FocusChain::self()->getForActivation(desktop);
+    return m_focusChain->getForActivation(desktop);
 }
 
 /**
@@ -1124,7 +1283,7 @@ Window *Workspace::findWindowToActivateOnDesktop(VirtualDesktop *desktop)
 void Workspace::updateCurrentActivity(const QString &new_activity)
 {
 #if KWIN_BUILD_ACTIVITIES
-    if (!Activities::self()) {
+    if (!m_activities) {
         return;
     }
     // closeActivePopup();
@@ -1180,7 +1339,7 @@ void Workspace::updateCurrentActivity(const QString &new_activity)
         window = m_activeWindow;
     } else if (options->focusPolicyIsReasonable()) {
         // Search in focus chain
-        window = FocusChain::self()->getForActivation(VirtualDesktopManager::self()->currentDesktop());
+        window = m_focusChain->getForActivation(VirtualDesktopManager::self()->currentDesktop());
     }
 
     if (!window) {
@@ -1203,11 +1362,37 @@ void Workspace::updateCurrentActivity(const QString &new_activity)
 #endif
 }
 
+Output *Workspace::outputAt(const QPointF &pos) const
+{
+    Output *bestOutput = nullptr;
+    int minDistance = INT_MAX;
+    for (Output *output : std::as_const(m_outputs)) {
+        const QRect &geo = output->geometry();
+        if (geo.contains(pos.toPoint())) {
+            return output;
+        }
+        qreal distance = QPointF(geo.topLeft() - pos).manhattanLength();
+        distance = std::min(distance, QPointF(geo.topRight() - pos).manhattanLength());
+        distance = std::min(distance, QPointF(geo.bottomRight() - pos).manhattanLength());
+        distance = std::min(distance, QPointF(geo.bottomLeft() - pos).manhattanLength());
+        if (distance < minDistance) {
+            minDistance = distance;
+            bestOutput = output;
+        }
+    }
+    return bestOutput;
+}
+
 void Workspace::slotOutputEnabled(Output *output)
 {
+    if (output->isNonDesktop()) {
+        return;
+    }
     if (!m_activeOutput) {
         m_activeOutput = output;
     }
+
+    m_outputs.append(output);
 
     connect(output, &Output::geometryChanged, this, &Workspace::desktopResized);
     desktopResized();
@@ -1216,12 +1401,20 @@ void Workspace::slotOutputEnabled(Output *output)
     for (Window *window : qAsConst(m_allClients)) {
         sendWindowToOutput(window, window->output());
     }
+
+    Q_EMIT outputAdded(output);
 }
 
 void Workspace::slotOutputDisabled(Output *output)
 {
+    if (output->isNonDesktop()) {
+        return;
+    }
+
+    m_outputs.removeOne(output);
+
     if (m_activeOutput == output) {
-        m_activeOutput = kwinApp()->platform()->outputAt(output->geometry().center());
+        m_activeOutput = outputAt(output->geometry().center());
     }
 
     disconnect(output, &Output::geometryChanged, this, &Workspace::desktopResized);
@@ -1230,15 +1423,17 @@ void Workspace::slotOutputDisabled(Output *output)
     const auto stack = stackingOrder();
     for (Window *window : stack) {
         if (window->output() == output) {
-            window->setOutput(kwinApp()->platform()->outputAt(window->frameGeometry().center()));
+            window->setOutput(outputAt(window->frameGeometry().center()));
         }
     }
+
+    Q_EMIT outputRemoved(output);
 }
 
 void Workspace::slotDesktopAdded(VirtualDesktop *desktop)
 {
-    FocusChain::self()->addDesktop(desktop);
-    Placement::self()->reinitCascading(0);
+    m_focusChain->addDesktop(desktop);
+    m_placement->reinitCascading(0);
     updateClientArea();
 }
 
@@ -1256,8 +1451,8 @@ void Workspace::slotDesktopRemoved(VirtualDesktop *desktop)
     }
 
     updateClientArea();
-    Placement::self()->reinitCascading(0);
-    FocusChain::self()->removeDesktop(desktop);
+    m_placement->reinitCascading(0);
+    m_focusChain->removeDesktop(desktop);
 }
 
 void Workspace::selectWmInputEventMask()
@@ -1315,34 +1510,6 @@ void Workspace::sendWindowToDesktop(Window *window, int desk, bool dont_activate
         sendWindowToDesktop(*it, desk, dont_activate);
     }
     updateClientArea();
-}
-
-/**
- * checks whether the X Window with the input focus is on our X11 screen
- * if the window cannot be determined or inspected, resturn depends on whether there's actually
- * more than one screen
- *
- * this is NOT in any way related to XRandR multiscreen
- *
- */
-extern bool is_multihead; // main.cpp
-bool Workspace::isOnCurrentHead()
-{
-    if (!is_multihead) {
-        return true;
-    }
-
-    Xcb::CurrentInput currentInput;
-    if (currentInput.window() == XCB_WINDOW_NONE) {
-        return !is_multihead;
-    }
-
-    Xcb::WindowGeometry geometry(currentInput.window());
-    if (geometry.isNull()) { // should not happen
-        return !is_multihead;
-    }
-
-    return kwinApp()->x11RootWindow() == geometry->root;
 }
 
 void Workspace::sendWindowToOutput(Window *window, Output *output)
@@ -1429,7 +1596,7 @@ void Workspace::setShowingDesktop(bool showing, bool animated)
     if (showing_desktop && topDesk) {
         requestFocus(topDesk);
     } else if (!showing_desktop && changed) {
-        const auto window = FocusChain::self()->getForActivation(VirtualDesktopManager::self()->currentDesktop());
+        const auto window = m_focusChain->getForActivation(VirtualDesktopManager::self()->currentDesktop());
         if (window) {
             activateWindow(window);
         }
@@ -1532,10 +1699,10 @@ QString Workspace::supportInformation() const
         support.append(QStringLiteral("\n"));
     }
 
-    if (auto bridge = Decoration::DecorationBridge::self()) {
+    if (m_decorationBridge) {
         support.append(QStringLiteral("Decoration\n"));
         support.append(QStringLiteral("==========\n"));
-        support.append(bridge->supportInformation());
+        support.append(m_decorationBridge->supportInformation());
         support.append(QStringLiteral("\n"));
     }
     support.append(QStringLiteral("Platform\n"));
@@ -1572,30 +1739,23 @@ QString Workspace::supportInformation() const
     }
     support.append(QStringLiteral("\nScreen Edges\n"));
     support.append(QStringLiteral("============\n"));
-    const QMetaObject *metaScreenEdges = ScreenEdges::self()->metaObject();
+    const QMetaObject *metaScreenEdges = m_screenEdges->metaObject();
     for (int i = 0; i < metaScreenEdges->propertyCount(); ++i) {
         const QMetaProperty property = metaScreenEdges->property(i);
         if (QLatin1String(property.name()) == QLatin1String("objectName")) {
             continue;
         }
-        support.append(QStringLiteral("%1: %2\n").arg(property.name(), printProperty(ScreenEdges::self()->property(property.name()))));
+        support.append(QStringLiteral("%1: %2\n").arg(property.name(), printProperty(m_screenEdges->property(property.name()))));
     }
     support.append(QStringLiteral("\nScreens\n"));
     support.append(QStringLiteral("=======\n"));
-    support.append(QStringLiteral("Multi-Head: "));
-    if (is_multihead) {
-        support.append(QStringLiteral("yes\n"));
-        support.append(QStringLiteral("Head: %1\n").arg(screen_number));
-    } else {
-        support.append(QStringLiteral("no\n"));
-    }
     support.append(QStringLiteral("Active screen follows mouse: "));
     if (options->activeMouseScreen()) {
         support.append(QStringLiteral(" yes\n"));
     } else {
         support.append(QStringLiteral(" no\n"));
     }
-    const QVector<Output *> outputs = kwinApp()->platform()->enabledOutputs();
+    const QVector<Output *> outputs = kwinApp()->platform()->outputs();
     support.append(QStringLiteral("Number of Screens: %1\n\n").arg(outputs.count()));
     for (int i = 0; i < outputs.count(); ++i) {
         const auto output = outputs[i];
@@ -1603,28 +1763,31 @@ QString Workspace::supportInformation() const
         support.append(QStringLiteral("Screen %1:\n").arg(i));
         support.append(QStringLiteral("---------\n"));
         support.append(QStringLiteral("Name: %1\n").arg(output->name()));
-        support.append(QStringLiteral("Geometry: %1,%2,%3x%4\n")
-                           .arg(geo.x())
-                           .arg(geo.y())
-                           .arg(geo.width())
-                           .arg(geo.height()));
-        support.append(QStringLiteral("Scale: %1\n").arg(output->scale()));
-        support.append(QStringLiteral("Refresh Rate: %1\n").arg(output->refreshRate()));
-        QString vrr = QStringLiteral("incapable");
-        if (output->capabilities() & Output::Capability::Vrr) {
-            switch (output->vrrPolicy()) {
-            case RenderLoop::VrrPolicy::Never:
-                vrr = QStringLiteral("never");
-                break;
-            case RenderLoop::VrrPolicy::Always:
-                vrr = QStringLiteral("always");
-                break;
-            case RenderLoop::VrrPolicy::Automatic:
-                vrr = QStringLiteral("automatic");
-                break;
+        support.append(QStringLiteral("Enabled: %1\n").arg(output->isEnabled()));
+        if (output->isEnabled()) {
+            support.append(QStringLiteral("Geometry: %1,%2,%3x%4\n")
+                               .arg(geo.x())
+                               .arg(geo.y())
+                               .arg(geo.width())
+                               .arg(geo.height()));
+            support.append(QStringLiteral("Scale: %1\n").arg(output->scale()));
+            support.append(QStringLiteral("Refresh Rate: %1\n").arg(output->refreshRate()));
+            QString vrr = QStringLiteral("incapable");
+            if (output->capabilities() & Output::Capability::Vrr) {
+                switch (output->vrrPolicy()) {
+                case RenderLoop::VrrPolicy::Never:
+                    vrr = QStringLiteral("never");
+                    break;
+                case RenderLoop::VrrPolicy::Always:
+                    vrr = QStringLiteral("always");
+                    break;
+                case RenderLoop::VrrPolicy::Automatic:
+                    vrr = QStringLiteral("automatic");
+                    break;
+                }
             }
+            support.append(QStringLiteral("Adaptive Sync: %1\n").arg(vrr));
         }
-        support.append(QStringLiteral("Adaptive Sync: %1\n").arg(vrr));
     }
     support.append(QStringLiteral("\nCompositing\n"));
     support.append(QStringLiteral("===========\n"));
@@ -1745,14 +1908,14 @@ QString Workspace::supportInformation() const
         }
         support.append(QLatin1String("\nLoaded Plugins:\n"));
         support.append(QLatin1String("---------------\n"));
-        QStringList loadedPlugins = PluginManager::self()->loadedPlugins();
+        QStringList loadedPlugins = kwinApp()->pluginManager()->loadedPlugins();
         loadedPlugins.sort();
         for (const QString &plugin : qAsConst(loadedPlugins)) {
             support.append(plugin + QLatin1Char('\n'));
         }
         support.append(QLatin1String("\nAvailable Plugins:\n"));
         support.append(QLatin1String("------------------\n"));
-        QStringList availablePlugins = PluginManager::self()->availablePlugins();
+        QStringList availablePlugins = kwinApp()->pluginManager()->availablePlugins();
         availablePlugins.sort();
         for (const QString &plugin : qAsConst(availablePlugins)) {
             support.append(plugin + QLatin1Char('\n'));
@@ -1892,9 +2055,8 @@ void Workspace::setWasUserInteraction()
 void Workspace::updateTabbox()
 {
 #if KWIN_BUILD_TABBOX
-    TabBox::TabBox *tabBox = TabBox::TabBox::self();
-    if (tabBox->isDisplayed()) {
-        tabBox->reset(true);
+    if (m_tabbox->isDisplayed()) {
+        m_tabbox->reset(true);
     }
 #endif
 }
@@ -1908,11 +2070,11 @@ void Workspace::addInternalWindow(InternalWindow *window)
     window->updateLayer();
 
     if (window->isPlaceable()) {
-        const QRect area = clientArea(PlacementArea, window, workspace()->activeOutput());
-        Placement::self()->place(window, area);
+        const QRectF area = clientArea(PlacementArea, window, workspace()->activeOutput());
+        m_placement->place(window, area);
     }
 
-    updateStackingOrder();
+    updateStackingOrder(true);
     updateClientArea();
 
     Q_EMIT internalWindowAdded(window);
@@ -2037,18 +2199,16 @@ void Workspace::checkTransients(xcb_window_t w)
  */
 void Workspace::desktopResized()
 {
-    const auto outputs = kwinApp()->platform()->enabledOutputs();
-
     const QRect oldGeometry = m_geometry;
     m_geometry = QRect();
-    for (const Output *output : outputs) {
+    for (const Output *output : std::as_const(m_outputs)) {
         m_geometry = m_geometry.united(output->geometry());
     }
 
     if (rootInfo()) {
         NETSize desktop_geometry;
-        desktop_geometry.width = m_geometry.width();
-        desktop_geometry.height = m_geometry.height();
+        desktop_geometry.width = Xcb::toXNative(m_geometry.width());
+        desktop_geometry.height = Xcb::toXNative(m_geometry.height());
         rootInfo()->setDesktopGeometry(desktop_geometry);
     }
 
@@ -2056,7 +2216,7 @@ void Workspace::desktopResized()
     saveOldScreenSizes(); // after updateClientArea(), so that one still uses the previous one
 
     // TODO: emit a signal instead and remove the deep function calls into edges and effects
-    ScreenEdges::self()->recreateEdges();
+    m_screenEdges->recreateEdges();
 
     if (m_geometry != oldGeometry) {
         Q_EMIT geometryChanged();
@@ -2068,8 +2228,7 @@ void Workspace::saveOldScreenSizes()
     olddisplaysize = m_geometry.size();
     m_oldScreenGeometries.clear();
 
-    const auto outputs = kwinApp()->platform()->enabledOutputs();
-    for (const Output *output : outputs) {
+    for (const Output *output : std::as_const(m_outputs)) {
         m_oldScreenGeometries.insert(output, output->geometry());
     }
 }
@@ -2088,7 +2247,7 @@ static bool hasOffscreenXineramaStrut(Window *window)
     region += window->strutRect(StrutAreaLeft);
 
     // Remove all visible areas so that only the invisible remain
-    const auto outputs = kwinApp()->platform()->enabledOutputs();
+    const auto outputs = workspace()->outputs();
     for (const Output *output : outputs) {
         region -= output->geometry();
     }
@@ -2097,16 +2256,16 @@ static bool hasOffscreenXineramaStrut(Window *window)
     return !region.isEmpty();
 }
 
-QRect Workspace::adjustClientArea(Window *window, const QRect &area) const
+QRectF Workspace::adjustClientArea(Window *window, const QRectF &area) const
 {
-    QRect adjustedArea = area;
+    QRectF adjustedArea = area;
 
-    QRect strutLeft = window->strutRect(StrutAreaLeft);
-    QRect strutRight = window->strutRect(StrutAreaRight);
-    QRect strutTop = window->strutRect(StrutAreaTop);
-    QRect strutBottom = window->strutRect(StrutAreaBottom);
+    QRectF strutLeft = window->strutRect(StrutAreaLeft);
+    QRectF strutRight = window->strutRect(StrutAreaRight);
+    QRectF strutTop = window->strutRect(StrutAreaTop);
+    QRectF strutBottom = window->strutRect(StrutAreaBottom);
 
-    QRect screenArea = clientArea(ScreenArea, window);
+    QRectF screenArea = clientArea(ScreenArea, window);
     // HACK: workarea handling is not xinerama aware, so if this strut
     // reserves place at a xinerama edge that's inside the virtual screen,
     // ignore the strut for workspace setting.
@@ -2134,16 +2293,16 @@ QRect Workspace::adjustClientArea(Window *window, const QRect &area) const
     strutBottom.setBottom(qMin(strutBottom.bottom(), screenArea.bottom()));
 
     if (strutLeft.intersects(area)) {
-        adjustedArea.setLeft(strutLeft.right() + 1);
+        adjustedArea.setLeft(strutLeft.right());
     }
     if (strutRight.intersects(area)) {
-        adjustedArea.setRight(strutRight.left() - 1);
+        adjustedArea.setRight(strutRight.left());
     }
     if (strutTop.intersects(area)) {
-        adjustedArea.setTop(strutTop.bottom() + 1);
+        adjustedArea.setTop(strutTop.bottom());
     }
     if (strutBottom.intersects(area)) {
-        adjustedArea.setBottom(strutBottom.top() - 1);
+        adjustedArea.setBottom(strutBottom.top());
     }
 
     return adjustedArea;
@@ -2160,17 +2319,16 @@ QRect Workspace::adjustClientArea(Window *window, const QRect &area) const
  */
 void Workspace::updateClientArea()
 {
-    const QVector<Output *> outputs = kwinApp()->platform()->enabledOutputs();
     const QVector<VirtualDesktop *> desktops = VirtualDesktopManager::self()->desktops();
 
-    QHash<const VirtualDesktop *, QRect> workAreas;
+    QHash<const VirtualDesktop *, QRectF> workAreas;
     QHash<const VirtualDesktop *, StrutRects> restrictedAreas;
-    QHash<const VirtualDesktop *, QHash<const Output *, QRect>> screenAreas;
+    QHash<const VirtualDesktop *, QHash<const Output *, QRectF>> screenAreas;
 
     for (const VirtualDesktop *desktop : desktops) {
         workAreas[desktop] = m_geometry;
 
-        for (const Output *output : outputs) {
+        for (const Output *output : std::as_const(m_outputs)) {
             screenAreas[desktop][output] = output->geometry();
         }
     }
@@ -2179,7 +2337,7 @@ void Workspace::updateClientArea()
         if (!window->hasStrut()) {
             continue;
         }
-        QRect r = adjustClientArea(window, m_geometry);
+        QRectF r = adjustClientArea(window, m_geometry);
 
         // This happens sometimes when the workspace size changes and the
         // struted windows haven't repositioned yet
@@ -2188,7 +2346,7 @@ void Workspace::updateClientArea()
         }
         // sanity check that a strut doesn't exclude a complete screen geometry
         // this is a violation to EWMH, as KWin just ignores the strut
-        for (const Output *output : outputs) {
+        for (const Output *output : std::as_const(m_outputs)) {
             if (!r.intersects(output->geometry())) {
                 qCDebug(KWIN_CORE) << "Adjusted client area would exclude a complete screen, ignore";
                 r = m_geometry;
@@ -2215,7 +2373,7 @@ void Workspace::updateClientArea()
                 workAreas[vd] &= r;
             }
             restrictedAreas[vd] += strutRegion;
-            for (Output *output : outputs) {
+            for (Output *output : std::as_const(m_outputs)) {
                 const auto geo = screenAreas[vd][output].intersected(adjustClientArea(window, output->geometry()));
                 // ignore the geometry if it results in the screen getting removed completely
                 if (!geo.isEmpty()) {
@@ -2234,13 +2392,9 @@ void Workspace::updateClientArea()
         m_restrictedAreas = restrictedAreas;
 
         if (rootInfo()) {
-            NETRect r;
             for (VirtualDesktop *desktop : desktops) {
-                const QRect &workArea = m_workAreas[desktop];
-                r.pos.x = workArea.x();
-                r.pos.y = workArea.y();
-                r.size.width = workArea.width();
-                r.size.height = workArea.height();
+                const QRectF &workArea = m_workAreas[desktop];
+                NETRect r(Xcb::toXNative(workArea));
                 rootInfo()->setWorkArea(desktop->x11DesktopNumber(), r);
             }
         }
@@ -2259,61 +2413,37 @@ void Workspace::updateClientArea()
  * geometry minus windows on the dock. Placement algorithms should
  * refer to this rather than Screens::geometry.
  */
-QRect Workspace::clientArea(clientAreaOption opt, const Output *output, const VirtualDesktop *desktop) const
+QRectF Workspace::clientArea(clientAreaOption opt, const Output *output, const VirtualDesktop *desktop) const
 {
-    QRect workArea;
-
-    const Output *effectiveOutput = output;
-    if (is_multihead) {
-        effectiveOutput = kwinApp()->platform()->findOutput(screen_number);
-    }
-
-    QRect screenArea = m_screenAreas[desktop][effectiveOutput];
-    if (screenArea.isNull()) { // screens may be missing during KWin initialization or screen config changes
-        screenArea = effectiveOutput->geometry();
-    }
-
-    if (is_multihead) {
-        workArea = m_workAreas[desktop];
-        if (workArea.isNull()) {
-            workArea = effectiveOutput->geometry();
-        }
-    } else {
-        workArea = m_workAreas[desktop];
-        if (workArea.isNull()) {
-            workArea = QRect(QPoint(0, 0), m_geometry.size());
-        }
-    }
-
     switch (opt) {
     case MaximizeArea:
     case PlacementArea:
-        return screenArea;
+        if (auto desktopIt = m_screenAreas.constFind(desktop); desktopIt != m_screenAreas.constEnd()) {
+            if (auto outputIt = desktopIt->constFind(output); outputIt != desktopIt->constEnd()) {
+                return *outputIt;
+            }
+        }
+        return output->geometry();
     case MaximizeFullArea:
     case FullScreenArea:
     case MovementArea:
     case ScreenArea:
-        return effectiveOutput->geometry();
+        return output->geometry();
     case WorkArea:
-        if (is_multihead) {
-            return screenArea;
-        } else {
-            return workArea;
-        }
+        return m_workAreas.value(desktop, m_geometry);
     case FullArea:
-        return QRect(QPoint(0, 0), m_geometry.size());
-
+        return m_geometry;
     default:
         Q_UNREACHABLE();
     }
 }
 
-QRect Workspace::clientArea(clientAreaOption opt, const Window *window) const
+QRectF Workspace::clientArea(clientAreaOption opt, const Window *window) const
 {
     return clientArea(opt, window, window->output());
 }
 
-QRect Workspace::clientArea(clientAreaOption opt, const Window *window, const Output *output) const
+QRectF Workspace::clientArea(clientAreaOption opt, const Window *window, const Output *output) const
 {
     const VirtualDesktop *desktop;
     if (window->isOnCurrentDesktop()) {
@@ -2325,9 +2455,9 @@ QRect Workspace::clientArea(clientAreaOption opt, const Window *window, const Ou
     return clientArea(opt, output, desktop);
 }
 
-QRect Workspace::clientArea(clientAreaOption opt, const Window *window, const QPoint &pos) const
+QRectF Workspace::clientArea(clientAreaOption opt, const Window *window, const QPointF &pos) const
 {
-    return clientArea(opt, window, kwinApp()->platform()->outputAt(pos));
+    return clientArea(opt, window, outputAt(pos));
 }
 
 QRect Workspace::geometry() const
@@ -2376,10 +2506,44 @@ int Workspace::oldDisplayHeight() const
     return olddisplaysize.height();
 }
 
+Output *Workspace::xineramaIndexToOutput(int index) const
+{
+    xcb_connection_t *connection = kwinApp()->x11Connection();
+    if (!connection) {
+        return nullptr;
+    }
+
+    const UniqueCPtr<xcb_xinerama_is_active_reply_t> active{xcb_xinerama_is_active_reply(connection, xcb_xinerama_is_active(connection), nullptr)};
+    if (!active || !active->state) {
+        return nullptr;
+    }
+
+    const UniqueCPtr<xcb_xinerama_query_screens_reply_t> screens(xcb_xinerama_query_screens_reply(connection, xcb_xinerama_query_screens(connection), nullptr));
+    if (!screens) {
+        return nullptr;
+    }
+
+    const int infoCount = xcb_xinerama_query_screens_screen_info_length(screens.get());
+    if (index >= infoCount) {
+        return nullptr;
+    }
+
+    const xcb_xinerama_screen_info_t *infos = xcb_xinerama_query_screens_screen_info(screens.get());
+    const QRect needle(infos[index].x_org, infos[index].y_org, infos[index].width, infos[index].height);
+
+    for (Output *output : std::as_const(m_outputs)) {
+        if (Xcb::toXNative(output->geometry()) == needle) {
+            return output;
+        }
+    }
+
+    return nullptr;
+}
+
 Output *Workspace::activeOutput() const
 {
     if (options->activeMouseScreen()) {
-        return kwinApp()->platform()->outputAt(Cursors::self()->mouse()->pos());
+        return outputAt(Cursors::self()->mouse()->pos());
     }
 
     if (m_activeWindow && !m_activeWindow->isOnOutput(m_activeOutput)) {
@@ -2394,9 +2558,9 @@ void Workspace::setActiveOutput(Output *output)
     m_activeOutput = output;
 }
 
-void Workspace::setActiveOutput(const QPoint &pos)
+void Workspace::setActiveOutput(const QPointF &pos)
 {
-    setActiveOutput(kwinApp()->platform()->outputAt(pos));
+    setActiveOutput(outputAt(pos));
 }
 
 /**
@@ -2408,14 +2572,14 @@ void Workspace::setActiveOutput(const QPoint &pos)
  * effective snap zones. When 1.0, it means that the snap zones will be
  * used without change.
  */
-QPoint Workspace::adjustWindowPosition(Window *window, QPoint pos, bool unrestricted, double snapAdjust)
+QPointF Workspace::adjustWindowPosition(Window *window, QPointF pos, bool unrestricted, double snapAdjust)
 {
-    QSize borderSnapZone(options->borderSnapZone(), options->borderSnapZone());
-    QRect maxRect;
+    QSizeF borderSnapZone(options->borderSnapZone(), options->borderSnapZone());
+    QRectF maxRect;
     int guideMaximized = MaximizeRestore;
     if (window->maximizeMode() != MaximizeRestore) {
         maxRect = clientArea(MaximizeArea, window, pos + window->rect().center());
-        QRect geo = window->frameGeometry();
+        QRectF geo = window->frameGeometry();
         if (window->maximizeMode() & MaximizeHorizontal && (geo.x() == maxRect.left() || geo.right() == maxRect.right())) {
             guideMaximized |= MaximizeHorizontal;
             borderSnapZone.setWidth(qMax(borderSnapZone.width() + 2, maxRect.width() / 16));
@@ -2428,16 +2592,15 @@ QPoint Workspace::adjustWindowPosition(Window *window, QPoint pos, bool unrestri
 
     if (options->windowSnapZone() || !borderSnapZone.isNull() || options->centerSnapZone()) {
 
-        const bool snappingToCenter = (options->centerSnapZone() * snapAdjust);
         const bool sOWO = options->isSnapOnlyWhenOverlapping();
-        const Output *output = kwinApp()->platform()->outputAt(pos + window->rect().center());
+        const Output *output = outputAt(pos + window->rect().center());
         if (maxRect.isNull()) {
             maxRect = clientArea(MaximizeArea, window, output);
         }
         const int xmin = maxRect.left();
-        const int xmax = maxRect.right() + 1; // desk size
+        const int xmax = maxRect.right(); // desk size
         const int ymin = maxRect.top();
-        const int ymax = maxRect.bottom() + 1;
+        const int ymax = maxRect.bottom();
 
         const int cx(pos.x());
         const int cy(pos.y());
@@ -2453,31 +2616,31 @@ QPoint Workspace::adjustWindowPosition(Window *window, QPoint pos, bool unrestri
         int lx, ly, lrx, lry; // coords and size for the comparison window, l
 
         // border snap
-        const int snapX = borderSnapZone.width() * snapAdjust; // snap trigger
-        const int snapY = borderSnapZone.height() * snapAdjust;
-        if (snapX || snapY) {
-            if ((sOWO ? (cx < xmin) : true) && (qAbs(xmin - cx) < snapX)) {
+        const int borderXSnapZone = borderSnapZone.width() * snapAdjust; // snap trigger
+        const int borderYSnapZone = borderSnapZone.height() * snapAdjust;
+        if (borderXSnapZone > 0 || borderYSnapZone > 0) {
+            if ((sOWO ? (cx < xmin) : true) && (qAbs(xmin - cx) < borderXSnapZone)) {
                 deltaX = xmin - cx;
                 nx = xmin;
             }
-            if ((sOWO ? (rx > xmax) : true) && (qAbs(rx - xmax) < snapX) && (qAbs(xmax - rx) < deltaX)) {
+            if ((sOWO ? (rx > xmax) : true) && (qAbs(rx - xmax) < borderXSnapZone) && (qAbs(xmax - rx) < deltaX)) {
                 deltaX = rx - xmax;
                 nx = xmax - cw;
             }
 
-            if ((sOWO ? (cy < ymin) : true) && (qAbs(ymin - cy) < snapY)) {
+            if ((sOWO ? (cy < ymin) : true) && (qAbs(ymin - cy) < borderYSnapZone)) {
                 deltaY = ymin - cy;
                 ny = ymin;
             }
-            if ((sOWO ? (ry > ymax) : true) && (qAbs(ry - ymax) < snapY) && (qAbs(ymax - ry) < deltaY)) {
+            if ((sOWO ? (ry > ymax) : true) && (qAbs(ry - ymax) < borderYSnapZone) && (qAbs(ymax - ry) < deltaY)) {
                 deltaY = ry - ymax;
                 ny = ymax - ch;
             }
         }
 
         // windows snap
-        int snap = options->windowSnapZone() * snapAdjust;
-        if (snap) {
+        const int windowSnapZone = options->windowSnapZone() * snapAdjust;
+        if (windowSnapZone > 0) {
             for (auto l = m_allClients.constBegin(); l != m_allClients.constEnd(); ++l) {
                 if ((*l) == window) {
                     continue;
@@ -2494,7 +2657,7 @@ QPoint Workspace::adjustWindowPosition(Window *window, QPoint pos, bool unrestri
                 if (!(*l)->isOnCurrentActivity()) {
                     continue; // wrong activity
                 }
-                if ((*l)->isDesktop() || (*l)->isSplash() || (*l)->isNotification() || (*l)->isCriticalNotification() || (*l)->isOnScreenDisplay()) {
+                if ((*l)->isDesktop() || (*l)->isSplash() || (*l)->isNotification() || (*l)->isCriticalNotification() || (*l)->isOnScreenDisplay() || (*l)->isAppletPopup()) {
                     continue;
                 }
 
@@ -2504,23 +2667,23 @@ QPoint Workspace::adjustWindowPosition(Window *window, QPoint pos, bool unrestri
                 lry = ly + (*l)->height();
 
                 if (!(guideMaximized & MaximizeHorizontal) && (((cy <= lry) && (cy >= ly)) || ((ry >= ly) && (ry <= lry)) || ((cy <= ly) && (ry >= lry)))) {
-                    if ((sOWO ? (cx < lrx) : true) && (qAbs(lrx - cx) < snap) && (qAbs(lrx - cx) < deltaX)) {
+                    if ((sOWO ? (cx < lrx) : true) && (qAbs(lrx - cx) < windowSnapZone) && (qAbs(lrx - cx) < deltaX)) {
                         deltaX = qAbs(lrx - cx);
                         nx = lrx;
                     }
-                    if ((sOWO ? (rx > lx) : true) && (qAbs(rx - lx) < snap) && (qAbs(rx - lx) < deltaX)) {
+                    if ((sOWO ? (rx > lx) : true) && (qAbs(rx - lx) < windowSnapZone) && (qAbs(rx - lx) < deltaX)) {
                         deltaX = qAbs(rx - lx);
                         nx = lx - cw;
                     }
                 }
 
                 if (!(guideMaximized & MaximizeVertical) && (((cx <= lrx) && (cx >= lx)) || ((rx >= lx) && (rx <= lrx)) || ((cx <= lx) && (rx >= lrx)))) {
-                    if ((sOWO ? (cy < lry) : true) && (qAbs(lry - cy) < snap) && (qAbs(lry - cy) < deltaY)) {
+                    if ((sOWO ? (cy < lry) : true) && (qAbs(lry - cy) < windowSnapZone) && (qAbs(lry - cy) < deltaY)) {
                         deltaY = qAbs(lry - cy);
                         ny = lry;
                     }
                     // if ( (qAbs( ry-ly ) < snap) && (qAbs( ry - ly ) < deltaY ))
-                    if ((sOWO ? (ry > ly) : true) && (qAbs(ry - ly) < snap) && (qAbs(ry - ly) < deltaY)) {
+                    if ((sOWO ? (ry > ly) : true) && (qAbs(ry - ly) < windowSnapZone) && (qAbs(ry - ly) < deltaY)) {
                         deltaY = qAbs(ry - ly);
                         ny = ly - ch;
                     }
@@ -2528,21 +2691,21 @@ QPoint Workspace::adjustWindowPosition(Window *window, QPoint pos, bool unrestri
 
                 // Corner snapping
                 if (!(guideMaximized & MaximizeVertical) && (nx == lrx || nx + cw == lx)) {
-                    if ((sOWO ? (ry > lry) : true) && (qAbs(lry - ry) < snap) && (qAbs(lry - ry) < deltaY)) {
+                    if ((sOWO ? (ry > lry) : true) && (qAbs(lry - ry) < windowSnapZone) && (qAbs(lry - ry) < deltaY)) {
                         deltaY = qAbs(lry - ry);
                         ny = lry - ch;
                     }
-                    if ((sOWO ? (cy < ly) : true) && (qAbs(cy - ly) < snap) && (qAbs(cy - ly) < deltaY)) {
+                    if ((sOWO ? (cy < ly) : true) && (qAbs(cy - ly) < windowSnapZone) && (qAbs(cy - ly) < deltaY)) {
                         deltaY = qAbs(cy - ly);
                         ny = ly;
                     }
                 }
                 if (!(guideMaximized & MaximizeHorizontal) && (ny == lry || ny + ch == ly)) {
-                    if ((sOWO ? (rx > lrx) : true) && (qAbs(lrx - rx) < snap) && (qAbs(lrx - rx) < deltaX)) {
+                    if ((sOWO ? (rx > lrx) : true) && (qAbs(lrx - rx) < windowSnapZone) && (qAbs(lrx - rx) < deltaX)) {
                         deltaX = qAbs(lrx - rx);
                         nx = lrx - cw;
                     }
-                    if ((sOWO ? (cx < lx) : true) && (qAbs(cx - lx) < snap) && (qAbs(cx - lx) < deltaX)) {
+                    if ((sOWO ? (cx < lx) : true) && (qAbs(cx - lx) < windowSnapZone) && (qAbs(cx - lx) < deltaX)) {
                         deltaX = qAbs(cx - lx);
                         nx = lx;
                     }
@@ -2551,19 +2714,20 @@ QPoint Workspace::adjustWindowPosition(Window *window, QPoint pos, bool unrestri
         }
 
         // center snap
-        if (snappingToCenter) { // snap trigger
+        const int centerSnapZone = options->centerSnapZone() * snapAdjust;
+        if (centerSnapZone > 0) {
             int diffX = qAbs((xmin + xmax) / 2 - (cx + cw / 2));
             int diffY = qAbs((ymin + ymax) / 2 - (cy + ch / 2));
-            if (diffX < snap && diffY < snap && diffX < deltaX && diffY < deltaY) {
+            if (diffX < centerSnapZone && diffY < centerSnapZone && diffX < deltaX && diffY < deltaY) {
                 // Snap to center of screen
                 nx = (xmin + xmax) / 2 - cw / 2;
                 ny = (ymin + ymax) / 2 - ch / 2;
-            } else if (options->borderSnapZone()) {
+            } else if (options->borderSnapZone() > 0) {
                 // Enhance border snap
-                if ((nx == xmin || nx == xmax - cw) && diffY < snap && diffY < deltaY) {
+                if ((nx == xmin || nx == xmax - cw) && diffY < centerSnapZone && diffY < deltaY) {
                     // Snap to vertical center on screen edge
                     ny = (ymin + ymax) / 2 - ch / 2;
-                } else if (((unrestricted ? ny == ymin : ny <= ymin) || ny == ymax - ch) && diffX < snap && diffX < deltaX) {
+                } else if (((unrestricted ? ny == ymin : ny <= ymin) || ny == ymax - ch) && diffX < centerSnapZone && diffX < deltaX) {
                     // Snap to horizontal center on screen edge
                     nx = (xmin + xmax) / 2 - cw / 2;
                 }
@@ -2575,7 +2739,7 @@ QPoint Workspace::adjustWindowPosition(Window *window, QPoint pos, bool unrestri
     return pos;
 }
 
-QRect Workspace::adjustWindowSize(Window *window, QRect moveResizeGeom, Gravity gravity)
+QRectF Workspace::adjustWindowSize(Window *window, QRectF moveResizeGeom, Gravity gravity)
 {
     // adapted from adjustWindowPosition on 29May2004
     // this function is called when resizing a window and will modify
@@ -2583,23 +2747,23 @@ QRect Workspace::adjustWindowSize(Window *window, QRect moveResizeGeom, Gravity 
     if (options->windowSnapZone() || options->borderSnapZone()) { // || options->centerSnapZone )
         const bool sOWO = options->isSnapOnlyWhenOverlapping();
 
-        const QRect maxRect = clientArea(MovementArea, window, window->rect().center());
-        const int xmin = maxRect.left();
-        const int xmax = maxRect.right(); // desk size
-        const int ymin = maxRect.top();
-        const int ymax = maxRect.bottom();
+        const QRectF maxRect = clientArea(MovementArea, window, window->rect().center());
+        const qreal xmin = maxRect.left();
+        const qreal xmax = maxRect.right(); // desk size
+        const qreal ymin = maxRect.top();
+        const qreal ymax = maxRect.bottom();
 
-        const int cx(moveResizeGeom.left());
-        const int cy(moveResizeGeom.top());
-        const int rx(moveResizeGeom.right());
-        const int ry(moveResizeGeom.bottom());
+        const qreal cx(moveResizeGeom.left());
+        const qreal cy(moveResizeGeom.top());
+        const qreal rx(moveResizeGeom.right());
+        const qreal ry(moveResizeGeom.bottom());
 
-        int newcx(cx), newcy(cy); // buffers
-        int newrx(rx), newry(ry);
-        int deltaX(xmax);
-        int deltaY(ymax); // minimum distance to other windows
+        qreal newcx(cx), newcy(cy); // buffers
+        qreal newrx(rx), newry(ry);
+        qreal deltaX(xmax);
+        qreal deltaY(ymax); // minimum distance to other windows
 
-        int lx, ly, lrx, lry; // coords and size for the comparison window, l
+        qreal lx, ly, lrx, lry; // coords and size for the comparison window, l
 
         // border snap
         int snap = options->borderSnapZone(); // snap trigger
@@ -2673,8 +2837,8 @@ QRect Workspace::adjustWindowSize(Window *window, QRect moveResizeGeom, Gravity 
             for (auto l = m_allClients.constBegin(); l != m_allClients.constEnd(); ++l) {
                 if ((*l)->isOnCurrentDesktop() && !(*l)->isMinimized()
                     && (*l) != window) {
-                    lx = (*l)->x() - 1;
-                    ly = (*l)->y() - 1;
+                    lx = (*l)->x();
+                    ly = (*l)->y();
                     lrx = (*l)->x() + (*l)->width();
                     lry = (*l)->y() + (*l)->height();
 
@@ -2718,32 +2882,32 @@ QRect Workspace::adjustWindowSize(Window *window, QRect moveResizeGeom, Gravity 
     if ((sOWO ? (newcy < ly) : true)     \
         && (newcx == lrx || newrx == lx) \
         && qAbs(ly - newcy) < deltaY) {  \
-        deltaY = qAbs(ly - newcy + 1);   \
-        newcy = ly + 1;                  \
+        deltaY = qAbs(ly - newcy);       \
+        newcy = ly;                      \
     }
 
 #define SNAP_WINDOW_C_BOTTOM             \
     if ((sOWO ? (newry > lry) : true)    \
         && (newcx == lrx || newrx == lx) \
         && qAbs(lry - newry) < deltaY) { \
-        deltaY = qAbs(lry - newry - 1);  \
-        newry = lry - 1;                 \
+        deltaY = qAbs(lry - newry);      \
+        newry = lry;                     \
     }
 
 #define SNAP_WINDOW_C_LEFT               \
     if ((sOWO ? (newcx < lx) : true)     \
         && (newcy == lry || newry == ly) \
         && qAbs(lx - newcx) < deltaX) {  \
-        deltaX = qAbs(lx - newcx + 1);   \
-        newcx = lx + 1;                  \
+        deltaX = qAbs(lx - newcx);       \
+        newcx = lx;                      \
     }
 
 #define SNAP_WINDOW_C_RIGHT              \
     if ((sOWO ? (newrx > lrx) : true)    \
         && (newcy == lry || newry == ly) \
         && qAbs(lrx - newrx) < deltaX) { \
-        deltaX = qAbs(lrx - newrx - 1);  \
-        newrx = lrx - 1;                 \
+        deltaX = qAbs(lrx - newrx);      \
+        newrx = lrx;                     \
     }
 
                     switch (gravity) {
@@ -2805,7 +2969,7 @@ QRect Workspace::adjustWindowSize(Window *window, QRect moveResizeGeom, Gravity 
         //    // 2) Snap to the horizontal and vertical center lines of the screen
         //    }
 
-        moveResizeGeom = QRect(QPoint(newcx, newcy), QPoint(newrx, newry));
+        moveResizeGeom = QRectF(QPointF(newcx, newcy), QPointF(newrx, newry));
     }
     return moveResizeGeom;
 }
@@ -2837,9 +3001,63 @@ void Workspace::fixPositionAfterCrash(xcb_window_t w, const xcb_get_geometry_rep
         // left and top needed due to narrowing conversations restrictions in C++11
         const uint32_t left = frame.left;
         const uint32_t top = frame.top;
-        const uint32_t values[] = {geometry->x - left, geometry->y - top};
+        const uint32_t values[] = {Xcb::toXNative(geometry->x - left), Xcb::toXNative(geometry->y - top)};
         xcb_configure_window(kwinApp()->x11Connection(), w, XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y, values);
     }
 }
+
+FocusChain *Workspace::focusChain() const
+{
+    return m_focusChain.get();
+}
+
+ApplicationMenu *Workspace::applicationMenu() const
+{
+    return m_applicationMenu.get();
+}
+
+Decoration::DecorationBridge *Workspace::decorationBridge() const
+{
+    return m_decorationBridge.get();
+}
+
+Outline *Workspace::outline() const
+{
+    return m_outline.get();
+}
+
+Placement *Workspace::placement() const
+{
+    return m_placement.get();
+}
+
+RuleBook *Workspace::rulebook() const
+{
+    return m_rulebook.get();
+}
+
+ScreenEdges *Workspace::screenEdges() const
+{
+    return m_screenEdges.get();
+}
+
+Screens *Workspace::screens() const
+{
+    return m_screens.get();
+}
+
+#if KWIN_BUILD_TABBOX
+TabBox::TabBox *Workspace::tabbox() const
+{
+    return m_tabbox.get();
+}
+#endif
+
+#if KWIN_BUILD_ACTIVITIES
+Activities *Workspace::activities() const
+{
+    return m_activities.get();
+}
+#endif
 
 } // namespace

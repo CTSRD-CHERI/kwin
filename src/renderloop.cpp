@@ -5,7 +5,6 @@
 */
 
 #include "renderloop.h"
-#include "options.h"
 #include "renderloop_p.h"
 #include "surfaceitem.h"
 #include "utils/common.h"
@@ -21,7 +20,7 @@ T alignTimestamp(const T &timestamp, const T &alignment)
 
 RenderLoopPrivate *RenderLoopPrivate::get(RenderLoop *loop)
 {
-    return loop->d.data();
+    return loop->d.get();
 }
 
 RenderLoopPrivate::RenderLoopPrivate(RenderLoop *q)
@@ -57,8 +56,8 @@ void RenderLoopPrivate::scheduleRepaint()
     const std::chrono::nanoseconds safetyMargin = std::chrono::milliseconds(3);
 
     std::chrono::nanoseconds renderTime;
-    switch (options->latencyPolicy()) {
-    case LatencyExteremelyLow:
+    switch (q->latencyPolicy()) {
+    case LatencyExtremelyLow:
         renderTime = std::chrono::nanoseconds(long(vblankInterval.count() * 0.1));
         break;
     case LatencyLow:
@@ -163,9 +162,8 @@ void RenderLoopPrivate::invalidate()
     compositeTimer.stop();
 }
 
-RenderLoop::RenderLoop(QObject *parent)
-    : QObject(parent)
-    , d(new RenderLoopPrivate(this))
+RenderLoop::RenderLoop()
+    : d(std::make_unique<RenderLoopPrivate>(this))
 {
 }
 
@@ -228,6 +226,21 @@ void RenderLoop::scheduleRepaint(Item *item)
     } else {
         d->delayScheduleRepaint();
     }
+}
+
+LatencyPolicy RenderLoop::latencyPolicy() const
+{
+    return d->latencyPolicy.value_or(options->latencyPolicy());
+}
+
+void RenderLoop::setLatencyPolicy(LatencyPolicy policy)
+{
+    d->latencyPolicy = policy;
+}
+
+void RenderLoop::resetLatencyPolicy()
+{
+    d->latencyPolicy.reset();
 }
 
 std::chrono::nanoseconds RenderLoop::lastPresentationTimestamp() const

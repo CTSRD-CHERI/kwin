@@ -15,12 +15,18 @@
 
 #include <QObject>
 #include <QPoint>
-#include <QSharedPointer>
 #include <QSize>
 #include <QTimer>
 #include <QVector>
 #include <chrono>
 #include <xf86drmMode.h>
+
+namespace KWaylandServer
+{
+class DrmLeaseConnectorV1Interface;
+class DrmLeaseDeviceV1Interface;
+class DrmLeaseV1Interface;
+}
 
 namespace KWin
 {
@@ -30,12 +36,13 @@ class DrmGpu;
 class DrmPipeline;
 class DumbSwapchain;
 class GLTexture;
+class RenderTarget;
 
 class KWIN_EXPORT DrmOutput : public DrmAbstractOutput
 {
     Q_OBJECT
 public:
-    DrmOutput(DrmPipeline *pipeline);
+    DrmOutput(DrmPipeline *pipeline, KWaylandServer::DrmLeaseDeviceV1Interface *leaseDevice);
     ~DrmOutput() override;
 
     DrmConnector *connector() const;
@@ -50,20 +57,25 @@ public:
     void updateModes();
 
     bool usesSoftwareCursor() const override;
+    void updateCursor();
+    void moveCursor();
 
-    void setColorTransformation(const QSharedPointer<ColorTransformation> &transformation) override;
+    KWaylandServer::DrmLeaseV1Interface *lease() const;
+    bool addLeaseObjects(QVector<uint32_t> &objectList);
+    void leased(KWaylandServer::DrmLeaseV1Interface *lease);
+    void leaseEnded();
+
+    void setColorTransformation(const std::shared_ptr<ColorTransformation> &transformation) override;
 
 private:
     void updateEnablement(bool enable) override;
     bool setDrmDpmsMode(DpmsMode mode);
     void setDpmsMode(DpmsMode mode) override;
 
-    QList<QSharedPointer<OutputMode>> getModes() const;
+    QList<std::shared_ptr<OutputMode>> getModes() const;
 
-    void updateCursor();
-    void moveCursor();
-    void renderCursorOpengl(const QSize &cursorSize);
-    void renderCursorQPainter();
+    void renderCursorOpengl(const RenderTarget &renderTarget, const QSize &cursorSize);
+    void renderCursorQPainter(const RenderTarget &renderTarget);
 
     DrmPipeline *m_pipeline;
     DrmConnector *m_connector;
@@ -73,6 +85,8 @@ private:
     bool m_cursorTextureDirty = true;
     std::unique_ptr<GLTexture> m_cursorTexture;
     QTimer m_turnOffTimer;
+    std::unique_ptr<KWaylandServer::DrmLeaseConnectorV1Interface> m_offer;
+    KWaylandServer::DrmLeaseV1Interface *m_lease = nullptr;
 };
 
 }

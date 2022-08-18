@@ -10,15 +10,16 @@
 
 #include "config-kwin.h"
 
+#include "dmabuftexture.h"
 #include "kwinglobals.h"
 #include "wayland/screencast_v1_interface.h"
 
 #include <QHash>
 #include <QObject>
-#include <QSharedPointer>
 #include <QSize>
 #include <QSocketNotifier>
 #include <chrono>
+#include <memory>
 #include <optional>
 
 #include <pipewire/pipewire.h>
@@ -30,7 +31,6 @@ namespace KWin
 {
 
 class Cursor;
-class DmaBufTexture;
 class EGLNativeFence;
 class GLTexture;
 class PipeWireCore;
@@ -76,18 +76,21 @@ private:
     static void onStreamRemoveBuffer(void *data, pw_buffer *buffer);
 
     bool createStream();
+    QVector<const spa_pod *> buildFormats(bool fixate, char buffer[2048]);
     void updateParams();
     void coreFailed(const QString &errorMessage);
     void sendCursorData(Cursor *cursor, spa_meta_cursor *spa_cursor);
+    void addHeader(spa_buffer *spaBuffer);
+    void addDamage(spa_buffer *spaBuffer, const QRegion &damagedRegion);
     void newStreamParams();
     void tryEnqueue(pw_buffer *buffer);
     void enqueue();
     spa_pod *buildFormat(struct spa_pod_builder *b, enum spa_video_format format, struct spa_rectangle *resolution,
                          struct spa_fraction *defaultFramerate, struct spa_fraction *minFramerate, struct spa_fraction *maxFramerate,
-                         uint64_t *modifiers, int modifier_count);
+                         const QVector<uint64_t> &modifiers, quint32 modifiersFlags);
 
-    QSharedPointer<PipeWireCore> pwCore;
-    QScopedPointer<ScreenCastSource> m_source;
+    std::shared_ptr<PipeWireCore> pwCore;
+    std::unique_ptr<ScreenCastSource> m_source;
     struct pw_stream *pwStream = nullptr;
     spa_hook streamListener;
     pw_stream_events pwStreamEvents = {};
@@ -98,8 +101,9 @@ private:
     bool m_stopped = false;
 
     spa_video_info_raw videoFormat;
-    bool m_hasModifier = false;
     QString m_error;
+    QVector<uint64_t> m_modifiers;
+    std::optional<DmaBufParams> m_dmabufParams; // when fixated
 
     struct
     {
@@ -109,17 +113,19 @@ private:
         QRect viewport;
         qint64 lastKey = 0;
         QRect lastRect;
-        QScopedPointer<GLTexture> texture;
+        std::unique_ptr<GLTexture> texture;
+        bool visible = false;
     } m_cursor;
     QRect cursorGeometry(Cursor *cursor) const;
 
-    QHash<struct pw_buffer *, QSharedPointer<DmaBufTexture>> m_dmabufDataForPwBuffer;
+    QHash<struct pw_buffer *, std::shared_ptr<DmaBufTexture>> m_dmabufDataForPwBuffer;
 
     pw_buffer *m_pendingBuffer = nullptr;
     QSocketNotifier *m_pendingNotifier = nullptr;
     EGLNativeFence *m_pendingFence = nullptr;
     std::optional<std::chrono::nanoseconds> m_start;
     quint64 m_sequential = 0;
+    bool m_hasDmaBuf = false;
 };
 
 } // namespace KWin

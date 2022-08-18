@@ -16,8 +16,8 @@
 
 #include "drm_object.h"
 #include "drm_pointer.h"
-#include "edid.h"
 #include "output.h"
+#include "utils/edid.h"
 
 namespace KWin
 {
@@ -78,7 +78,6 @@ public:
     };
 
     bool init() override;
-    bool needsModeset() const override;
     bool updateProperties() override;
     void disable() override;
 
@@ -93,8 +92,8 @@ public:
     QString modelName() const;
     QSize physicalSize() const;
 
-    QList<QSharedPointer<DrmConnectorMode>> modes() const;
-    QSharedPointer<DrmConnectorMode> findMode(const drmModeModeInfo &modeInfo) const;
+    QList<std::shared_ptr<DrmConnectorMode>> modes() const;
+    std::shared_ptr<DrmConnectorMode> findMode(const drmModeModeInfo &modeInfo) const;
 
     Output::SubPixel subpixel() const;
     bool hasOverscan() const;
@@ -105,15 +104,15 @@ public:
     LinkStatus linkStatus() const;
 
 private:
-    QList<QSharedPointer<DrmConnectorMode>> generateCommonModes();
-    QSharedPointer<DrmConnectorMode> generateMode(const QSize &size, uint32_t refreshRate);
+    QList<std::shared_ptr<DrmConnectorMode>> generateCommonModes();
+    std::shared_ptr<DrmConnectorMode> generateMode(const QSize &size, float refreshRate);
 
-    QScopedPointer<DrmPipeline> m_pipeline;
-    DrmScopedPointer<drmModeConnector> m_conn;
+    std::unique_ptr<DrmPipeline> m_pipeline;
+    DrmUniquePtr<drmModeConnector> m_conn;
     Edid m_edid;
     QSize m_physicalSize = QSize(-1, -1);
-    QList<QSharedPointer<DrmConnectorMode>> m_driverModes;
-    QList<QSharedPointer<DrmConnectorMode>> m_modes;
+    QList<std::shared_ptr<DrmConnectorMode>> m_driverModes;
+    QList<std::shared_ptr<DrmConnectorMode>> m_modes;
     uint32_t m_possibleCrtcs = 0;
 
     friend QDebug &operator<<(QDebug &s, const KWin::DrmConnector *obj);

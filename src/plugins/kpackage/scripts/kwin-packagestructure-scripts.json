@@ -7,6 +7,7 @@
                 "Name": "Marco Martin",
                 "Name[ar]": "Marco Martin",
                 "Name[az]": "Marco Martin",
+                "Name[bg]": "Marco Martin",
                 "Name[ca@valencia]": "Marco Martin",
                 "Name[ca]": "Marco Martin",
                 "Name[cs]": "Marco Martin",
@@ -37,12 +38,14 @@
                 "Name[uk]": "Marco Martin",
                 "Name[vi]": "Marco Martin",
                 "Name[x-test]": "xxMarco Martinxx",
-                "Name[zh_CN]": "Marco Martin"
+                "Name[zh_CN]": "Marco Martin",
+                "Name[zh_TW]": "Marco Martin"
             }
         ],
         "Name": "KWin Script",
         "Name[ar]": "سكربت كوين",
         "Name[az]": "Kwin skripti",
+        "Name[bg]": "Скрипт на KWin",
         "Name[ca@valencia]": "Script de KWin",
         "Name[ca]": "Script del KWin",
         "Name[cs]": "Skript KWinu",
@@ -54,6 +57,7 @@
         "Name[fr]": "Script pour KWin",
         "Name[hu]": "KWin szkript",
         "Name[ia]": "Script de KWin",
+        "Name[id]": "Skrip KWin",
         "Name[it]": "Script di KWin",
         "Name[ko]": "KWin 스크립트",
         "Name[lt]": "KWin scenarijus",
@@ -73,6 +77,7 @@
         "Name[vi]": "Kịch bản KWin",
         "Name[x-test]": "xxKWin Scriptxx",
         "Name[zh_CN]": "KWin 脚本",
+        "Name[zh_TW]": "KWin 文稿",
         "Version": "1"
     }
 }

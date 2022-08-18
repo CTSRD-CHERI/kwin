@@ -55,7 +55,7 @@ SurfaceItemWayland::SurfaceItemWayland(KWaylandServer::SurfaceInterface *surface
 
 QRegion SurfaceItemWayland::shape() const
 {
-    return QRegion(rect());
+    return QRegion(rect().toAlignedRect());
 }
 
 QRegion SurfaceItemWayland::opaque() const
@@ -132,9 +132,9 @@ void SurfaceItemWayland::handleSubSurfaceMappedChanged()
     setVisible(m_surface->isMapped());
 }
 
-SurfacePixmap *SurfaceItemWayland::createPixmap()
+std::unique_ptr<SurfacePixmap> SurfaceItemWayland::createPixmap()
 {
-    return new SurfacePixmapWayland(this);
+    return std::make_unique<SurfacePixmapWayland>(this);
 }
 
 SurfacePixmapWayland::SurfacePixmapWayland(SurfaceItemWayland *item, QObject *parent)
@@ -193,6 +193,7 @@ void SurfacePixmapWayland::setBuffer(KWaylandServer::ClientBuffer *buffer)
     if (m_buffer) {
         m_buffer->ref();
         m_hasAlphaChannel = m_buffer->hasAlphaChannel();
+        m_size = m_buffer->size();
     }
 }
 
@@ -204,10 +205,10 @@ SurfaceItemXwayland::SurfaceItemXwayland(Window *window, Item *parent)
 
 QRegion SurfaceItemXwayland::shape() const
 {
-    const QRect clipRect = rect() & window()->clientGeometry().translated(-window()->bufferGeometry().topLeft());
+    const QRectF clipRect = rect() & window()->clientGeometry().translated(-window()->bufferGeometry().topLeft());
     const QRegion shape = window()->shapeRegion();
 
-    return shape & clipRect;
+    return shape & clipRect.toRect();
 }
 
 } // namespace KWin

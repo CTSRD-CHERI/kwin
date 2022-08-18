@@ -58,11 +58,10 @@ void TestDontCrashUseractionsMenu::initTestCase()
 
     kwinApp()->start();
     QVERIFY(applicationStartedSpy.wait());
-    const auto outputs = kwinApp()->platform()->enabledOutputs();
+    const auto outputs = workspace()->outputs();
     QCOMPARE(outputs.count(), 2);
     QCOMPARE(outputs[0]->geometry(), QRect(0, 0, 1280, 1024));
     QCOMPARE(outputs[1]->geometry(), QRect(1280, 0, 1280, 1024));
-    Test::initWaylandWorkspace();
 }
 
 void TestDontCrashUseractionsMenu::init()
@@ -81,9 +80,9 @@ void TestDontCrashUseractionsMenu::cleanup()
 void TestDontCrashUseractionsMenu::testShowHideShowUseractionsMenu()
 {
     // this test creates the condition of BUG 382063
-    QScopedPointer<KWayland::Client::Surface> surface1(Test::createSurface());
-    QScopedPointer<Test::XdgToplevel> shellSurface1(Test::createXdgToplevelSurface(surface1.data()));
-    auto window = Test::renderAndWaitForShown(surface1.data(), QSize(100, 50), Qt::blue);
+    std::unique_ptr<KWayland::Client::Surface> surface1(Test::createSurface());
+    std::unique_ptr<Test::XdgToplevel> shellSurface1(Test::createXdgToplevelSurface(surface1.get()));
+    auto window = Test::renderAndWaitForShown(surface1.get(), QSize(100, 50), Qt::blue);
     QVERIFY(window);
 
     workspace()->showWindowMenu(QRect(), window);

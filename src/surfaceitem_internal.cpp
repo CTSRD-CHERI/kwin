@@ -9,6 +9,8 @@
 #include "internalwindow.h"
 #include "scene.h"
 
+#include <QOpenGLFramebufferObject>
+
 namespace KWin
 {
 
@@ -28,15 +30,15 @@ SurfaceItemInternal::SurfaceItemInternal(InternalWindow *window, Item *parent)
 
 QRegion SurfaceItemInternal::shape() const
 {
-    return QRegion(rect());
+    return QRegion(rect().toAlignedRect());
 }
 
-SurfacePixmap *SurfaceItemInternal::createPixmap()
+std::unique_ptr<SurfacePixmap> SurfaceItemInternal::createPixmap()
 {
-    return new SurfacePixmapInternal(this);
+    return std::make_unique<SurfacePixmapInternal>(this);
 }
 
-void SurfaceItemInternal::handleBufferGeometryChanged(Window *window, const QRect &old)
+void SurfaceItemInternal::handleBufferGeometryChanged(Window *window, const QRectF &old)
 {
     if (window->bufferGeometry().size() != old.size()) {
         discardPixmap();
@@ -52,7 +54,7 @@ SurfacePixmapInternal::SurfacePixmapInternal(SurfaceItemInternal *item, QObject 
 
 QOpenGLFramebufferObject *SurfacePixmapInternal::fbo() const
 {
-    return m_fbo.data();
+    return m_fbo.get();
 }
 
 QImage SurfacePixmapInternal::image() const
@@ -71,16 +73,18 @@ void SurfacePixmapInternal::update()
 
     if (window->internalFramebufferObject()) {
         m_fbo = window->internalFramebufferObject();
+        m_size = m_fbo->size();
         m_hasAlphaChannel = true;
     } else if (!window->internalImageObject().isNull()) {
         m_rasterBuffer = window->internalImageObject();
+        m_size = m_rasterBuffer.size();
         m_hasAlphaChannel = m_rasterBuffer.hasAlphaChannel();
     }
 }
 
 bool SurfacePixmapInternal::isValid() const
 {
-    return !m_fbo.isNull() || !m_rasterBuffer.isNull();
+    return m_fbo != nullptr || !m_rasterBuffer.isNull();
 }
 
 } // namespace KWin

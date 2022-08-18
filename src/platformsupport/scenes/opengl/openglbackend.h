@@ -13,6 +13,7 @@
 #include "renderbackend.h"
 
 #include <QRegion>
+#include <memory>
 
 namespace KWin
 {
@@ -51,9 +52,9 @@ public:
     CompositingType compositingType() const override final;
     bool checkGraphicsReset() override final;
 
-    virtual SurfaceTexture *createSurfaceTextureInternal(SurfacePixmapInternal *pixmap);
-    virtual SurfaceTexture *createSurfaceTextureX11(SurfacePixmapX11 *pixmap);
-    virtual SurfaceTexture *createSurfaceTextureWayland(SurfacePixmapWayland *pixmap);
+    virtual std::unique_ptr<SurfaceTexture> createSurfaceTextureInternal(SurfacePixmapInternal *pixmap);
+    virtual std::unique_ptr<SurfaceTexture> createSurfaceTextureX11(SurfacePixmapX11 *pixmap);
+    virtual std::unique_ptr<SurfaceTexture> createSurfaceTextureWayland(SurfacePixmapWayland *pixmap);
 
     virtual bool makeCurrent() = 0;
     virtual void doneCurrent() = 0;
@@ -125,7 +126,7 @@ public:
      */
     void copyPixels(const QRegion &region);
 
-    virtual QSharedPointer<GLTexture> textureForOutput(Output *output) const;
+    virtual std::shared_ptr<GLTexture> textureForOutput(Output *output) const;
 
 protected:
     /**

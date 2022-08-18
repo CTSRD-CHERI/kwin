@@ -16,13 +16,10 @@
 #include <QObject>
 
 #include <functional>
+#include <memory>
+#include <optional>
 
 class QAction;
-
-namespace KWaylandServer
-{
-class OutputConfigurationV2Interface;
-}
 
 namespace KWin
 {
@@ -40,8 +37,8 @@ class OutlineVisual;
 class QPainterBackend;
 class Scene;
 class ScreenEdges;
-class Session;
 class OutputConfiguration;
+struct DmaBufParams;
 
 class KWIN_EXPORT Outputs : public QVector<Output *>
 {
@@ -61,12 +58,13 @@ class KWIN_EXPORT Platform : public QObject
 public:
     ~Platform() override;
 
-    virtual Session *session() const = 0;
     virtual bool initialize() = 0;
-    virtual InputBackend *createInputBackend();
-    virtual OpenGLBackend *createOpenGLBackend();
-    virtual QPainterBackend *createQPainterBackend();
-    virtual QSharedPointer<DmaBufTexture> createDmaBufTexture(const QSize &size);
+    virtual std::unique_ptr<InputBackend> createInputBackend();
+    virtual std::unique_ptr<OpenGLBackend> createOpenGLBackend();
+    virtual std::unique_ptr<QPainterBackend> createQPainterBackend();
+    virtual std::optional<DmaBufParams> testCreateDmaBuf(const QSize &size, quint32 format, const QVector<uint64_t> &modifiers);
+    virtual std::shared_ptr<DmaBufTexture> createDmaBufTexture(const QSize &size, quint32 format, const uint64_t modifier);
+    std::shared_ptr<DmaBufTexture> createDmaBufTexture(const DmaBufParams &attributes);
 
     /**
      * Allows the platform to create a platform specific screen edge.
@@ -101,15 +99,6 @@ public:
      * by rendering backends.
      */
     void setSceneEglGlobalShareContext(EGLContext context);
-
-    /**
-     * Implement this method to receive configuration change requests through KWayland's
-     * OutputManagement interface.
-     *
-     * Base implementation warns that the current backend does not implement this
-     * functionality.
-     */
-    void requestOutputsChange(KWaylandServer::OutputConfigurationV2Interface *config);
 
     /**
      * Whether the Platform requires compositing for rendering.
@@ -257,7 +246,7 @@ public:
      * Creates the OverlayWindow required for X11 based compositors.
      * Default implementation returns @c nullptr.
      */
-    virtual OverlayWindow *createOverlayWindow();
+    virtual std::unique_ptr<OverlayWindow> createOverlayWindow();
 
     /**
      * Queries the current X11 time stamp of the X server.
@@ -297,20 +286,9 @@ public:
         return m_supportsGammaControl;
     }
 
-    // outputs with connections (org_kde_kwin_outputdevice)
-    virtual Outputs outputs() const
-    {
-        return Outputs();
-    }
-    // actively compositing outputs (wl_output)
-    virtual Outputs enabledOutputs() const
-    {
-        return Outputs();
-    }
-    Output *findOutput(int screenId) const;
+    virtual Outputs outputs() const = 0;
     Output *findOutput(const QUuid &uuid) const;
     Output *findOutput(const QString &name) const;
-    Output *outputAt(const QPoint &pos) const;
 
     /**
      * A string of information to include in kwin debug output
@@ -394,7 +372,6 @@ Q_SIGNALS:
 
 protected:
     explicit Platform(QObject *parent = nullptr);
-    void repaint(const QRect &rect);
     void setReady(bool ready);
     QSize initialWindowSize() const
     {
@@ -413,14 +390,6 @@ protected:
         m_supportsGammaControl = set;
     }
 
-    /**
-     * Whether the backend is supposed to change the configuration of outputs.
-     */
-    void supportsOutputChanges()
-    {
-        m_supportsOutputChanges = true;
-    }
-
 private:
     bool m_ready = false;
     QSize m_initialWindowSize;
@@ -431,13 +400,10 @@ private:
     EGLDisplay m_eglDisplay;
     EGLContext m_globalShareContext = EGL_NO_CONTEXT;
     bool m_supportsGammaControl = false;
-    bool m_supportsOutputChanges = false;
     CompositingType m_selectedCompositor = NoCompositing;
     Output *m_primaryOutput = nullptr;
 };
 
-}
-
-Q_DECLARE_INTERFACE(KWin::Platform, "org.kde.kwin.Platform")
+} // namespace KWin
 
 #endif

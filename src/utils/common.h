@@ -21,7 +21,6 @@
 #include <QMatrix4x4>
 #include <QPoint>
 #include <QRect>
-#include <QScopedPointer>
 // system
 #include <climits>
 Q_DECLARE_LOGGING_CATEGORY(KWIN_CORE)
@@ -116,9 +115,6 @@ enum class QuickTileFlag {
 };
 Q_DECLARE_FLAGS(QuickTileMode, QuickTileFlag)
 
-template<typename T>
-using ScopedCPointer = QScopedPointer<T, QScopedPointerPodDeleter>;
-
 void KWIN_EXPORT updateXTime();
 void KWIN_EXPORT grabXServer();
 void KWIN_EXPORT ungrabXServer();
@@ -158,7 +154,7 @@ Qt::MouseButton KWIN_EXPORT x11ToQtMouseButton(int button);
 Qt::MouseButtons KWIN_EXPORT x11ToQtMouseButtons(int state);
 Qt::KeyboardModifiers KWIN_EXPORT x11ToQtKeyboardModifiers(int state);
 
-KWIN_EXPORT QPoint popupOffset(const QRect &anchorRect, const Qt::Edges anchorEdge, const Qt::Edges gravity, const QSize popupSize);
+KWIN_EXPORT QPointF popupOffset(const QRectF &anchorRect, const Qt::Edges anchorEdge, const Qt::Edges gravity, const QSizeF popupSize);
 
 } // namespace
 

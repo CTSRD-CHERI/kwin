@@ -44,7 +44,7 @@ public:
     };
     Q_DECLARE_FLAGS(ConfigureFlags, ConfigureFlag)
 
-    QRect bounds;
+    QRectF bounds;
     Gravity gravity;
     qreal serial;
     ConfigureFlags flags;
@@ -59,15 +59,15 @@ public:
     ~XdgSurfaceWindow() override;
 
     NET::WindowType windowType(bool direct = false, int supported_types = 0) const override;
-    QRect frameRectToBufferRect(const QRect &rect) const override;
-    QRect inputGeometry() const override;
+    QRectF frameRectToBufferRect(const QRectF &rect) const override;
+    QRectF inputGeometry() const override;
     QMatrix4x4 inputTransformation() const override;
     void destroyWindow() override;
 
     void installPlasmaShellSurface(KWaylandServer::PlasmaShellSurfaceInterface *shellSurface);
 
 protected:
-    void moveResizeInternal(const QRect &rect, MoveResizeMode mode) override;
+    void moveResizeInternal(const QRectF &rect, MoveResizeMode mode) override;
 
     virtual XdgSurfaceConfigure *sendRoleConfigure() const = 0;
     virtual void handleRoleCommit();
@@ -92,22 +92,22 @@ private:
     bool haveNextWindowGeometry() const;
     void setHaveNextWindowGeometry();
     void resetHaveNextWindowGeometry();
-    void maybeUpdateMoveResizeGeometry(const QRect &rect);
+    void maybeUpdateMoveResizeGeometry(const QRectF &rect);
 
     KWaylandServer::XdgSurfaceInterface *m_shellSurface;
     QTimer *m_configureTimer;
     XdgSurfaceConfigure::ConfigureFlags m_configureFlags;
     QQueue<XdgSurfaceConfigure *> m_configureEvents;
-    QScopedPointer<XdgSurfaceConfigure> m_lastAcknowledgedConfigure;
+    std::unique_ptr<XdgSurfaceConfigure> m_lastAcknowledgedConfigure;
     std::optional<quint32> m_lastAcknowledgedConfigureSerial;
-    QRect m_windowGeometry;
+    QRectF m_windowGeometry;
     bool m_haveNextWindowGeometry = false;
 };
 
 class XdgToplevelConfigure final : public XdgSurfaceConfigure
 {
 public:
-    QSharedPointer<KDecoration2::Decoration> decoration;
+    std::shared_ptr<KDecoration2::Decoration> decoration;
     KWaylandServer::XdgToplevelInterface::States states;
 };
 
@@ -134,8 +134,8 @@ public:
 
     MaximizeMode maximizeMode() const override;
     MaximizeMode requestedMaximizeMode() const override;
-    QSize minSize() const override;
-    QSize maxSize() const override;
+    QSizeF minSize() const override;
+    QSizeF maxSize() const override;
     bool isFullScreen() const override;
     bool isRequestedFullScreen() const override;
     bool isMovableAcrossScreens() const override;
@@ -233,7 +233,7 @@ private:
     bool m_userNoBorder = false;
     bool m_isTransient = false;
     QPointer<Output> m_fullScreenRequestedOutput;
-    QSharedPointer<KDecoration2::Decoration> m_nextDecoration;
+    std::shared_ptr<KDecoration2::Decoration> m_nextDecoration;
 };
 
 class XdgPopupWindow final : public XdgSurfaceWindow
@@ -252,7 +252,7 @@ public:
     bool isMovable() const override;
     bool isMovableAcrossScreens() const override;
     bool hasTransientPlacementHint() const override;
-    QRect transientPlacement(const QRect &bounds) const override;
+    QRectF transientPlacement(const QRectF &bounds) const override;
     bool isCloseable() const override;
     void closeWindow() override;
     bool wantsInput() const override;

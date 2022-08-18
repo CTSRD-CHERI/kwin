@@ -4,11 +4,11 @@
     SPDX-License-Identifier: GPL-2.0-or-later
 */
 
-import QtQuick 2.12
-import QtQuick.Controls 2.12
-import QtQuick.Layouts 1.12
-import QtGraphicalEffects 1.12
-import org.kde.kirigami 2.12 as Kirigami
+import QtQuick 2.15
+import QtQuick.Controls 2.15
+import QtQuick.Layouts 1.15
+import QtGraphicalEffects 1.15
+import org.kde.kirigami 2.20 as Kirigami
 import org.kde.kwin 3.0 as KWinComponents
 import org.kde.plasma.components 3.0 as PC3
 import org.kde.plasma.core 2.0 as PlasmaCore
@@ -182,12 +182,16 @@ Item {
                             anchors.right: parent.right
                             anchors.top: parent.top
                             sourceComponent: PC3.Button {
+                                text: i18nd("kwin_effects", "Delete Virtual Desktop")
                                 icon.name: "delete"
-                                onClicked: delegate.remove()
-                                PC3.ToolTip {
-                                    text: i18nd("kwin_effects", "Delete virtual desktop")
-                                }
+                                display: PC3.AbstractButton.IconOnly
 
+                                PC3.ToolTip.text: text
+                                PC3.ToolTip.visible: hovered
+                                PC3. ToolTip.delay: Kirigami.Units.toolTipDelay
+                                Accessible.name: text
+
+                                onClicked: delegate.remove()
                             }
                         }
 
@@ -195,10 +199,13 @@ Item {
                             id: dropArea
                             anchors.fill: parent
 
-                            onEntered: {
-                                drag.accepted = true;
-                            }
-                            onDropped: {
+                            onDropped: drop => {
+                                drop.accepted = true;
+                                // dragging a KWin::Window
+                                if (drag.source.desktop === delegate.desktop.x11DesktopNumber) {
+                                    drop.action = Qt.IgnoreAction;
+                                    return;
+                                }
                                 drag.source.desktop = delegate.desktop.x11DesktopNumber;
                             }
                         }
@@ -269,15 +276,24 @@ Item {
             PC3.Button {
                 width: bar.desktopWidth
                 height: bar.desktopHeight
-                icon.name: "list-add"
-                opacity: hovered ? 1 : 0.75
-                action: Action {
-                    onTriggered: desktopModel.create(desktopModel.rowCount())
-                }
 
-                ToolTip.text: i18nd("kwin_effects", "Add Desktop")
-                ToolTip.visible: hovered
-                ToolTip.delay: Kirigami.Units.toolTipDelay
+                text: i18nd("kwin_effects", "Add Virtual Desktop")
+                icon.name: "list-add"
+                display: PC3.AbstractButton.IconOnly
+                opacity: hovered ? 1 : 0.75
+
+                PC3.ToolTip.text: text
+                PC3.ToolTip.visible: hovered
+                PC3. ToolTip.delay: Kirigami.Units.toolTipDelay
+                Accessible.name: text
+
+                Keys.onReturnPressed: action.trigger()
+                Keys.onEnterPressed: action.trigger()
+
+                Keys.onLeftPressed: nextItemInFocusChain(LayoutMirroring.enabled).forceActiveFocus(Qt.BacktabFocusReason);
+                Keys.onRightPressed: nextItemInFocusChain(!LayoutMirroring.enabled).forceActiveFocus(Qt.TabFocusReason);
+
+                onClicked: desktopModel.create(desktopModel.rowCount())
 
                 DropArea {
                     anchors.fill: parent
@@ -289,12 +305,6 @@ Item {
                         drag.source.desktop = desktopModel.rowCount() + 1;
                     }
                 }
-
-                Keys.onReturnPressed: action.trigger()
-                Keys.onEnterPressed: action.trigger()
-
-                Keys.onLeftPressed: nextItemInFocusChain(LayoutMirroring.enabled).forceActiveFocus(Qt.BacktabFocusReason);
-                Keys.onRightPressed: nextItemInFocusChain(!LayoutMirroring.enabled).forceActiveFocus(Qt.TabFocusReason);
             }
         }
     }

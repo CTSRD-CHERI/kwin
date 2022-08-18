@@ -6,8 +6,7 @@
 
     SPDX-License-Identifier: GPL-2.0-or-later
 */
-#ifndef KWIN_VIRTUAL_OUTPUT_H
-#define KWIN_VIRTUAL_OUTPUT_H
+#pragma once
 
 #include "output.h"
 
@@ -42,13 +41,11 @@ private:
     friend class VirtualBackend;
 
     VirtualBackend *m_backend;
-    RenderLoop *m_renderLoop;
-    SoftwareVsyncMonitor *m_vsyncMonitor;
+    std::unique_ptr<RenderLoop> m_renderLoop;
+    std::unique_ptr<SoftwareVsyncMonitor> m_vsyncMonitor;
     int m_gammaSize = 200;
     bool m_gammaResult = true;
     int m_identifier;
 };
 
-}
-
-#endif
+} // namespace KWin

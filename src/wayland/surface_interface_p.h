@@ -39,7 +39,7 @@ struct SurfaceState
     bool bufferScaleIsSet = false;
     bool bufferTransformIsSet = false;
     qint32 bufferScale = 1;
-    OutputInterface::Transform bufferTransform = OutputInterface::Transform::Normal;
+    KWin::Output::Transform bufferTransform = KWin::Output::Transform::Normal;
     wl_list frameCallbacks;
     QPoint offset = QPoint();
     QPointer<ClientBuffer> buffer;
@@ -68,7 +68,7 @@ class SurfaceInterfacePrivate : public QtWaylandServer::wl_surface
 public:
     static SurfaceInterfacePrivate *get(SurfaceInterface *surface)
     {
-        return surface->d.data();
+        return surface->d.get();
     }
 
     explicit SurfaceInterfacePrivate(SurfaceInterface *q);
@@ -96,6 +96,13 @@ public:
     bool computeEffectiveMapped() const;
     void updateEffectiveMapped();
 
+    /**
+     * Returns true if this surface (not including subsurfaces) contains a given point
+     * @param position in surface-local co-ordiantes
+     */
+    bool contains(const QPointF &position) const;
+    bool inputContains(const QPointF &position) const;
+
     CompositorInterface *compositor;
     SurfaceInterface *q;
     SurfaceRole *role = nullptr;
@@ -105,14 +112,17 @@ public:
     SubSurfaceInterface *subSurface = nullptr;
     QMatrix4x4 surfaceToBufferMatrix;
     QMatrix4x4 bufferToSurfaceMatrix;
-    QSize bufferSize;
-    QSize implicitSurfaceSize;
-    QSize surfaceSize;
+    QSize bufferSize = QSize(0, 0);
+    QSizeF implicitSurfaceSize = QSizeF(0, 0);
+    QSizeF surfaceSize = QSizeF(0, 0);
+
     QRegion inputRegion;
     QRegion opaqueRegion;
     ClientBuffer *bufferRef = nullptr;
     bool mapped = false;
     bool hasCacheState = false;
+    qreal scaleOverride = 1.;
+    qreal pendingScaleOverride = 1.;
 
     QVector<OutputInterface *> outputs;
 
@@ -123,7 +133,7 @@ public:
 
     QVector<IdleInhibitorV1Interface *> idleInhibitors;
     ViewportInterface *viewportExtension = nullptr;
-    QScopedPointer<LinuxDmaBufV1Feedback> dmabufFeedbackV1;
+    std::unique_ptr<LinuxDmaBufV1Feedback> dmabufFeedbackV1;
     ClientConnection *client = nullptr;
 
 protected:

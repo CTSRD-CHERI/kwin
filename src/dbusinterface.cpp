@@ -33,7 +33,6 @@
 #endif
 
 // Qt
-#include <QDBusServiceWatcher>
 #include <QOpenGLContext>
 
 namespace KWin
@@ -47,49 +46,21 @@ DBusInterface::DBusInterface(QObject *parent)
 
     QDBusConnection dbus = QDBusConnection::sessionBus();
     dbus.registerObject(QStringLiteral("/KWin"), this);
-    const QByteArray dBusSuffix = qgetenv("KWIN_DBUS_SERVICE_SUFFIX");
-    if (!dBusSuffix.isNull()) {
-        m_serviceName = m_serviceName + QLatin1Char('.') + dBusSuffix;
-    }
-    if (!dbus.registerService(m_serviceName)) {
-        QDBusServiceWatcher *dog = new QDBusServiceWatcher(m_serviceName, dbus, QDBusServiceWatcher::WatchForUnregistration, this);
-        connect(dog, &QDBusServiceWatcher::serviceUnregistered, this, &DBusInterface::becomeKWinService);
-    } else {
-        announceService();
-    }
+    dbus.registerService(m_serviceName);
     dbus.connect(QString(), QStringLiteral("/KWin"), QStringLiteral("org.kde.KWin"), QStringLiteral("reloadConfig"),
                  Workspace::self(), SLOT(slotReloadConfig()));
-    connect(kwinApp(), &Application::x11ConnectionChanged, this, &DBusInterface::announceService);
-}
 
-void DBusInterface::becomeKWinService(const QString &service)
-{
-    // TODO: this watchdog exists to make really safe that we at some point get the service
-    // but it's probably no longer needed since we explicitly unregister the service with the deconstructor
-    if (service == m_serviceName && QDBusConnection::sessionBus().registerService(m_serviceName) && sender()) {
-        sender()->deleteLater(); // bye doggy :'(
-        announceService();
-    }
+    connect(Workspace::self(), &Workspace::showingDesktopChanged, this, &DBusInterface::onShowingDesktopChanged);
 }
 
 DBusInterface::~DBusInterface()
 {
     QDBusConnection::sessionBus().unregisterService(m_serviceName);
-    // KApplication automatically also grabs org.kde.kwin, so it's often been used externally - ensure to free it as well
-    QDBusConnection::sessionBus().unregisterService(QStringLiteral("org.kde.kwin"));
-    if (kwinApp()->x11Connection()) {
-        xcb_delete_property(kwinApp()->x11Connection(), kwinApp()->x11RootWindow(), atoms->kwin_dbus_service);
-    }
 }
 
-void DBusInterface::announceService()
+bool DBusInterface::showingDesktop() const
 {
-    if (!kwinApp()->x11Connection()) {
-        return;
-    }
-    const QByteArray service = m_serviceName.toUtf8();
-    xcb_change_property(kwinApp()->x11Connection(), XCB_PROP_MODE_REPLACE, kwinApp()->x11RootWindow(), atoms->kwin_dbus_service,
-                        atoms->utf8_string, 8, service.size(), service.constData());
+    return workspace()->showingDesktop();
 }
 
 // wrap void methods with no arguments to Workspace
@@ -108,10 +79,10 @@ void DBusInterface::killWindow()
     Workspace::self()->slotKillWindow();
 }
 
-#define WRAP(name)                 \
-    void DBusInterface::name()     \
-    {                              \
-        Placement::self()->name(); \
+#define WRAP(name)                        \
+    void DBusInterface::name()            \
+    {                                     \
+        workspace()->placement()->name(); \
     }
 
 WRAP(cascadeDesktop)
@@ -138,10 +109,10 @@ QString DBusInterface::activeOutputName()
 bool DBusInterface::startActivity(const QString &in0)
 {
 #if KWIN_BUILD_ACTIVITIES
-    if (!Activities::self()) {
+    if (!Workspace::self()->activities()) {
         return false;
     }
-    return Activities::self()->start(in0);
+    return Workspace::self()->activities()->start(in0);
 #else
     Q_UNUSED(in0)
     return false;
@@ -151,10 +122,10 @@ bool DBusInterface::startActivity(const QString &in0)
 bool DBusInterface::stopActivity(const QString &in0)
 {
 #if KWIN_BUILD_ACTIVITIES
-    if (!Activities::self()) {
+    if (!Workspace::self()->activities()) {
         return false;
     }
-    return Activities::self()->stop(in0);
+    return Workspace::self()->activities()->stop(in0);
 #else
     Q_UNUSED(in0)
     return false;
@@ -263,6 +234,45 @@ QVariantMap DBusInterface::getWindowInfo(const QString &uuid)
     } else {
         return {};
     }
+}
+
+void DBusInterface::showDesktop(bool show)
+{
+    workspace()->setShowingDesktop(show, true);
+
+    auto m = message();
+    if (m.service().isEmpty()) {
+        return;
+    }
+
+    // Keep track of whatever D-Bus client asked to show the desktop. If
+    // they disappear from the bus, cancel the show desktop state so we do
+    // not end up in a state where we are stuck showing the desktop.
+    static QPointer<QDBusServiceWatcher> watcher;
+
+    if (show) {
+        if (watcher) {
+            // If we get a second call to `showDesktop(true)`, drop the previous
+            // watcher and watch the new client. That way, we simply always
+            // track the last state.
+            watcher->deleteLater();
+        }
+
+        watcher = new QDBusServiceWatcher(m.service(), QDBusConnection::sessionBus(), QDBusServiceWatcher::WatchForUnregistration, this);
+        connect(watcher, &QDBusServiceWatcher::serviceUnregistered, []() {
+            workspace()->setShowingDesktop(false, true);
+            watcher->deleteLater();
+        });
+    } else if (watcher) {
+        // Someone cancelled showing the desktop, so there's no more need to
+        // watch to cancel the show desktop state.
+        watcher->deleteLater();
+    }
+}
+
+void DBusInterface::onShowingDesktopChanged(bool show, bool /*animated*/)
+{
+    Q_EMIT showingDesktopChanged(show);
 }
 
 CompositorDBusInterface::CompositorDBusInterface(Compositor *parent)

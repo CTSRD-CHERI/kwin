@@ -45,9 +45,9 @@ NightColorManager *NightColorManager::self()
     return s_instance;
 }
 
-NightColorManager::NightColorManager(QObject *parent)
-    : Plugin(parent)
+NightColorManager::NightColorManager()
 {
+    NightColorSettings::instance(kwinApp()->config());
     s_instance = this;
 
     m_iface = new NightColorDBusInterface(this);
@@ -74,22 +74,6 @@ NightColorManager::NightColorManager(QObject *parent)
         QDBusConnection::sessionBus().asyncCall(message);
     });
 
-    if (workspace()) {
-        init();
-    } else {
-        connect(kwinApp(), &Application::workspaceCreated, this, &NightColorManager::init);
-    }
-}
-
-NightColorManager::~NightColorManager()
-{
-    s_instance = nullptr;
-}
-
-void NightColorManager::init()
-{
-    NightColorSettings::instance(kwinApp()->config());
-
     m_configWatcher = KConfigWatcher::create(kwinApp()->config());
     connect(m_configWatcher.data(), &KConfigWatcher::configChanged, this, &NightColorManager::reconfigure);
 
@@ -115,9 +99,9 @@ void NightColorManager::init()
     KGlobalAccel::setGlobalShortcut(toggleAction, QList<QKeySequence>());
     input()->registerShortcut(QKeySequence(), toggleAction, this, &NightColorManager::toggle);
 
-    connect(ColorManager::self(), &ColorManager::deviceAdded, this, &NightColorManager::hardReset);
+    connect(kwinApp()->colorManager(), &ColorManager::deviceAdded, this, &NightColorManager::hardReset);
 
-    connect(kwinApp()->platform()->session(), &Session::activeChanged, this, [this](bool active) {
+    connect(kwinApp()->session(), &Session::activeChanged, this, [this](bool active) {
         if (active) {
             hardReset();
         } else {
@@ -152,6 +136,11 @@ void NightColorManager::init()
     });
 
     hardReset();
+}
+
+NightColorManager::~NightColorManager()
+{
+    s_instance = nullptr;
 }
 
 void NightColorManager::hardReset()
@@ -672,7 +661,7 @@ int NightColorManager::currentTargetTemp() const
 
 void NightColorManager::commitGammaRamps(int temperature)
 {
-    const QVector<ColorDevice *> devices = ColorManager::self()->devices();
+    const QVector<ColorDevice *> devices = kwinApp()->colorManager()->devices();
     for (ColorDevice *device : devices) {
         device->setTemperature(temperature);
     }
