@@ -85,6 +85,10 @@
 // system
 #include <sys/socket.h>
 #include <sys/types.h>
+#ifdef __FreeBSD__
+#include <sys/param.h>
+#include <sys/sysctl.h>
+#endif
 #include <unistd.h>
 
 // screenlocker
@@ -122,7 +126,18 @@ public:
     bool isTrustedOrigin(KWaylandServer::ClientConnection *client) const
     {
         const auto fullPathSha = sha256(client->executablePath());
-        const auto localSha = sha256(QLatin1String("/proc/") + QString::number(client->processId()) + QLatin1String("/exe"));
+#ifdef __FreeBSD__
+        const int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PATHNAME, static_cast<int>(client->processId())};
+        char buf[MAXPATHLEN];
+        size_t cb = sizeof(buf);
+        if (sysctl(mib, 4, buf, &cb, nullptr, 0) != 0) {
+            buf[0] = 0;
+        }
+        const auto localExe = QString::fromLocal8Bit(buf);
+#else
+        const auto localExe = QLatin1String("/proc/") + QString::number(client->processId()) + QLatin1String("/exe");
+#endif
+        const auto localSha = sha256(localExe);
         const bool trusted = !localSha.isEmpty() && fullPathSha == localSha;
 
         if (!trusted) {
