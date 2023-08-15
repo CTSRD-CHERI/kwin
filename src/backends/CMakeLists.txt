@@ -1,4 +1,6 @@
-add_subdirectory(drm)
+if (KWIN_BUILD_DRM_BACKEND)
+    add_subdirectory(drm)
+endif()
 add_subdirectory(fakeinput)
 add_subdirectory(libinput)
 add_subdirectory(virtual)

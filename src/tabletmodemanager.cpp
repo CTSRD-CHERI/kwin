@@ -19,6 +19,11 @@
 
 #include <QDBusConnection>
 
+#include "utils/common.h"
+#include <QFile>
+#include <fcntl.h>
+#include <unistd.h>
+
 namespace KWin
 {
 

@@ -110,7 +110,7 @@ static bool activate(const QString &sessionPath)
 
 std::unique_ptr<ConsoleKitSession> ConsoleKitSession::create()
 {
-    if (!QDBusConnection::systemBus().interface()->isServiceRegistered(s_serviceName)) {
+    if (!QDBusConnection::systemBus().interface() || !QDBusConnection::systemBus().interface()->isServiceRegistered(s_serviceName)) {
         return nullptr;
     }
 
