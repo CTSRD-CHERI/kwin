@@ -47,7 +47,7 @@ bool DrmDumbBuffer::map(QImage::Format format)
 #ifdef KWIN_UNIT_TEST
     m_memory = reinterpret_cast<void *>(mapArgs.offset);
 #else
-    void *address = mmap(nullptr, m_bufferSize, PROT_WRITE, MAP_SHARED, m_gpu->fd(), mapArgs.offset);
+    void *address = mmap(nullptr, m_bufferSize, PROT_READ | PROT_WRITE, MAP_SHARED, m_gpu->fd(), mapArgs.offset);
     if (address == MAP_FAILED) {
         return false;
     }
