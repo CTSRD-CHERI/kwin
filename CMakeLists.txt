@@ -244,6 +244,11 @@ set_package_properties(UDev PROPERTIES
     PURPOSE "Required for input handling on Wayland."
 )
 
+find_package(Libseat)
+set_package_properties(Libseat PROPERTIES
+    TYPE OPTIONAL
+)
+
 if (KWIN_BUILD_DRM_BACKEND)
     find_package(Libdrm 2.4.112)
     set_package_properties(Libdrm PROPERTIES TYPE REQUIRED PURPOSE "Required for drm output on Wayland.")

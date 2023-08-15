@@ -299,6 +299,11 @@ if (KWIN_BUILD_TABBOX)
     target_link_libraries(kwin Qt::GuiPrivate)
 endif()
 
+if (Libseat_FOUND)
+    target_sources(kwin PRIVATE core/session_libseat.cpp)
+    target_link_libraries(kwin ${Libseat_LIBRARY})
+endif()
+
 qt_generate_dbus_interface(virtualkeyboard_dbus.h org.kde.kwin.VirtualKeyboard.xml OPTIONS -A)
 qt_generate_dbus_interface(tabletmodemanager.h org.kde.KWin.TabletModeManager.xml OPTIONS -A)
 

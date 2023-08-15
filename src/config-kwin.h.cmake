@@ -34,3 +34,5 @@
 #cmakedefine01 PipeWire_FOUND
 
 #cmakedefine01 HAVE_XWAYLAND_LISTENFD
+
+#cmakedefine Libseat_FOUND 1

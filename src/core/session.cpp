@@ -5,7 +5,13 @@
 */
 
 #include "session.h"
+
+#include <config-kwin.h>
+
 #include "session_consolekit.h"
+#ifdef Libseat_FOUND
+#include "session_libseat.h"
+#endif
 #include "session_logind.h"
 #include "session_noop.h"
 
@@ -19,6 +25,9 @@ static const struct
 } s_availableSessions[] = {
     {Session::Type::Logind, &LogindSession::create},
     {Session::Type::ConsoleKit, &ConsoleKitSession::create},
+#ifdef Libseat_FOUND
+    { Session::Type::Libseat, &LibseatSession::create },
+#endif
     {Session::Type::Noop, &NoopSession::create},
 };
 

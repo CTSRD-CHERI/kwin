@@ -35,6 +35,7 @@ public:
     enum class Type {
         Noop,
         ConsoleKit,
+        Libseat,
         Logind,
     };
 
