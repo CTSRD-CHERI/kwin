@@ -33,7 +33,7 @@ class LibseatSession : public Session
     };
 
 public:
-    static LibseatSession *create(QObject *parent = nullptr);
+    static std::unique_ptr<LibseatSession> create();
     ~LibseatSession() override;
 
     bool isActive() const override;
@@ -49,7 +49,7 @@ private Q_SLOTS:
     void handleDisableSeat();
 
 private:
-    explicit LibseatSession(QObject *parent = nullptr);
+    explicit LibseatSession();
 
     void initialize(struct libseat *seat, struct wl_event_source *eventSource);
     void updateActive(bool active);

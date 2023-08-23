@@ -10,7 +10,7 @@
 #include "utils/common.h"
 #include "wayland_server.h"
 
-#include <KWaylandServer/display.h>
+#include "wayland/display.h"
 
 #include <fcntl.h>
 #include <string.h>
@@ -58,7 +58,7 @@ static int libseatEvent(int fd, uint32_t mask, void *data)
     return 1;
 }
 
-LibseatSession *LibseatSession::create(QObject *parent)
+std::unique_ptr<LibseatSession> LibseatSession::create()
 {
     // We're lazy and abuse Wayland event loop since we don't care about
     // X11, rather than dealing with creating our own thread as is used
@@ -67,10 +67,10 @@ LibseatSession *LibseatSession::create(QObject *parent)
         return nullptr;
     }
 
-    LibseatSession *session = new LibseatSession(parent);
-    struct libseat *seat = libseat_open_seat(&s_listener, (void *)session);
+    std::unique_ptr<LibseatSession> session{new LibseatSession()};
+    struct libseat *seat = libseat_open_seat(&s_listener,
+                                             (void *)session.get());
     if (!seat) {
-        delete session;
         return nullptr;
     }
 
@@ -82,7 +82,6 @@ LibseatSession *LibseatSession::create(QObject *parent)
         qCDebug(KWIN_CORE, "Failed to add libseat event source (%s)",
                 strerror(errno));
         libseat_close_seat(seat);
-        delete session;
         return nullptr;
     }
 
@@ -91,7 +90,6 @@ LibseatSession *LibseatSession::create(QObject *parent)
                 strerror(errno));
         libseat_close_seat(seat);
         wl_event_source_remove(eventSource);
-        delete session;
         return nullptr;
     }
 
@@ -99,8 +97,8 @@ LibseatSession *LibseatSession::create(QObject *parent)
     return session;
 }
 
-LibseatSession::LibseatSession(QObject *parent)
-    : Session(parent)
+LibseatSession::LibseatSession()
+    : Session()
     , m_seat(nullptr)
     , m_eventSource(nullptr)
 {
